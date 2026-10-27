@@ -1,0 +1,15 @@
+# secrets and runtime state — never commit
+.env
+data/
+backups/
+
+# local scratch used while testing the image
+.pnpm-store/
+
+# noise
+*.log
+.DS_Store
+
+
+# scratch dirs used while testing the image
+_*/

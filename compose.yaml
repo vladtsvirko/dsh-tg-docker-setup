@@ -1,0 +1,67 @@
+name: dsh
+
+# DeepSeek Harness backend — web UI + Telegram adapter in one container.
+#
+#   cp .env.example .env      # fill it in
+#   docker compose build
+#   docker compose up -d
+#
+# The container is the security boundary: inside it the harness runs
+# DSH_PERMISSION_MODE=danger-full-access (no nested sandbox), and everything
+# outside /data is invisible. Don't loosen the settings below without a reason.
+
+services:
+  dsh:
+    build:
+      context: .
+      args:
+        DSH_VERSION: ${DSH_VERSION:-0.2.1-rc.2}
+        DSH_UID: ${DSH_UID:-1000}
+        DSH_GID: ${DSH_GID:-1000}
+    image: dsh-backend:${DSH_VERSION:-0.2.1-rc.2}
+    container_name: dsh
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+    env_file:
+      - .env
+    environment:
+      # HOME must be writable: dsh and pnpm keep state there, and the rootfs is read-only.
+      HOME: /data/home
+      DSH_HOME: /data/home
+      DSH_WORKSPACE: /data/workspace
+      DSH_PORT: ${DSH_PORT:-4310}
+      # The container is the boundary. A nested bwrap/Landlock sandbox is
+      # unreliable in containers and fails closed, which would break the bash tool.
+      DSH_PERMISSION_MODE: ${DSH_PERMISSION_MODE:-danger-full-access}
+
+    volumes:
+      - ./data:/data
+
+    ports:
+      # Bind to the LAN address only; 127.0.0.1 keeps it private to the host.
+      - "${DSH_BIND_IP:-127.0.0.1}:${DSH_PORT:-4310}:${DSH_PORT:-4310}"
+
+    # --- hardening ---------------------------------------------------------
+    read_only: true
+    tmpfs:
+      # Docker mounts tmpfs with noexec, so the native addon cache cannot live
+      # here — the image points NARB_NATIVE_CACHE_DIR at /data/.cache/native.
+      - /tmp:size=512m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: ${DSH_MEM_LIMIT:-4g}
+    cpus: ${DSH_CPUS:-2.0}
+    # Never mount /var/run/docker.sock here: that is a root-equivalent escape.
+
+    healthcheck:
+      # probes over HTTP with curl --noproxy, then falls back to a TCP connect;
+      # 10s interval so `docker compose ps` reflects reality quickly instead of
+      # sitting on "starting" for a whole start_period.
+      test: ["CMD", "/usr/local/bin/dsh-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
