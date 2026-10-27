@@ -21,6 +21,13 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        runtime_uid="$$(id -u dsh)"
+        runtime_gid="$$(id -g dsh)"
+        if [ "$$runtime_uid" != "$$DSH_UID" ] || [ "$$runtime_gid" != "$$DSH_GID" ]; then
+          echo "init: the image runs as $$runtime_uid:$$runtime_gid but .env says $$DSH_UID:$$DSH_GID" >&2
+          echo "init: rebuild so the runtime user matches: docker compose build" >&2
+          exit 1
+        fi
         owner="$$(stat -c '%u:%g' /data)"
         if [ "$$owner" != "$$DSH_UID:$$DSH_GID" ]; then
           chown -R "$$DSH_UID:$$DSH_GID" /data

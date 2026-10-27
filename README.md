@@ -343,6 +343,7 @@ container's subnet. Worth doing if you ever expose the bot to a group chat.
 | Container restarts, log shows permission denied on `/data` | UID mismatch | set `DSH_UID`/`DSH_GID`, `docker compose build` |
 | `mkdir: cannot create directory '/data/home': Permission denied` | `./data` is root-owned (init service disabled, or created outside compose) | `sudo chown -R $(id -u):$(id -g) data`, `docker compose up -d` |
 | `init` service exits non-zero | `./data` is not writable/owned as expected, or the image is missing | `docker compose logs init`; rebuild with `docker compose build` |
+| `init: the image runs as 1000:1000 but .env says 1001:1001` | `DSH_UID`/`DSH_GID` changed after the image was built | `docker compose build`, then `docker compose up -d` |
 | `No usable native binding found for node-addon-require-builtin-…` / `failed to map segment from shared object` | the addon loader caches `.node` files in `os.tmpdir()`, and Docker mounts `/tmp` with **noexec** | the image already sets `NARB_NATIVE_CACHE_DIR=/data/.cache/native`; if you override `TMPDIR` or that env, put it back on an exec-capable filesystem |
 | `adapter install failed` in log | no egress during first boot, or the version gate | check `docker compose exec dsh cat /tmp/plugin-install.log`; then `docker compose run --rm dsh init` |
 | Web UI 200 but API calls 403 | opened the bare origin instead of the `?token=` URL | use the URL from the log, or set `--trusted-host` |
