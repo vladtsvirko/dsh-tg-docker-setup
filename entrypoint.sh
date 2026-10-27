@@ -312,7 +312,7 @@ ensure_compat() {
 setup_git_credentials() {
   local manifest=/run/secrets/git/profiles.json
   [ -f "$manifest" ] || return 0
-  if node /usr/local/bin/dsh-git-credentials; then
+  if node /usr/local/bin/dsh-git-credentials.mjs; then
     return 0
   fi
   warn "git credentials failed — fix $manifest or see docs/GIT.md"
