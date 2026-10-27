@@ -21,6 +21,9 @@ exploit.
 - `ALLOWED_USER_IDS` is the only gate on Telegram. Empty refuses everyone.
 - The supervisor's control socket is loopback-only and bearer-authenticated; its
   token is generated per container start.
+- The one-shot `init` service runs as root only to chown `./data` to `DSH_UID`.
+  It has no network, a read-only rootfs, and only `CHOWN` and `DAC_OVERRIDE`;
+  the runtime itself never runs as root.
 
 ## What is not protected
 

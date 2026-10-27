@@ -36,10 +36,9 @@ the `/data` volume expose; nothing else on the server is mounted.
 ### Stage 1 — local only (no Telegram)
 
 ```sh
-git clone git@github.com:vladtsvirko/dsh-tg-docker-setup.git   # private repo: add a deploy key first
+git clone https://github.com/vladtsvirko/dsh-tg-docker-setup.git
 cd dsh-tg-docker-setup
-cp .env.example .env
-mkdir -p data                 # create it yourself: docker would make it root-owned
+cp .env.example .env          # ./data is created and fixed up automatically
 
 # the two values that are easy to get wrong
 sed -i "s|^DSH_UID=.*|DSH_UID=$(id -u)|; s|^DSH_GID=.*|DSH_GID=$(id -g)|" .env
@@ -122,10 +121,14 @@ same provider/model when it creates a session.
 ./data/supervisor  the stable profile snapshot + open trial state (see below)
 ```
 
-These must be writable by the container's uid (image user = `DSH_UID`). Create
-`./data` yourself before the first `up`; if Docker creates it, it belongs to
-`root:root` and the container dies with `mkdir: cannot create directory
-'/data/home': Permission denied`.
+These must be writable by the container's uid (image user = `DSH_UID`). You do
+not need to create `./data`: the `init` service creates the directory if needed
+and chowns it to `DSH_UID:DSH_GID` before `dsh` starts. If you remove or disable
+that service, either create `./data` yourself or Docker will create it as root and
+the runtime will fail with `mkdir: cannot create directory '/data/home'`.
+
+`docker compose ps` shows the `init` service as `exited (0)` after a start; that
+is normal — it is a one-shot ownership fix, not a daemon.
 
 Both live on the host and are the only things that survive a rebuild. Back up
 `./data/home` if you care about session history (it's the agent's memory), and
@@ -338,7 +341,8 @@ container's subnet. Worth doing if you ever expose the bot to a group chat.
 | Symptom | Cause | Fix |
 |---|---|---|
 | Container restarts, log shows permission denied on `/data` | UID mismatch | set `DSH_UID`/`DSH_GID`, `docker compose build` |
-| `mkdir: cannot create directory '/data/home': Permission denied` | `./data` was created by Docker as root | `sudo chown -R $(id -u):$(id -g) data`, `docker compose restart dsh` |
+| `mkdir: cannot create directory '/data/home': Permission denied` | `./data` is root-owned (init service disabled, or created outside compose) | `sudo chown -R $(id -u):$(id -g) data`, `docker compose up -d` |
+| `init` service exits non-zero | `./data` is not writable/owned as expected, or the image is missing | `docker compose logs init`; rebuild with `docker compose build` |
 | `No usable native binding found for node-addon-require-builtin-…` / `failed to map segment from shared object` | the addon loader caches `.node` files in `os.tmpdir()`, and Docker mounts `/tmp` with **noexec** | the image already sets `NARB_NATIVE_CACHE_DIR=/data/.cache/native`; if you override `TMPDIR` or that env, put it back on an exec-capable filesystem |
 | `adapter install failed` in log | no egress during first boot, or the version gate | check `docker compose exec dsh cat /tmp/plugin-install.log`; then `docker compose run --rm dsh init` |
 | Web UI 200 but API calls 403 | opened the bare origin instead of the `?token=` URL | use the URL from the log, or set `--trusted-host` |

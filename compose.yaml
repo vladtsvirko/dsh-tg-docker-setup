@@ -11,6 +11,35 @@ name: dsh
 # outside /data is invisible. Don't loosen the settings below without a reason.
 
 services:
+  # One-shot ownership fix. Docker creates a missing bind-mount source (./data)
+  # as root; the runtime runs as DSH_UID and cannot write there, so it would die
+  # on `mkdir /data/home`. This container chowns the mount, then exits; it has no
+  # network, a read-only rootfs, and only the two capabilities chown needs.
+  init:
+    image: dsh-backend:${DSH_VERSION:-0.2.1-rc.2}
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        owner="$$(stat -c '%u:%g' /data)"
+        if [ "$$owner" != "$$DSH_UID:$$DSH_GID" ]; then
+          chown -R "$$DSH_UID:$$DSH_GID" /data
+        fi
+        mkdir -p /data/home /data/workspace
+        chown "$$DSH_UID:$$DSH_GID" /data/home /data/workspace
+    environment:
+      DSH_UID: ${DSH_UID:-1000}
+      DSH_GID: ${DSH_GID:-1000}
+    volumes:
+      - ./data:/data
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE]
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+    restart: "no"
+
   dsh:
     build:
       context: .
@@ -20,6 +49,9 @@ services:
         DSH_GID: ${DSH_GID:-1000}
     image: dsh-backend:${DSH_VERSION:-0.2.1-rc.2}
     container_name: dsh
+    depends_on:
+      init:
+        condition: service_completed_successfully
     restart: unless-stopped
     stop_grace_period: 30s
 
