@@ -16,7 +16,7 @@ jobs:
           node-version: 22
 
       - name: Supervisor tests
-        run: node --test supervisor.test.mjs
+        run: node --test supervisor.test.mjs git-credentials.test.mjs
 
       - name: Shell syntax
         run: bash -n entrypoint.sh healthcheck.sh update.sh host-install/setup-dsh-server.sh

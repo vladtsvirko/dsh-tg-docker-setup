@@ -1,6 +1,7 @@
 # secrets and runtime state — never commit
 .env
 data/
+secrets/
 backups/
 
 # local scratch used while testing the image

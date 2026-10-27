@@ -1,0 +1,12 @@
+{
+  "default": {
+    "provider": "github",
+    "auth": "https",
+    "token": "github_pat_REPLACE_ME",
+    "identity": {
+      "name": "Your Name",
+      "email": "you@example.com"
+    }
+  },
+  "projects": {}
+}

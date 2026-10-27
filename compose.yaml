@@ -39,6 +39,8 @@ services:
       DSH_GID: ${DSH_GID:-1000}
     volumes:
       - ./data:/data
+      # Optional git credentials: profiles.json, tokens/keys, known_hosts.
+      - ./secrets:/run/secrets:ro
     read_only: true
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE]
@@ -76,6 +78,8 @@ services:
 
     volumes:
       - ./data:/data
+      # Optional git credentials: profiles.json, tokens/keys, known_hosts.
+      - ./secrets:/run/secrets:ro
 
     ports:
       # Bind to the LAN address only; 127.0.0.1 keeps it private to the host.

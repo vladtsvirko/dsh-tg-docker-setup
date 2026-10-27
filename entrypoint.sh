@@ -309,8 +309,18 @@ ensure_compat() {
     warn "could not grant the exemption; the Telegram adapter will not load"
 }
 
+setup_git_credentials() {
+  local manifest=/run/secrets/git/profiles.json
+  [ -f "$manifest" ] || return 0
+  if node /usr/local/bin/dsh-git-credentials; then
+    return 0
+  fi
+  warn "git credentials failed — fix $manifest or see docs/GIT.md"
+}
+
 prepare() {
   prepare_dirs
+  setup_git_credentials
   init_profile
   set_provider_patch
 

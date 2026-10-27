@@ -45,6 +45,10 @@ sed -i "s|^DSH_UID=.*|DSH_UID=$(id -u)|; s|^DSH_GID=.*|DSH_GID=$(id -g)|" .env
 sed -i "s|^DSH_BIND_IP=.*|DSH_BIND_IP=$(ip route get 1.1.1.1 | awk '{print $7; exit}')|" .env
 nano .env                     # add your provider key
 
+# optional: private git repositories (see docs/GIT.md)
+# cp -r secrets.example secrets && chmod -R go-rwx secrets
+# $EDITOR secrets/git/profiles.json
+
 docker compose build          # ~5 min first time, downloads dsh + its tree
 docker compose up -d
 docker compose logs -f dsh | grep 'dsh web:'
@@ -218,6 +222,36 @@ DSH_TELEGRAM_PUBLISHER_TOKENS=123:AAA...,456:BBB...
 - Messages are delivered exactly once when the send is acknowledged; the only
   loss window is a crash between Telegram accepting and the acknowledgement, and
   those items are quarantined and counted, never duplicated.
+
+## Repository access (git)
+
+Private repositories get credentials from one JSON manifest, either globally or
+per workspace:
+
+```sh
+cp -r secrets.example secrets
+chmod -R go-rwx secrets
+$EDITOR secrets/git/profiles.json
+docker compose up -d
+```
+
+```json
+{
+  "default": { "provider": "github", "auth": "https", "token": "github_pat_..." },
+  "projects": {
+    "web-app": { "provider": "gitlab", "auth": "ssh", "key": "gitlab_deploy", "known_hosts": "known_hosts" }
+  }
+}
+```
+
+Supported: GitHub, GitLab, Gitea/Forgejo and self-hosted, over HTTPS tokens or SSH
+keys, with a per-workspace commit identity. `secrets/` is mounted read-only at
+`/run/secrets` and gitignored.
+
+Everyone allowed in the workspace shares these credentials — that is the trust
+model, not a bug. The agent can read `/run/secrets`; see
+[docs/GIT.md](docs/GIT.md) for recipes, verification, rotation and the full
+schema.
 
 ## Restarts and rollback
 
