@@ -279,7 +279,7 @@ runtime still boots; the last good files stay in place.
 
 ```sh
 # what applies in the container
-docker compose exec dsh git config --global --get credential.helper
+docker compose exec dsh git config --global --includes --get credential.helper
 docker compose exec dsh git config --global --get-all include.path
 
 # what applies inside a workspace
@@ -289,6 +289,10 @@ docker compose exec dsh sh -lc 'cd /data/workspace/web-app && git config --show-
 docker compose exec dsh sh -lc 'cd /data/workspace/web-app && git ls-remote https://github.com/you/private-repo.git'
 docker compose exec dsh sh -lc 'cd /data/workspace/web-app && git ls-remote git@github.com:you/private-repo.git'
 ```
+
+`git config --global` does not expand `[include]` unless you add `--includes`;
+without the flag the generated identity looks empty even though commits use it.
+Inside a workspace, plain `git config --get …` is enough.
 
 Avoid `git credential fill` in shared logs: it prints the token.
 
