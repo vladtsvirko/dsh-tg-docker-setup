@@ -370,7 +370,7 @@ function runProcess(command, args, timeoutMs) {
  * handling that made the first install work — instead of reimplementing pnpm
  * from the supervisor.
  */
-async function runUpdate() {
+async function runUpdate(trial = true) {
   busy = true
   try {
     await stopChild()
@@ -395,13 +395,19 @@ async function runUpdate() {
     state.lastEvent = { kind: 'update', at: now() }
     await saveState()
     startChild()
-    armBootTimer()
+    if (trial) {
+      armBootTimer()
+    } else {
+      // No trial: the new state is committed as soon as it starts. A later
+      // failure restarts the same files; it is the explicit "now" path.
+      await snapshotStable('update').catch((error) => log(`cannot record the updated state: ${String(error)}`))
+    }
   } finally {
     busy = false
   }
 }
 
-async function beginUpdate() {
+async function beginUpdate(trial = true) {
   if (busy) return { ok: false, code: 409, error: 'another operation is running' }
   if (state.trial !== null) return { ok: false, code: 409, error: 'a trial is already running' }
   if (!await exists(stableDir)) {
@@ -410,12 +416,12 @@ async function beginUpdate() {
   if (child === undefined || child.exitCode !== null) {
     return { ok: false, code: 409, error: 'the runtime is not running' }
   }
-  state.trial = { id: randomUUID(), startedAt: now(), deadline: null, armed: false }
+  state.trial = trial ? { id: randomUUID(), startedAt: now(), deadline: null, armed: false } : null
   state.lastEvent = { kind: 'update', at: now() }
   await saveState()
   // Answer the request before the runtime goes away with the connection.
-  setTimeout(() => void runUpdate(), 800)
-  return { ok: true, trial: { ...state.trial } }
+  setTimeout(() => void runUpdate(trial), 800)
+  return { ok: true, ...(trial ? { trial: { ...state.trial } } : {}) }
 }
 
 async function plainRestart() {
@@ -528,7 +534,7 @@ const server = createServer((request, response) => {
       return send(response, result.ok ? 200 : result.code, result)
     }
     if (path === '/update') {
-      const result = await beginUpdate()
+      const result = await beginUpdate(body.trial !== false)
       return send(response, result.ok ? 200 : result.code, result)
     }
     if (path === '/trial/open') {

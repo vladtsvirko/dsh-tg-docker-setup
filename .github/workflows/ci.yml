@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 jobs:
@@ -26,3 +27,6 @@ jobs:
 
       - name: Compose configuration
         run: cp .env.example .env && docker compose config >/dev/null
+
+      - name: Validate release tag
+        run: node scripts/check-version.mjs

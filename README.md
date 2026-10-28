@@ -154,7 +154,7 @@ container is disposable and disappears with the container.
 | `DSH_PERMISSION_MODE` | Keep `danger-full-access`. Setting `workspace-write` re-enables the nested sandbox, which will fail closed in here. |
 | `DSH_TRIAL_SECONDS` | Rollback window for a trial, default `300` (5 min). Waiting longer is safer for slow checks; shorter is easier on a broken bot. |
 | `DSH_BOOT_GRACE_SECONDS` | How long a trial runtime may stay up without checking in, default `120`. After that it is rolled back. |
-| `DSH_UPDATE_TIMEOUT_SECONDS` | How long `/update` may spend in `reset-plugin`, default `900`. |
+| `DSH_UPDATE_TIMEOUT_SECONDS` | How long `/system update connector` may spend in `reset-plugin`, default `900`. |
 
 ## Compatibility
 
@@ -166,7 +166,7 @@ Inside the bot, `/about` reports the connector version, the runtime version (the
 image exports `DSH_RUNTIME_VERSION`) and the declared peer range.
 
 Upgrading the image does not upgrade the connector by itself: the entrypoint
-keeps an installed copy. Use the bot's `/update` (or
+keeps an installed copy. Use the bot's `/system update connector` (or
 `docker compose run --rm dsh reset-plugin`) to move the connector too.
 
 ## Choosing the connector
@@ -266,11 +266,13 @@ From the bot chat:
 
 | Command | Effect |
 |---|---|
-| `/restart` | restart into a trial: the new state is live and the previous one is kept for rollback |
-| `/restart now` | restart without a trial; the current state becomes the rollback point |
-| `/confirm` | commit the trial: this state becomes the new rollback point |
-| `/rollback` | restore the last committed state and restart |
-| `/update` | reinstall the connector itself: stop, run `reset-plugin`, start in a trial |
+| `/system restart` | restart into a trial: the new state is live and the previous one is kept for rollback |
+| `/system restart now` | restart without a trial; the current state becomes the rollback point |
+| `/system update connector` | reinstall the pinned connector: stop, run `reset-plugin`, start in a trial |
+| `/system update connector now` | same, without the trial |
+| `/system update all` | check the host-side setup update; the image is rebuilt on the host |
+| `/system confirm` | commit the trial: this state becomes the new rollback point |
+| `/system rollback` | restore the last committed state and restart |
 
 The trial announcement carries **Commit** and **Roll back** buttons; the
 commands do the same thing. Every confirmed plugin change opens a trial *before*
@@ -292,10 +294,16 @@ starts. The supervisor sends the rollback notice itself, since it knows the bot
 token and the control chat id from `bindings.json`; the trial announcement comes
 from the connector once it is up.
 
-`/update` is the SSH step moved into the bot: the supervisor stops the runtime,
-runs the entrypoint's own `reset-plugin` (including its allow-builds and version
-compatibility handling), then starts the runtime inside a trial. If the reinstall
-fails, the snapshot is restored before the runtime comes back.
+`/system update connector` is the SSH step moved into the bot: the supervisor
+stops the runtime, runs the entrypoint's own `reset-plugin` (including its
+allow-builds and version compatibility handling), then starts the runtime inside
+a trial. `now` skips the trial. If the reinstall fails, the snapshot is restored
+before the runtime comes back.
+
+`/system update all` is check-only: the container cannot rebuild its image. It
+reports the host command; setup updates run there with `./update.sh --self-check`
+and `./update.sh --self`. Same-major/DSH updates may jump; crossing either needs
+`--i-know-versions-are-incompatible`.
 
 Scope: this covers the **profile**, which is what plugins and their settings
 live in. Sessions and the workspace are outside it and are untouched by a
@@ -312,6 +320,8 @@ made directly in `./data/home` before the container starts is outside any trial.
 ./update.sh --apply     # backup, bump, rebuild --pull, restart, verify
 ./update.sh --rollback  # back to DSH_VERSION_PREVIOUS
 ./update.sh --plugin    # re-resolve the Telegram adapter from its git ref
+./update.sh --self-check # is a newer compatible setup tag available?
+./update.sh --self       # jump to it, build, health gate, rollback
 ```
 
 `--apply` records the outgoing version in `DSH_VERSION_PREVIOUS`, tars

@@ -7,6 +7,9 @@
 #   ./update.sh --plugin     re-resolve the Telegram adapter from its git ref
 #   ./update.sh --rollback   go back to the version that was running before the last --apply
 #   ./update.sh --status     what is installed / running / healthy
+#   ./update.sh --self-check # latest compatible tag? change nothing
+#   ./update.sh --self [--i-know-versions-are-incompatible]
+#                            # jump to the latest compatible tag, build, health gate, rollback
 #
 # Run it from this directory (next to compose.yaml and .env).
 #
@@ -71,6 +74,181 @@ wait_healthy() {
     sleep 3; waited=$((waited + 3))
   done
   warn "container did not become healthy within ${HEALTH_TIMEOUT}s"; return 1
+}
+
+
+# --- setup repo updates, tag by tag --------------------------------------
+# The setup repo is deployed at release tags, never off main. `--self` moves to
+# the immediate successor tag only: no skipping, no jumping branches. Rollback
+# restores both the checkout and the image that was running.
+
+image_ref() {
+  local version
+  version="$(current_version)"
+  [ -n "$version" ] || die "DSH_VERSION is missing from .env"
+  printf 'dsh-backend:%s\n' "$version"
+}
+
+start_and_wait() {
+  local recreate=${1:-}
+  local extra=()
+  [ "$recreate" = force ] && extra=(--force-recreate)
+  if "${COMPOSE[@]}" up --help 2>&1 | grep -q -- '--wait-timeout'; then
+    "${COMPOSE[@]}" up -d "${extra[@]}" --wait --wait-timeout "$HEALTH_TIMEOUT"
+  else
+    "${COMPOSE[@]}" up -d "${extra[@]}"
+    wait_healthy
+  fi
+}
+
+# The tag checked out right now. A deploy box must be on a tag, not main.
+current_tag() {
+  local tag
+  tag="$(git describe --tags --exact-match 2>/dev/null)" || {
+    warn "this checkout is not on a release tag — check out the tag you deploy"
+    return 1
+  }
+  printf '%s\n' "$tag"
+}
+
+# v0.2.1-rc.2-0.0.1 → 0.2.1-rc.2 (everything before the last -X.Y.Z).
+tag_dsh() {
+  local t=${1#v}
+  printf '%s\n' "${t%-*}"
+}
+
+# v0.2.1-rc.2-0.0.1 → 0.0.1
+tag_product() {
+  local t=${1#v}
+  printf '%s\n' "${t##*-}"
+}
+
+tag_major() {
+  local product
+  product="$(tag_product "$1")"
+  printf '%s\n' "${product%%.*}"
+}
+
+# Every valid aligned tag newer than the current one, oldest first.
+newer_tags() {
+  local cur tags line found=0
+  cur="$(current_tag)" || return 1
+  tags="$(git -c versionsort.suffix=-rc tag --list 'v*' --sort=v:refname \
+    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?-[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+  if ! grep -Fqx -- "$cur" <<<"$tags"; then
+    warn "current tag $cur is not a <dsh>-<major>.<minor>.<patch> tag"
+    return 1
+  fi
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    [ "$found" = 1 ] && printf '%s\n' "$line"
+    [ "$line" = "$cur" ] && found=1
+  done <<<"$tags"
+  return 0
+}
+
+# Latest tag the updater may move to. Without the explicit flag this stays on
+# the same DSH line and the same product major; with it, the latest tag wins.
+target_tag() {
+  local allow=${1:-0} cur cur_dsh cur_major tag last=""
+  cur="$(current_tag)" || return 1
+  cur_dsh="$(tag_dsh "$cur")"
+  cur_major="$(tag_major "$cur")"
+  while IFS= read -r tag; do
+    [ -n "$tag" ] || continue
+    git merge-base --is-ancestor "$cur" "$tag" || continue
+    if [ "$allow" != 1 ]; then
+      [ "$(tag_dsh "$tag")" = "$cur_dsh" ] || continue
+      [ "$(tag_major "$tag")" = "$cur_major" ] || continue
+    fi
+    last="$tag"
+  done < <(newer_tags)
+  [ -n "$last" ] || return 1
+  printf '%s\n' "$last"
+}
+
+self_check() {
+  local allow=${1:-0} cur target all
+  git fetch --tags --quiet origin || die "git fetch failed"
+  cur="$(current_tag)" || die "cannot determine the deployed tag — check out the tag that is running"
+  all="$(newer_tags)" || die "cannot list newer tags"
+  if [ -z "$all" ]; then
+    log "no newer tag after $cur"
+    exit 0
+  fi
+  target="$(target_tag "$allow" || true)"
+  if [ -z "$target" ]; then
+    warn "no compatible tag after $cur"
+    warn "crossing a product major or a DSH line requires --i-know-versions-are-incompatible"
+    printf '%s\n' "$all" | sed 's/^/    /'
+    exit 2
+  fi
+  log "current tag: $cur"
+  log "target tag:  $target  (latest compatible)"
+  log "available:   $(printf '%s\n' "$all" | tr '\n' ' ')"
+  git --no-pager log --oneline "$cur..$target" | sed 's/^/    /'
+  exit 2
+}
+
+self_update() {
+  local allow=${1:-0} cur target all prev_image
+  [ -z "$(git status --porcelain)" ] || die "working tree is dirty — commit or stash first"
+  git fetch --tags --quiet origin || die "git fetch failed"
+  cur="$(current_tag)" || die "cannot determine the deployed tag — check out the tag that is running"
+  all="$(newer_tags)" || die "cannot list newer tags"
+  if [ -z "$all" ]; then
+    log "no newer tag after $cur — nothing to do"
+    return 0
+  fi
+  target="$(target_tag "$allow" || true)"
+  if [ -z "$target" ]; then
+    warn "no compatible tag after $cur"
+    warn "crossing a product major or a DSH line requires --i-know-versions-are-incompatible"
+    return 1
+  fi
+
+  log "setup update: $cur → $target"
+  git --no-pager log --oneline "$cur..$target" | sed 's/^/    /'
+  if [ "${ASSUME_YES:-0}" != 1 ]; then
+    read -r -p "apply? [y/N] " answer
+    [ "$answer" = y ] || { log "cancelled"; return 0; }
+  fi
+
+  prev_image="$(docker inspect --format '{{.Image}}' dsh 2>/dev/null || true)"
+  [ -n "$prev_image" ] || die "cannot find the running dsh container"
+  docker tag "$prev_image" dsh-backend:self-previous
+  log "saved current image as dsh-backend:self-previous"
+
+  [ "${NO_BACKUP:-0}" = 1 ] || backup_home
+
+  log "checking out $target"
+  git -c advice.detachedHead=false checkout --detach "$target" || {
+    warn "checkout failed; still on $cur"
+    return 1
+  }
+
+  log "building"
+  if ! "${COMPOSE[@]}" build; then
+    warn "build failed — restoring $cur; the old container was not touched"
+    git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  log "starting (health gate: ${HEALTH_TIMEOUT}s)"
+  if ! start_and_wait; then
+    warn "new tag did not become healthy; rolling back to $cur"
+    git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 || true
+    docker tag dsh-backend:self-previous "$(image_ref)"
+    if start_and_wait force; then
+      verify || warn "rolled back, but verification complained — inspect: docker compose logs dsh"
+      warn "rolled back to $cur; the previous setup is running"
+      return 1
+    fi
+    die "rollback failed too — dsh-backend:self-previous still exists for manual recovery"
+  fi
+
+  verify || warn "healthy, but verification complained — inspect: docker compose logs dsh"
+  log "done — $target is running (detached HEAD)"
 }
 
 verify() {
@@ -171,6 +349,16 @@ case "${1:---check}" in
     log "restarting"
     "${COMPOSE[@]}" up -d
     wait_healthy && verify
+    ;;
+  --self-check)
+    if [ "${2:-}" = "--i-know-versions-are-incompatible" ]; then self_check 1
+    elif [ -n "${2:-}" ]; then die "unknown option for --self-check: ${2}"
+    else self_check 0; fi
+    ;;
+  --self)
+    if [ "${2:-}" = "--i-know-versions-are-incompatible" ]; then self_update 1
+    elif [ -n "${2:-}" ]; then die "unknown option for --self: ${2}"
+    else self_update 0; fi
     ;;
   *)
     sed -n '3,14p' "$0" | sed 's/^# \{0,1\}//'
