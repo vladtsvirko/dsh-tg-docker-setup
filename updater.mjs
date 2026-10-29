@@ -44,6 +44,10 @@ export async function currentTag(repo) {
   }
 }
 
+export async function fetchTags(repo) {
+  await exec('git', ['fetch', '--tags', '--quiet', 'origin'], { cwd: repo })
+}
+
 export async function listTags(repo) {
   const { stdout } = await exec(
     'git',
@@ -122,7 +126,7 @@ const readBody = (request) => new Promise((resolve, reject) => {
  * Build the request handler. The git readers are injectable so tests do not
  * need a repository; `apply` is intentionally absent in slice 1.
  */
-export function createUpdater({ repo, dataDir, botToken = '', token = '', apply = false, tags = () => listTags(repo), current = () => currentTag(repo), now = Date.now }) {
+export function createUpdater({ repo, dataDir, botToken = '', token = '', apply = false, fetch = async () => {}, tags = () => listTags(repo), current = () => currentTag(repo), now = Date.now }) {
   const state = { job: null }
 
   const report = async (text) => {
@@ -230,6 +234,11 @@ ${tail}`)
         } catch {
           throw new UpdateError(400, 'body must be JSON')
         }
+        try {
+          await fetch()
+        } catch (error) {
+          throw new UpdateError(503, `cannot fetch release tags: ${error instanceof Error ? error.message : String(error)}`)
+        }
         const from = await current()
         if (from === undefined) throw new UpdateError(409, 'checkout is not on a release tag')
         const all = await tags()
@@ -271,7 +280,7 @@ if (isCli) {
   const token = process.env.DSH_UPDATER_TOKEN ?? ''
   const botToken = process.env.DSH_TELEGRAM_BOT_TOKEN ?? ''
   const port = Number(process.env.DSH_UPDATER_PORT ?? 8787)
-  const app = createUpdater({ repo, dataDir, botToken, token, apply: true })
+  const app = createUpdater({ repo, dataDir, botToken, token, apply: true, fetch: () => fetchTags(repo) })
   const server = http.createServer((request, response) => void app.handler(request, response))
   server.listen(port, '0.0.0.0', () => {
     console.log(`updater: listening on :${port} for ${repo}${token.length === 0 ? ' (disabled: no token)' : ''}`)

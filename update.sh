@@ -175,7 +175,8 @@ self_check() {
 }
 
 snapshot_state() {
-  local stamp=$1 file="$BACKUP_DIR/self-$stamp.tgz"
+  local stamp=$1
+  local file="$BACKUP_DIR/self-$stamp.tgz"
   [ -d data/home ] || return 1
   mkdir -p "$BACKUP_DIR"
   local paths=(home)
