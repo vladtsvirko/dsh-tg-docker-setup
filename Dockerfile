@@ -9,7 +9,9 @@
 #
 FROM node:24-bookworm-slim
 
-ARG DSH_VERSION
+ARG DSH_VERSION=0.2.1-rc.2
+ARG DSH_SETUP_VERSION=0.2.1-rc.2-0.1.0
+ENV DSH_SETUP_VERSION=${DSH_SETUP_VERSION}
 # The connector's /about reports this; the runtime itself does not export it.
 ENV DSH_RUNTIME_VERSION=${DSH_VERSION}
 ARG DSH_UID=1000

@@ -16,7 +16,7 @@ services:
   # on `mkdir /data/home`. This container chowns the mount, then exits; it has no
   # network, a read-only rootfs, and only the two capabilities chown needs.
   init:
-    image: dsh-backend:${DSH_VERSION:?set DSH_VERSION in .env}
+    image: dsh-backend:0.2.1-rc.2-0.1.0
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -41,6 +41,7 @@ services:
       - ./data:/data
       # Optional git credentials: profiles.json, tokens/keys, known_hosts.
       - ./secrets:/run/secrets:ro
+
     read_only: true
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE]
@@ -53,10 +54,9 @@ services:
     build:
       context: .
       args:
-        DSH_VERSION: ${DSH_VERSION:?set DSH_VERSION in .env}
         DSH_UID: ${DSH_UID:-1000}
         DSH_GID: ${DSH_GID:-1000}
-    image: dsh-backend:${DSH_VERSION:?set DSH_VERSION in .env}
+    image: dsh-backend:0.2.1-rc.2-0.1.0
     container_name: dsh
     depends_on:
       init:
@@ -80,6 +80,10 @@ services:
       - ./data:/data
       # Optional git credentials: profiles.json, tokens/keys, known_hosts.
       - ./secrets:/run/secrets:ro
+
+    networks:
+      - default
+      - ops
 
     ports:
       # Bind to the LAN address only; 127.0.0.1 keeps it private to the host.
@@ -108,3 +112,47 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # Privileged setup updater. No published port: the connector calls it over
+  # the internal ops network with a bearer token.
+  updater:
+    build:
+      context: .
+      dockerfile: updater.Dockerfile
+    image: dsh-updater:0.2.1-rc.2-0.1.0
+    restart: unless-stopped
+    stop_grace_period: 10s
+    user: "${DSH_UID:-1000}:${DSH_GID:-1000}"
+    group_add:
+      - "${DSH_DOCKER_GID:-999}"
+    working_dir: ${PWD}
+    environment:
+      HOME: /tmp
+      DSH_REPO_DIR: ${PWD}
+      DSH_DATA_DIR: ${PWD}/data
+      DSH_UPDATER_PORT: "8787"
+      DSH_UPDATER_TOKEN: ${DSH_UPDATER_TOKEN:-}
+      DSH_TELEGRAM_BOT_TOKEN: ${DSH_TELEGRAM_BOT_TOKEN:-}
+    volumes:
+      # Same absolute path inside the container, so `docker compose` run by the
+      # updater resolves ./data to the real host paths.
+      - ${PWD}:${PWD}
+      - /var/run/docker.sock:/var/run/docker.sock
+    expose:
+      - "8787"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    networks:
+      - default
+      - ops
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  ops:
+    internal: true

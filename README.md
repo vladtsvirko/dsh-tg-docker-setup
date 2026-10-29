@@ -155,11 +155,14 @@ container is disposable and disappears with the container.
 | `DSH_TRIAL_SECONDS` | Rollback window for a trial, default `300` (5 min). Waiting longer is safer for slow checks; shorter is easier on a broken bot. |
 | `DSH_BOOT_GRACE_SECONDS` | How long a trial runtime may stay up without checking in, default `120`. After that it is rolled back. |
 | `DSH_UPDATE_TIMEOUT_SECONDS` | How long `/system update connector` may spend in `reset-plugin`, default `900`. |
+| `DSH_UPDATER_TOKEN` | Shared bearer token for the updater sidecar. Empty disables `/system update all` (it becomes a check). |
+| `DSH_DOCKER_GID` | GID of the host docker group; lets the updater use the socket without root. `getent group docker \| cut -d: -f3`. |
 
 ## Compatibility
 
-The image pins `DSH_VERSION` (default `0.2.1-rc.2`) and installs the connector
-from `DSH_TELEGRAM_PLUGIN`. The supported pairs and the policy for moving them
+Each setup release hardcodes its DSH version in the image tag and Dockerfile,
+and installs the connector version derived from the setup tag. The
+supported pairs and the policy for moving them
 
 are in the connector's [`COMPATIBILITY.md`](https://github.com/vladtsvirko/dsh-telegram-connector/blob/main/COMPATIBILITY.md).
 Inside the bot, `/about` reports the connector version, the runtime version (the
@@ -171,11 +174,12 @@ keeps an installed copy. Use the bot's `/system update connector` (or
 
 ## Choosing the connector
 
-`DSH_TELEGRAM_PLUGIN` decides which plugin gets installed and mounted:
+`DSH_TELEGRAM_PLUGIN` decides which plugin gets installed and mounted. Empty
+(the default) means this setup's connector, pinned to the setup version:
 
 | Ref | Model |
 |---|---|
-| `github:vladtsvirko/dsh-telegram-connector` | group = workspace, topic = session, control chat = private |
+| *(empty)* | group = workspace, topic = session, control chat = private, version = setup tag |
 | `github:ben7am1n/dsh-telegram` | one chat = one session, flat |
 
 The package name is derived from the ref (or set `DSH_TELEGRAM_PACKAGE`), because
@@ -315,19 +319,22 @@ made directly in `./data/home` before the container starts is outside any trial.
 `update.sh` is the whole story:
 
 ```sh
-./update.sh --check     # 0 = current, 2 = newer published (cron-friendly)
-./update.sh --status    # version, container health, adapter version, HTTP
-./update.sh --apply     # backup, bump, rebuild --pull, restart, verify
-./update.sh --rollback  # back to DSH_VERSION_PREVIOUS
-./update.sh --plugin    # re-resolve the Telegram adapter from its git ref
-./update.sh --self-check # is a newer compatible setup tag available?
-./update.sh --self       # jump to it, build, health gate, rollback
+./update.sh --status     # setup/DSH version, container health, adapter, HTTP
+./update.sh --self-check # latest compatible setup tag, change nothing
+./update.sh --self       # latest compatible tag, build, health gate, rollback
+./update.sh --plugin     # re-resolve the Telegram adapter from its git ref
 ```
 
-`--apply` records the outgoing version in `DSH_VERSION_PREVIOUS`, tars
-`data/home` into `backups/` (last 5 kept), rebuilds, waits for the healthcheck,
-then checks the web port and greps the last 200 log lines for plugin complaints.
-If the runtime doesn't come up, it stops and tells you to roll back.
+`--self` checks out the target tag, builds while the old container runs, stops
+`dsh` to freeze the state, snapshots `data/home` + `data/supervisor`, starts the
+new image, and waits for health. On failure it restores the snapshot and the
+previous image. One previous image and one `backups/self-*.tgz` are kept.
+
+The updater sidecar does the same from `/system update all` (after draining all
+agents); it reports the result to the control chat. It is opt-in only through
+the token: an empty `DSH_UPDATER_TOKEN` leaves `/system update all` as a check.
+Endpoint, modes, drain semantics and recovery are documented in
+[docs/UPDATER.md](docs/UPDATER.md).
 
 **The one thing that breaks on every dsh upgrade.** The adapter is a git
 dependency declaring `^0.1.0-rc.6` peers, and dsh only mounts it through an
@@ -346,14 +353,13 @@ re-grants.
 
 ### Staying on latest safely
 
-`latest` for dsh means RC releases, and the adapter lags behind them. So "always
-latest" is fine, but only as an *unattended, verified* bump rather than a floating
-tag: the image bakes an exact version, `--check` tells you when it moves, and
-`--rollback` is one command. Weekly cron on the host:
+Each setup release bakes an exact DSH version and image tag. `--self-check` tells
+you when a compatible tag moves; `--self` applies it with a health gate and a
+one-step rollback. `ASSUME_YES=1` makes it unattended:
 
 ```cron
-# Monday 04:17 — apply updates, keep a log, stay quiet unless something fails
-17 4 * * 1 cd /home/YOU/docker && ./update.sh --apply >> /var/log/dsh-update.log 2>&1 || \
+# Monday 04:17 — apply the latest compatible setup tag
+17 4 * * 1 cd /home/YOU/docker && ASSUME_YES=1 ./update.sh --self >> /var/log/dsh-update.log 2>&1 || \
   echo "dsh update failed" | mail -s "dsh" you@example.com
 ```
 
@@ -361,7 +367,7 @@ tag: the image bakes an exact version, `--check` tells you when it moves, and
 
 | Layer | How it updates | Notes |
 |---|---|---|
-| dsh itself | `--apply` (`DSH_VERSION` in `.env`) | The only version that matters for compatibility |
+| dsh itself | setup release tag (`VERSION`, hardcoded Dockerfile/image tag) | The only version that matters for compatibility |
 | Node base image | `docker compose build --pull` | Follows `24-bookworm-slim` within 24.x |
 | pnpm | rebuild | `pnpm@11` floats within 11.x |
 | Telegram adapter | `--plugin` | Tracks its git ref at install time, not continuously |
@@ -371,6 +377,11 @@ tag: the image bakes an exact version, `--check` tells you when it moves, and
 Nothing here auto-updates on its own: no watchtower, no floating tags. That is
 deliberate — a container that silently changes the software running your shell is
 a worse failure mode than a Monday morning bump you can roll back.
+
+The updater sidecar is the one privileged component: it mounts the Docker socket
+(no published port, internal `ops` network, bearer token) because rebuilding an
+image from inside the runtime is impossible otherwise. The bot container never
+gets the socket. Keep `DSH_UPDATER_TOKEN` empty if you do not want that surface.
 
 ## Optional: lock down egress
 
@@ -394,9 +405,12 @@ container's subnet. Worth doing if you ever expose the bot to a group chat.
 | `failed to bind host port …: cannot assign requested address` | `DSH_BIND_IP` isn't an address of this host | derive it with `ip route get 1.1.1.1`, fix `.env`, `docker compose up -d` |
 | `docker compose ps` shows `(health: starting)` for a long time | the probe runs every 10s; the first ones land before the runtime is listening | `docker compose exec dsh /usr/local/bin/dsh-healthcheck; echo $?` — `0` means it is serving, whatever `ps` says |
 | UI loads but keeps saying **reconnecting** | the browser dials the address the container advertises (`172.x`), which it cannot reach | set `DSH_PUBLIC_URL` to the root you actually use, e.g. `http://192.0.2.10:4310/` (a documentation address; use your own) |
-| Bot silent after a dsh upgrade | adapter no longer mounts | re-grant the exemption, or pin `DSH_VERSION` back |
+| Bot silent after a dsh upgrade | adapter no longer mounts | re-grant the exemption, or move to the previous setup tag |
 | Bot says `⛔ You are not authorized` | your id isn't in `allowedUserIds` | edit `./data/home/profiles/web/cordis.patch.yml`, `docker compose restart dsh` |
 | `no space left on device` | sessions + pnpm store in `/data/home` | prune old sessions, move `DSH_HOME` to a bigger volume |
+| `/system update all` says updater unreachable | updater not running, token mismatch, or wrong `DSH_DOCKER_GID` | `docker compose ps updater`; `docker compose logs updater` |
+| `/system update all` says `canApply` false | `DSH_UPDATER_TOKEN` is empty | set it in `.env` and `docker compose up -d updater` |
+| Updater can't access Docker | `DSH_DOCKER_GID` does not match `getent group docker` | fix `.env`, `docker compose up -d updater` |
 
 ## Why not just a Unix user?
 

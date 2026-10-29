@@ -16,11 +16,11 @@ and `1` on an error. `--self` asks for confirmation unless `ASSUME_YES=1`.
 ## Tag convention
 
 Tags match `<dsh>-<major>.<minor>.<patch>`, for example
-`v0.2.1-rc.2-0.0.1`, and must be ancestors of the current one:
+`v0.2.1-rc.2-0.1.0`, and must be ancestors of the current one:
 
 ```sh
-git tag -a v0.2.1-rc.2-0.0.1 -m "setup 0.2.1-rc.2-0.0.1"
-git push origin v0.2.1-rc.2-0.0.1
+git tag -a v0.2.1-rc.2-0.1.0 -m "setup 0.2.1-rc.2-0.1.0"
+git push origin v0.2.1-rc.2-0.1.0
 ```
 
 - Product `0.x` is the compatible line; `1.0.0` marks a break.
@@ -61,5 +61,5 @@ skipped because it is not a descendant of the current one.
 - No systemd and no Docker socket in the runtime: run `--self` from the host. A
   future Telegram trigger would write a request flag; a separate privileged
   updater would run this same script.
-- `--apply` / `--rollback` remain the **DSH version** updater; `--self` is only
-  for the setup repo. Use them independently.
+- `--self` updates the setup repo and the DSH version it contains; there is no
+  separate DSH-version updater any more.

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** The setup tag, VERSION, DSH_VERSION and the connector pin must agree. */
+/** The setup tag, VERSION, image tags and hardcoded DSH/setup versions must agree. */
 import { readFile } from 'node:fs/promises'
 
 const ref = process.env.GITHUB_REF_NAME ?? ''
@@ -18,10 +18,13 @@ const version = (await readFile(new URL('../VERSION', import.meta.url), 'utf8'))
 if (version !== tag) fail(`VERSION is ${version}, tag is ${tag}`)
 
 const env = (await readFile(new URL('../.env.example', import.meta.url), 'utf8'))
-const dshLine = /^DSH_VERSION=(.+)$/m.exec(env)
-if (dshLine === null || dshLine[1].trim() !== dsh) fail(`.env.example DSH_VERSION is not ${dsh}`)
-const pinLine = /^DSH_TELEGRAM_PLUGIN=(.+)$/m.exec(env)
-if (pinLine === null) fail('.env.example has no DSH_TELEGRAM_PLUGIN')
-if (!pinLine[1].includes(`#v${tag}`)) fail(`connector pin is not #v${tag}`)
+if (/^DSH_VERSION=/m.test(env)) fail('.env.example still sets DSH_VERSION; it is hardcoded per release')
 
-console.log(`version check ok: setup ${tag} (DSH ${dsh}, connector pinned to v${tag})`)
+const compose = await readFile(new URL('../compose.yaml', import.meta.url), 'utf8')
+if (!compose.includes(`image: dsh-backend:${tag}`)) fail(`compose.yaml has no dsh-backend:${tag}`)
+if (!compose.includes(`image: dsh-updater:${tag}`)) fail(`compose.yaml has no dsh-updater:${tag}`)
+const dockerfile = await readFile(new URL('../Dockerfile', import.meta.url), 'utf8')
+if (!dockerfile.includes(`ARG DSH_VERSION=${dsh}`)) fail(`Dockerfile DSH_VERSION is not ${dsh}`)
+if (!dockerfile.includes(`ARG DSH_SETUP_VERSION=${tag}`)) fail(`Dockerfile DSH_SETUP_VERSION is not ${tag}`)
+
+console.log(`version check ok: setup ${tag} (DSH ${dsh}, connector derived from setup version)`)

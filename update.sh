@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 #
-# Move the dsh backend to the latest published dsh, or check whether you should.
+# Move the setup to a release tag; the DSH version moves with it.
 #
-#   ./update.sh --check      # is a newer dsh published? exit 0 = current, 2 = update available
-#   ./update.sh --apply      # backup, bump DSH_VERSION, rebuild, restart, verify
 #   ./update.sh --plugin     re-resolve the Telegram adapter from its git ref
-#   ./update.sh --rollback   go back to the version that was running before the last --apply
 #   ./update.sh --status     what is installed / running / healthy
 #   ./update.sh --self-check # latest compatible tag? change nothing
 #   ./update.sh --self [--i-know-versions-are-incompatible]
 #                            # jump to the latest compatible tag, build, health gate, rollback
+#   ./update.sh --self-to <tag>
+#                            # exact target (used by the updater sidecar)
 #
 # Run it from this directory (next to compose.yaml and .env).
 #
@@ -28,23 +27,11 @@ die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 [ -f "$ENV_FILE" ] || die "no $ENV_FILE here — run from the compose directory"
 
 env_get() { sed -n "s/^$1=//p" "$ENV_FILE" | head -1; }
-env_set() {
-  local key=$1 value=$2
-  if grep -q "^$key=" "$ENV_FILE"; then
-    sed -i "s|^$key=.*|$key=$value|" "$ENV_FILE"
-  else
-    printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
-  fi
-}
-
-current_version() { env_get DSH_VERSION; }
-
-latest_version() {
+setup_version() { tr -d '\n' < VERSION; }
+dsh_version() {
   local v
-  v="$(curl -fsS --max-time 15 https://registry.npmjs.org/@deepseek-ai/dsh/latest 2>/dev/null \
-        | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | head -1)"
-  [ -n "$v" ] || die "could not reach the npm registry"
-  echo "$v"
+  v="$(setup_version)"
+  printf '%s\n' "${v%-*}"
 }
 
 container_health() {
@@ -83,10 +70,7 @@ wait_healthy() {
 # restores both the checkout and the image that was running.
 
 image_ref() {
-  local version
-  version="$(current_version)"
-  [ -n "$version" ] || die "DSH_VERSION is missing from .env"
-  printf 'dsh-backend:%s\n' "$version"
+  printf 'dsh-backend:%s\n' "$(setup_version)"
 }
 
 start_and_wait() {
@@ -94,9 +78,9 @@ start_and_wait() {
   local extra=()
   [ "$recreate" = force ] && extra=(--force-recreate)
   if "${COMPOSE[@]}" up --help 2>&1 | grep -q -- '--wait-timeout'; then
-    "${COMPOSE[@]}" up -d "${extra[@]}" --wait --wait-timeout "$HEALTH_TIMEOUT"
+    "${COMPOSE[@]}" up -d "${extra[@]}" --wait --wait-timeout "$HEALTH_TIMEOUT" dsh
   else
-    "${COMPOSE[@]}" up -d "${extra[@]}"
+    "${COMPOSE[@]}" up -d "${extra[@]}" dsh
     wait_healthy
   fi
 }
@@ -111,13 +95,13 @@ current_tag() {
   printf '%s\n' "$tag"
 }
 
-# v0.2.1-rc.2-0.0.1 → 0.2.1-rc.2 (everything before the last -X.Y.Z).
+# v0.2.1-rc.2-0.1.0 → 0.2.1-rc.2 (everything before the last -X.Y.Z).
 tag_dsh() {
   local t=${1#v}
   printf '%s\n' "${t%-*}"
 }
 
-# v0.2.1-rc.2-0.0.1 → 0.0.1
+# v0.2.1-rc.2-0.1.0 → 0.0.1
 tag_product() {
   local t=${1#v}
   printf '%s\n' "${t##*-}"
@@ -190,21 +174,52 @@ self_check() {
   exit 2
 }
 
+snapshot_state() {
+  local stamp=$1 file="$BACKUP_DIR/self-$stamp.tgz"
+  [ -d data/home ] || return 1
+  mkdir -p "$BACKUP_DIR"
+  local paths=(home)
+  [ -d data/supervisor ] && paths+=(supervisor)
+  tar czf "$file" -C data "${paths[@]}"
+  # one rollback snapshot is enough (portable: no xargs -r in busybox)
+  ls -1t "$BACKUP_DIR"/self-*.tgz 2>/dev/null | tail -n +2 | while IFS= read -r old; do rm -f "$old"; done
+  printf '%s\n' "$file"
+}
+
+restore_state() {
+  local file=$1 uid gid
+  [ -f "$file" ] || return 1
+  uid="$(env_get DSH_UID)"; uid="${uid:-1000}"
+  gid="$(env_get DSH_GID)"; gid="${gid:-1000}"
+  rm -rf data/home data/supervisor
+  tar xzf "$file" -C data
+  chown -R "$uid:$gid" data/home 2>/dev/null || true
+  [ -d data/supervisor ] && chown -R "$uid:$gid" data/supervisor 2>/dev/null || true
+}
+
 self_update() {
-  local allow=${1:-0} cur target all prev_image
+  local allow=${1:-0} override=${2:-} cur target all prev_image snapshot
   [ -z "$(git status --porcelain)" ] || die "working tree is dirty — commit or stash first"
   git fetch --tags --quiet origin || die "git fetch failed"
   cur="$(current_tag)" || die "cannot determine the deployed tag — check out the tag that is running"
   all="$(newer_tags)" || die "cannot list newer tags"
-  if [ -z "$all" ]; then
-    log "no newer tag after $cur — nothing to do"
-    return 0
-  fi
-  target="$(target_tag "$allow" || true)"
-  if [ -z "$target" ]; then
-    warn "no compatible tag after $cur"
-    warn "crossing a product major or a DSH line requires --i-know-versions-are-incompatible"
-    return 1
+
+  if [ -n "$override" ]; then
+    target="$override"
+    [ "$target" != "$cur" ] || die "target is already running"
+    grep -Fqx -- "$target" <<<"$all" || die "target $target is not a newer aligned tag"
+    git merge-base --is-ancestor "$cur" "$target" || die "target $target is not a descendant of $cur"
+  else
+    if [ -z "$all" ]; then
+      log "no newer tag after $cur — nothing to do"
+      return 0
+    fi
+    target="$(target_tag "$allow" || true)"
+    if [ -z "$target" ]; then
+      warn "no compatible tag after $cur"
+      warn "crossing a product major or a DSH line requires --i-know-versions-are-incompatible"
+      return 1
+    fi
   fi
 
   log "setup update: $cur → $target"
@@ -219,24 +234,42 @@ self_update() {
   docker tag "$prev_image" dsh-backend:self-previous
   log "saved current image as dsh-backend:self-previous"
 
-  [ "${NO_BACKUP:-0}" = 1 ] || backup_home
-
   log "checking out $target"
   git -c advice.detachedHead=false checkout --detach "$target" || {
     warn "checkout failed; still on $cur"
     return 1
   }
 
-  log "building"
-  if ! "${COMPOSE[@]}" build; then
+  log "building dsh"
+  if ! "${COMPOSE[@]}" build dsh; then
     warn "build failed — restoring $cur; the old container was not touched"
     git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 || true
     return 1
   fi
 
-  log "starting (health gate: ${HEALTH_TIMEOUT}s)"
+  log "stopping dsh (freeze)"
+  if ! "${COMPOSE[@]}" stop dsh; then
+    warn "could not stop dsh; restoring $cur"
+    git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  log "snapshotting data/home and data/supervisor"
+  if ! snapshot="$(snapshot_state "$(date +%Y%m%d-%H%M%S)")"; then
+    warn "snapshot failed; restarting the previous setup"
+    "${COMPOSE[@]}" stop dsh >/dev/null 2>&1 || true
+    git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 || true
+    docker tag dsh-backend:self-previous "$(image_ref)"
+    start_and_wait force || die "could not restart the previous setup"
+    die "snapshot failed; previous setup restored"
+  fi
+  log "snapshot: $snapshot"
+
+  log "starting dsh"
   if ! start_and_wait; then
     warn "new tag did not become healthy; rolling back to $cur"
+    "${COMPOSE[@]}" stop dsh >/dev/null 2>&1 || true
+    restore_state "$snapshot" || warn "data restore failed — the snapshot is at $snapshot"
     git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 || true
     docker tag dsh-backend:self-previous "$(image_ref)"
     if start_and_wait force; then
@@ -244,7 +277,7 @@ self_update() {
       warn "rolled back to $cur; the previous setup is running"
       return 1
     fi
-    die "rollback failed too — dsh-backend:self-previous still exists for manual recovery"
+    die "rollback failed too — dsh-backend:self-previous and $snapshot remain for recovery"
   fi
 
   verify || warn "healthy, but verification complained — inspect: docker compose logs dsh"
@@ -270,59 +303,9 @@ verify() {
   log "no plugin compatibility complaints in the last 200 log lines"
 }
 
-backup_home() {
-  local stamp
-  stamp="$(date +%Y%m%d-%H%M%S)"
-  mkdir -p "$BACKUP_DIR"
-  # sessions + profile config; the workspace is usually too big to copy here
-  log "backing up data/home → $BACKUP_DIR/home-$stamp.tgz"
-  tar czf "$BACKUP_DIR/home-$stamp.tgz" -C data home
-  # keep the last 5
-  ls -1t "$BACKUP_DIR"/home-*.tgz 2>/dev/null | tail -n +6 | xargs -r rm -f
-}
-
-apply_update() {
-  local current latest
-  current="$(current_version)"; latest="$(latest_version)"
-  [ "$current" = "$latest" ] && { log "already on $latest"; return 0; }
-
-  log "updating $current → $latest"
-  backup_home
-  env_set DSH_VERSION_PREVIOUS "$current"
-  env_set DSH_VERSION "$latest"
-
-  log "rebuilding (this also pulls a fresh base image)"
-  "${COMPOSE[@]}" build --pull
-  log "restarting"
-  "${COMPOSE[@]}" up -d
-
-  # the entrypoint re-grants the adapter's exact-version exemption on boot;
-  # if the adapter cannot be mounted the verify step below says so
-  if wait_healthy; then
-    verify || warn "runtime is up but verification complained — check: docker compose logs dsh"
-  else
-    warn "update to $latest did not come up cleanly"
-    warn "roll back with: ./update.sh --rollback"
-    exit 1
-  fi
-  log "done — dsh $latest is running"
-}
-
-rollback() {
-  local prev
-  prev="$(env_get DSH_VERSION_PREVIOUS)"
-  [ -n "$prev" ] || die "no DSH_VERSION_PREVIOUS recorded — nothing to roll back to"
-  log "rolling back to $prev"
-  env_set DSH_VERSION_PREVIOUS "$(current_version)"
-  env_set DSH_VERSION "$prev"
-  "${COMPOSE[@]}" build && "${COMPOSE[@]}" up -d
-  wait_healthy && verify
-}
-
 status() {
-  printf '%-22s %s\n' "compose version" "$(current_version)"
-  printf '%-22s %s\n' "previous version" "$(env_get DSH_VERSION_PREVIOUS)"
-  printf '%-22s %s\n' "latest published" "$(latest_version 2>/dev/null || echo '?')"
+  printf '%-22s %s\n' "setup version" "$(setup_version)"
+  printf '%-22s %s\n' "dsh version" "$(dsh_version)"
   printf '%-22s %s\n' "container" "$(container_health)"
   printf '%-22s %s\n' "web" "$(web_code)"
   printf '%-22s %s\n' "telegram adapter" "$(
@@ -330,24 +313,13 @@ status() {
   )"
 }
 
-case "${1:---check}" in
-  --check)
-    cur="$(current_version)"; lat="$(latest_version)"
-    if [ "$cur" = "$lat" ]; then
-      log "up to date ($cur)"
-      exit 0
-    fi
-    log "update available: $cur → $lat"
-    exit 2
-    ;;
-  --apply)    apply_update ;;
-  --rollback) rollback ;;
+case "${1:---status}" in
   --status)   status ;;
   --plugin)
     log "re-resolving the Telegram adapter"
     "${COMPOSE[@]}" run --rm dsh reset-plugin
     log "restarting"
-    "${COMPOSE[@]}" up -d
+    "${COMPOSE[@]}" up -d dsh
     wait_healthy && verify
     ;;
   --self-check)
@@ -359,6 +331,10 @@ case "${1:---check}" in
     if [ "${2:-}" = "--i-know-versions-are-incompatible" ]; then self_update 1
     elif [ -n "${2:-}" ]; then die "unknown option for --self: ${2}"
     else self_update 0; fi
+    ;;
+  --self-to)
+    [ -n "${2:-}" ] || die "usage: ./update.sh --self-to <tag>"
+    self_update 0 "$2"
     ;;
   *)
     sed -n '3,14p' "$0" | sed 's/^# \{0,1\}//'

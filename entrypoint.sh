@@ -14,7 +14,13 @@ set -euo pipefail
 DSH_HOME="${DSH_HOME:-/data/home}"
 DSH_WORKSPACE="${DSH_WORKSPACE:-/data/workspace}"
 DSH_PORT="${DSH_PORT:-4310}"
-PLUGIN_REF="${DSH_TELEGRAM_PLUGIN:-github:ben7am1n/dsh-telegram}"
+SETUP_VERSION="${DSH_SETUP_VERSION:-0.0.0}"
+PLUGIN_REF="${DSH_TELEGRAM_PLUGIN:-github:vladtsvirko/dsh-telegram-connector#v${SETUP_VERSION}}"
+# The setup release owns the connector version: if the configured ref points at
+# this connector, force the matching tag instead of an older user override.
+case "$PLUGIN_REF" in
+  github:vladtsvirko/dsh-telegram-connector*) PLUGIN_REF="github:vladtsvirko/dsh-telegram-connector#v${SETUP_VERSION}" ;;
+esac
 # Which package this ref installs. Derived from the ref unless stated, because the
 # patch row id and the install check both key off the package name.
 PLUGIN_PKG="${DSH_TELEGRAM_PACKAGE:-}"
@@ -215,8 +221,16 @@ BLOCK
 install_plugin() {
   # Check the installed copy, not the manifest entry: `reset-plugin` keeps the
   # dependency but wipes node_modules, and that must re-trigger the install.
-  if [ -f "$PROFILE_DIR/node_modules/$PLUGIN_PKG/package.json" ]; then
+  # The ref stamp makes a setup release that pins a new connector reinstall it.
+  local stamp="$PROFILE_DIR/.telegram-plugin-ref"
+  if [ -f "$PROFILE_DIR/node_modules/$PLUGIN_PKG/package.json" ] &&
+     [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$PLUGIN_REF" ]; then
     return 0
+  fi
+  if [ -f "$PROFILE_DIR/node_modules/$PLUGIN_PKG/package.json" ] && [ -f "$stamp" ]; then
+    log "Telegram adapter ref changed; reinstalling it"
+    dsh plugin --profile web remove "$PLUGIN_PKG" >/dev/null 2>&1 || true
+    rm -rf "$PROFILE_DIR/node_modules/$PLUGIN_PKG"
   fi
   command -v pnpm >/dev/null 2>&1 ||
     warn "pnpm is not on PATH — the adapter's build step will fail (see Dockerfile)"
@@ -225,6 +239,7 @@ install_plugin() {
   for attempt in 1 2 3 4; do
     if dsh plugin --profile web add "$PLUGIN_REF" >/tmp/plugin-install.log 2>&1; then
       log "adapter installed"
+      printf '%s\n' "$PLUGIN_REF" > "$stamp"
       return 0
     fi
     out="$(cat /tmp/plugin-install.log)"

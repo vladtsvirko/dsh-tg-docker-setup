@@ -22,6 +22,9 @@ jobs:
       - name: Git credentials tests
         run: node --test git-credentials.test.mjs
 
+      - name: Updater tests
+        run: node --test updater.test.mjs
+
       - name: Shell syntax
         run: bash -n entrypoint.sh healthcheck.sh update.sh host-install/setup-dsh-server.sh
 
