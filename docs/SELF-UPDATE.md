@@ -47,7 +47,8 @@ skipped because it is not a descendant of the current one.
 4. Optionally backs up `data/home` (`NO_BACKUP=1` skips).
 5. Checks out the target tag (detached HEAD), builds, and starts with a health gate:
    `docker compose up -d --wait --wait-timeout $HEALTH_TIMEOUT` (falls back to
-   polling when Compose is older).
+   polling when Compose is older). The gate also requires the **published** web
+   port to answer from the host, not just the container healthcheck.
 6. Runs the usual `verify` checks (web answers, recent plugin warnings).
 7. On build/health failure: restores the previous tag checkout, retags
    `self-previous` as the running image, starts it, and verifies the rollback.

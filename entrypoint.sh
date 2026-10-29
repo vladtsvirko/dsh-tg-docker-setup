@@ -368,12 +368,26 @@ prepare() {
   fi
 }
 
+# The address Docker publishes the port to: the container's default-network
+# interface. `hostname -I` lists every network in arbitrary order, so a
+# recreate can put the internal `ops` address first and the web UI then binds
+# where the published port never forwards. The default route uniquely names
+# the right interface (`ops` is internal and has no default route).
+web_bind_ip() {
+  local ip=""
+  if command -v ip >/dev/null 2>&1; then
+    ip="$(ip -4 route get 1.1.1.1 2>/dev/null \
+      | awk '{ for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }')"
+  fi
+  [ -n "$ip" ] || ip="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | head -n1)"
+  printf '%s\n' "${ip:-127.0.0.1}"
+}
+
 serve() {
   local bind args public authority
   # dsh rejects wildcard binds, so bind the container's own (non-loopback)
   # address; that is what the published port forwards to.
-  bind="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | head -n1)"
-  [ -n "$bind" ] || bind="127.0.0.1"
+  bind="$(web_bind_ip)"
 
   # The advertised root is what the browser is told to dial — for the UI's API and
   # WebSocket, not just the printed link. Left to itself the container advertises

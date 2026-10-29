@@ -8,7 +8,14 @@
 # CA, ...), which would otherwise keep the container "starting" forever.
 set -u
 port="${DSH_PORT:-4310}"
-ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+# Must match the entrypoint's choice: the default-network address, not whatever
+# `hostname -I` happens to list first (Docker can order the ops network first).
+ip=""
+if command -v ip >/dev/null 2>&1; then
+  ip="$(ip -4 route get 1.1.1.1 2>/dev/null \
+    | awk '{ for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }')"
+fi
+[ -n "$ip" ] || ip="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | head -n1)"
 [ -n "$ip" ] || exit 1
 
 code="$(curl --noproxy '*' -s -o /dev/null -m 4 -w '%{http_code}' "http://${ip}:${port}/" 2>/dev/null || true)"

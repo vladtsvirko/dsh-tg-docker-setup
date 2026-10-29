@@ -50,6 +50,13 @@ web_code() {
   echo "${code:-000}"
 }
 
+web_ready() {
+  case "$(web_code)" in
+    200|302|303|401|403) return 0 ;;
+  esac
+  return 1
+}
+
 wait_healthy() {
   local waited=0 state
   while [ "$waited" -lt "$HEALTH_TIMEOUT" ]; do
@@ -61,6 +68,17 @@ wait_healthy() {
     sleep 3; waited=$((waited + 3))
   done
   warn "container did not become healthy within ${HEALTH_TIMEOUT}s"; return 1
+}
+
+# The container can report healthy on a TCP accept before the web app has
+# finished dispatching, so allow a short settle window instead of one probe.
+wait_web() {
+  local waited=0 limit=${WEB_READY_TIMEOUT:-30}
+  while [ "$waited" -lt "$limit" ]; do
+    if web_ready; then return 0; fi
+    sleep 2; waited=$((waited + 2))
+  done
+  return 1
 }
 
 
@@ -75,13 +93,20 @@ image_ref() {
 
 start_and_wait() {
   local recreate=${1:-}
+  local require_web=${2:-1}
   local extra=()
   [ "$recreate" = force ] && extra=(--force-recreate)
   if "${COMPOSE[@]}" up --help 2>&1 | grep -q -- '--wait-timeout'; then
-    "${COMPOSE[@]}" up -d "${extra[@]}" --wait --wait-timeout "$HEALTH_TIMEOUT" dsh
+    "${COMPOSE[@]}" up -d "${extra[@]}" --wait --wait-timeout "$HEALTH_TIMEOUT" dsh || return 1
   else
-    "${COMPOSE[@]}" up -d "${extra[@]}" dsh
-    wait_healthy
+    "${COMPOSE[@]}" up -d "${extra[@]}" dsh || return 1
+    wait_healthy || return 1
+  fi
+  # The container can be healthy while the published port points at the wrong
+  # container interface. That is not a usable update.
+  if [ "$require_web" = 1 ] && ! wait_web; then
+    warn "container is healthy but the published web UI did not answer (code $(web_code))"
+    return 1
   fi
 }
 
@@ -261,7 +286,7 @@ self_update() {
     "${COMPOSE[@]}" stop dsh >/dev/null 2>&1 || true
     git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 || true
     docker tag dsh-backend:self-previous "$(image_ref)"
-    start_and_wait force || die "could not restart the previous setup"
+    start_and_wait force 0 || die "could not restart the previous setup"
     die "snapshot failed; previous setup restored"
   fi
   log "snapshot: $snapshot"
@@ -273,7 +298,7 @@ self_update() {
     restore_state "$snapshot" || warn "data restore failed — the snapshot is at $snapshot"
     git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 || true
     docker tag dsh-backend:self-previous "$(image_ref)"
-    if start_and_wait force; then
+    if start_and_wait force 0; then
       verify || warn "rolled back, but verification complained — inspect: docker compose logs dsh"
       warn "rolled back to $cur; the previous setup is running"
       return 1

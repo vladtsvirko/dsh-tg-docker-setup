@@ -10,7 +10,7 @@
 FROM node:24-bookworm-slim
 
 ARG DSH_VERSION=0.2.1-rc.2
-ARG DSH_SETUP_VERSION=0.2.1-rc.2-0.1.9
+ARG DSH_SETUP_VERSION=0.2.1-rc.2-0.1.10
 ENV DSH_SETUP_VERSION=${DSH_SETUP_VERSION}
 # The connector's /about reports this; the runtime itself does not export it.
 ENV DSH_RUNTIME_VERSION=${DSH_VERSION}
@@ -28,9 +28,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     NARB_NATIVE_CACHE_DIR=/data/.cache/native
 
 # ca-certificates: api.telegram.org + npm; git: the adapter is a git dependency;
+# iproute2: pick the default-network address to bind the web UI to;
 # tini: PID 1 that reaps the agent's subprocess zoo.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl git tini \
+ && apt-get install -y --no-install-recommends ca-certificates curl git iproute2 tini \
  && rm -rf /var/lib/apt/lists/*
 
 # pnpm is not optional: the Telegram adapter builds itself with a `prepare`
