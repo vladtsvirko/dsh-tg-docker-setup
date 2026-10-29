@@ -12,7 +12,7 @@
  */
 import { execFile, spawn } from 'node:child_process'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -129,8 +129,6 @@ const readBody = (request) => new Promise((resolve, reject) => {
 export function createUpdater({ repo, dataDir, botToken = '', token = '', apply = false, refreshTags = async () => {}, tags = () => listTags(repo), current = () => currentTag(repo), now = Date.now }) {
   const state = { job: null }
 
-  const resultPath = dataDir === undefined ? undefined : join(dataDir, 'update', 'result.json')
-
   const report = async (text) => {
     if (botToken.length === 0 || dataDir === undefined) return false
     let chatId
@@ -225,6 +223,8 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
     job.logTail = tail
     job.state = code === 0 ? 'done' : /rolled back/i.test(output) ? 'rolled-back' : 'failed'
     await persist()
+    job.reporting = true
+    await persist()
     let delivered = false
     if (job.state === 'done') {
       const dsh = parseTag(job.target)?.dsh ?? 'unknown'
@@ -234,9 +234,9 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
     } else {
       delivered = await report(`system update failed (exit ${code}). Check the updater log; the previous state may still be running.\n\n${tail}`)
     }
-    if (delivered && resultPath !== undefined) {
-      await unlink(resultPath).catch(() => undefined)
-    }
+    job.reporting = false
+    job.reported = delivered
+    await persist()
     if (reachedStop) reload()
   }
 

@@ -3,9 +3,9 @@
 The setup repo ships one aligned release together with DSH and the connector:
 
 ```
-VERSION:      0.2.1-rc.2-0.1.6
-git tag:      v0.2.1-rc.2-0.1.6
-image:        dsh-backend:0.2.1-rc.2-0.1.6
+VERSION:      0.2.1-rc.2-0.1.7
+git tag:      v0.2.1-rc.2-0.1.7
+image:        dsh-backend:0.2.1-rc.2-0.1.7
 Dockerfile:   ARG DSH_VERSION=0.2.1-rc.2
 ```
 
