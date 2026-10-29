@@ -165,8 +165,19 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
 
   const stripAnsi = (value) => value.replace(/\x1b\[[0-9;]*m/g, '')
 
+  const reload = () => {
+    // Docker's restart policy brings the container back with the new mounted
+    // updater.mjs. Only do this once the runtime was actually stopped; a
+    // build failure before the stop must keep the current process for /status.
+    setTimeout(() => {
+      console.log('updater: exiting to reload the checkout')
+      process.exit(0)
+    }, 1000)
+  }
+
   const runApply = async (job) => {
     let toldDown = false
+    let reachedStop = false
     job.state = 'applying'
     await persist()
     let output = ''
@@ -188,6 +199,7 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
       output = (output + chunk.toString()).slice(-20000)
       if (!toldDown && output.includes('stopping dsh')) {
         toldDown = true
+        reachedStop = true
         void report('dsh is down — update in progress. New messages are queued; send them again when the bot returns.')
       }
       for (const line of chunk.toString().split('\n')) {
@@ -213,12 +225,11 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
       const dsh = parseTag(job.target)?.dsh ?? 'unknown'
       await report(`system update finished: ${job.from} → ${job.target} (DSH ${dsh}).`)
     } else if (job.state === 'rolled-back') {
-      await report(`system update failed and rolled back to ${job.from}.
-
-${tail}`)
+      await report(`system update failed and rolled back to ${job.from}.\n\n${tail}`)
     } else {
       await report(`system update failed (exit ${code}). Check the updater log; the previous state may still be running.\n\n${tail}`)
     }
+    if (reachedStop) reload()
   }
 
   const handler = async (request, response) => {

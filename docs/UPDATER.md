@@ -40,6 +40,12 @@ ops (internal): dsh, updater      endpoint :8787, token, no published port
 default:        dsh, updater      egress (Telegram, git, image pulls)
 ```
 
+The updater runs from the mounted checkout (`node updater.mjs`), so a setup
+update changes its code on the next restart. After a completed stop/start it
+exits and Docker's restart policy brings it back with the new checkout. The
+first adoption of that layout needs one `docker compose build updater && docker
+compose up -d updater`.
+
 The updater runs as `DSH_UID:DSH_GID` with `DSH_DOCKER_GID` added to its groups.
 It is not root, but the Docker socket makes it host-root-equivalent.
 
