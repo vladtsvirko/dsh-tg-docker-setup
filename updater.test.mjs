@@ -61,6 +61,13 @@ test('endpoint validates token and returns a job', async () => {
       body: JSON.stringify({ mode: 'nope' }),
     })
     assert.equal(bad.status, 400)
+    const target = await fetch(`${base}/target`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer secret' },
+      body: JSON.stringify({ mode: 'compatible' }),
+    })
+    assert.equal(target.status, 200)
+    assert.equal((await target.json()).target, 'v0.2.1-rc.2-0.1.0')
     const accepted = await fetch(`${base}/update`, {
       method: 'POST',
       headers: { authorization: 'Bearer secret' },

@@ -163,9 +163,11 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
     }
   }
 
+  const stripAnsi = (value) => value.replace(/\x1b\[[0-9;]*m/g, '')
+
   const runApply = async (job) => {
+    let toldDown = false
     job.state = 'applying'
-    await report(`system update started: ${job.from} → ${job.target}. The bot will restart during the update.`)
     await persist()
     let output = ''
     let child
@@ -184,6 +186,10 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
     }
     const capture = (chunk) => {
       output = (output + chunk.toString()).slice(-20000)
+      if (!toldDown && output.includes('stopping dsh')) {
+        toldDown = true
+        void report('dsh is down — update in progress. New messages are queued; send them again when the bot returns.')
+      }
       for (const line of chunk.toString().split('\n')) {
         if (line.includes('building dsh')) job.state = 'building'
         else if (line.includes('stopping dsh')) job.state = 'stopping'
@@ -196,7 +202,8 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
       child.on('error', () => resolve(-1))
       child.on('close', (value) => resolve(value ?? -1))
     })
-    const safeOutput = botToken.length > 0 ? output.replaceAll(botToken, '<redacted>') : output
+    const stripped = stripAnsi(output)
+    const safeOutput = botToken.length > 0 ? stripped.replaceAll(botToken, '<redacted>') : stripped
     const tail = safeOutput.split('\n').filter((line) => line.trim().length > 0).slice(-20).join('\n')
     job.exitCode = code
     job.logTail = tail
@@ -220,6 +227,26 @@ ${tail}`)
       if (path === '/health' && request.method === 'GET') {
         const tag = await current().catch(() => undefined)
         return json(response, 200, { ok: true, tag: tag ?? null, canApply: apply })
+      }
+      if (path === '/target' && request.method === 'POST') {
+        if (token.length === 0) return json(response, 503, { error: 'updater is disabled (DSH_UPDATER_TOKEN is empty)' })
+        if (!authorized(request.headers.authorization, token)) return json(response, 401, { error: 'unauthorized' })
+        const raw = await readBody(request)
+        let body
+        try {
+          body = raw.length === 0 ? {} : JSON.parse(raw)
+        } catch {
+          throw new UpdateError(400, 'body must be JSON')
+        }
+        try {
+          await fetch()
+        } catch (error) {
+          throw new UpdateError(503, `cannot fetch release tags: ${error instanceof Error ? error.message : String(error)}`)
+        }
+        const from = await current()
+        if (from === undefined) throw new UpdateError(409, 'checkout is not on a release tag')
+        const target = resolveTarget(from, await tags(), { mode: body.mode, version: body.version })
+        return json(response, 200, { from, target })
       }
       if (path === '/update' && request.method === 'POST') {
         if (token.length === 0) return json(response, 503, { error: 'updater is disabled (DSH_UPDATER_TOKEN is empty)' })

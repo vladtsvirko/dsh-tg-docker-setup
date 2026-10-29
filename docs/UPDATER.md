@@ -59,8 +59,9 @@ Authorization: Bearer <DSH_UPDATER_TOKEN>
 ```
 
 ```
-GET /health   {ok, tag, canApply}
-GET /status   {job: {id, state, from, target, exitCode?, logTail?}}
+POST /target   {mode} -> 200 {from, target}   (resolve without applying)
+GET  /health   {ok, tag, canApply}
+GET  /status   {job: {id, state, from, target, exitCode?, logTail?}}
 ```
 
 There is no result-polling requirement for the connector: the updater reports
@@ -90,6 +91,13 @@ The connector:
 3. polls `agents.list()` until every agent is `idle` (web UI included);
 4. calls `/update` only then.
 
+The connector first asks `/target` and posts one editable card in the control
+chat: `from → target`, live blocker count/list, and a **Cancel** button. Cancel
+deletes the update state and edits the card to “cancelled”; once `/update`
+returns 202 the button is removed and cancellation is refused. Older updaters
+without `/target` fall back to `/update` and update the card with the accepted
+target.
+
 There is no timeout and no cancel after the request. `/system status` lists the
 sessions still running. A web turn can still start in the instant before the
 updater stops the container; that best-effort race is accepted.
@@ -104,7 +112,7 @@ Plain text to the control chat (`controlChatId` from
 `data/home/telegram-connector/bindings.json`), token from
 `DSH_TELEGRAM_BOT_TOKEN`:
 
-- `update started: from → target`
+- `dsh is down — update in progress` when the stop phase begins
 - `update finished: target (DSH …)`
 - `update failed and rolled back to from` plus the last 20 log lines
 - Telegram token redaction is applied to the log tail.
