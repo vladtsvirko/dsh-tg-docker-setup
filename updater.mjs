@@ -12,7 +12,7 @@
  */
 import { execFile, spawn } from 'node:child_process'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -126,29 +126,33 @@ const readBody = (request) => new Promise((resolve, reject) => {
  * Build the request handler. The git readers are injectable so tests do not
  * need a repository; `apply` is intentionally absent in slice 1.
  */
-export function createUpdater({ repo, dataDir, botToken = '', token = '', apply = false, fetch = async () => {}, tags = () => listTags(repo), current = () => currentTag(repo), now = Date.now }) {
+export function createUpdater({ repo, dataDir, botToken = '', token = '', apply = false, refreshTags = async () => {}, tags = () => listTags(repo), current = () => currentTag(repo), now = Date.now }) {
   const state = { job: null }
 
+  const resultPath = dataDir === undefined ? undefined : join(dataDir, 'update', 'result.json')
+
   const report = async (text) => {
-    if (botToken.length === 0 || dataDir === undefined) return
+    if (botToken.length === 0 || dataDir === undefined) return false
     let chatId
     try {
       const bindings = JSON.parse(await readFile(join(dataDir, 'home', 'telegram-connector', 'bindings.json'), 'utf8'))
       if (typeof bindings.controlChatId === 'number') chatId = bindings.controlChatId
     } catch {
-      return
+      return false
     }
-    if (chatId === undefined) return
+    if (chatId === undefined) return false
     try {
       const body = new URLSearchParams({
         chat_id: String(chatId),
         text: text.slice(0, 3800),
         disable_web_page_preview: 'true',
       })
-      const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, { method: 'POST', body })
+      const response = await globalThis.fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, { method: 'POST', body })
       if (!response.ok) console.error(`updater: Telegram report failed (${response.status})`)
+      return response.ok
     } catch (error) {
       console.error(`updater: Telegram report failed: ${error instanceof Error ? error.message : String(error)}`)
+      return false
     }
   }
 
@@ -221,13 +225,17 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
     job.logTail = tail
     job.state = code === 0 ? 'done' : /rolled back/i.test(output) ? 'rolled-back' : 'failed'
     await persist()
+    let delivered = false
     if (job.state === 'done') {
       const dsh = parseTag(job.target)?.dsh ?? 'unknown'
-      await report(`system update finished: ${job.from} → ${job.target} (DSH ${dsh}).`)
+      delivered = await report(`system update finished: ${job.from} → ${job.target} (DSH ${dsh}).`)
     } else if (job.state === 'rolled-back') {
-      await report(`system update failed and rolled back to ${job.from}.\n\n${tail}`)
+      delivered = await report(`system update failed and rolled back to ${job.from}.\n\n${tail}`)
     } else {
-      await report(`system update failed (exit ${code}). Check the updater log; the previous state may still be running.\n\n${tail}`)
+      delivered = await report(`system update failed (exit ${code}). Check the updater log; the previous state may still be running.\n\n${tail}`)
+    }
+    if (delivered && resultPath !== undefined) {
+      await unlink(resultPath).catch(() => undefined)
     }
     if (reachedStop) reload()
   }
@@ -250,7 +258,7 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
           throw new UpdateError(400, 'body must be JSON')
         }
         try {
-          await fetch()
+          await refreshTags()
         } catch (error) {
           throw new UpdateError(503, `cannot fetch release tags: ${error instanceof Error ? error.message : String(error)}`)
         }
@@ -273,7 +281,7 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
           throw new UpdateError(400, 'body must be JSON')
         }
         try {
-          await fetch()
+          await refreshTags()
         } catch (error) {
           throw new UpdateError(503, `cannot fetch release tags: ${error instanceof Error ? error.message : String(error)}`)
         }
@@ -318,7 +326,7 @@ if (isCli) {
   const token = process.env.DSH_UPDATER_TOKEN ?? ''
   const botToken = process.env.DSH_TELEGRAM_BOT_TOKEN ?? ''
   const port = Number(process.env.DSH_UPDATER_PORT ?? 8787)
-  const app = createUpdater({ repo, dataDir, botToken, token, apply: true, fetch: () => fetchTags(repo) })
+  const app = createUpdater({ repo, dataDir, botToken, token, apply: true, refreshTags: () => fetchTags(repo) })
   const server = http.createServer((request, response) => void app.handler(request, response))
   server.listen(port, '0.0.0.0', () => {
     console.log(`updater: listening on :${port} for ${repo}${token.length === 0 ? ' (disabled: no token)' : ''}`)
