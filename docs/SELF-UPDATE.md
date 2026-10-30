@@ -15,7 +15,7 @@ docs) to a release tag. Neither pulls `main`.
 ./update.sh --self-check   # fetch tags, show the target and its commits; change nothing
 ./update.sh --self         # latest compatible tag, build, health gate, rollback
 ./update.sh --self --i-know-versions-are-incompatible   # allow a major/DSH jump
-./update.sh --self-to v0.2.1-rc.2-0.1.11                # exact target, used by the updater
+./update.sh --self-to v0.2.1-rc.2-0.1.12                # exact target, used by the updater
 ```
 
 `--self-check` exits `0` when there is no newer compatible tag, `2` when there is,
@@ -26,11 +26,11 @@ running one.
 ## Tag convention
 
 Tags match `<dsh>-<major>.<minor>.<patch>`, for example
-`v0.2.1-rc.2-0.1.11`, and the target must be a descendant of the current one:
+`v0.2.1-rc.2-0.1.12`, and the target must be a descendant of the current one:
 
 ```sh
-git tag v0.2.1-rc.2-0.1.11
-git push origin v0.2.1-rc.2-0.1.11
+git tag v0.2.1-rc.2-0.1.12
+git push origin v0.2.1-rc.2-0.1.12
 ```
 
 - Product `0.x` is the compatible line; `1.0.0` marks a break.

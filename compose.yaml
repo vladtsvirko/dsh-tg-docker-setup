@@ -16,7 +16,7 @@ services:
   # on `mkdir /data/home`. This container chowns the mount, then exits; it has no
   # network, a read-only rootfs, and only the two capabilities chown needs.
   init:
-    image: dsh-backend:0.2.1-rc.2-0.1.11
+    image: dsh-backend:0.2.1-rc.2-0.1.12
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -56,7 +56,7 @@ services:
       args:
         DSH_UID: ${DSH_UID:-1000}
         DSH_GID: ${DSH_GID:-1000}
-    image: dsh-backend:0.2.1-rc.2-0.1.11
+    image: dsh-backend:0.2.1-rc.2-0.1.12
     container_name: dsh
     depends_on:
       init:
@@ -119,7 +119,7 @@ services:
     build:
       context: .
       dockerfile: updater.Dockerfile
-    image: dsh-updater:0.2.1-rc.2-0.1.11
+    image: dsh-updater:0.2.1-rc.2-0.1.12
     restart: unless-stopped
     stop_grace_period: 10s
     user: "${DSH_UID:-1000}:${DSH_GID:-1000}"
