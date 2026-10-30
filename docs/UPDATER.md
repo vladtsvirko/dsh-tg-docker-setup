@@ -5,6 +5,10 @@ sidecar to move the setup to a release tag. The updater stops the runtime,
 snapshots state, starts the new image, and rolls back on failure. It reports
 the result to the control chat itself.
 
+This is the normal no-SSH path. Version rules are in
+[`VERSIONS.md`](VERSIONS.md); the full boundary of what this cannot fix is in
+[`LIMITS.md`](LIMITS.md).
+
 ## Shape
 
 ```
@@ -80,13 +84,19 @@ Tags are `<dsh>-<major>.<minor>.<patch>`; `0.x` is the compatible line, a major
 bump is a break. The product part resets to `0.0.0` on a new DSH alignment.
 
 - `compatible`: same DSH part and same product major; latest wins; compatible
-  releases may be skipped.
-- `available`: latest overall; `/system update all --i-know-versions-are-incompatible`.
-- `exact`: the updater's explicit target; not older than the running tag.
-- `rollback` mode is deliberately not exposed yet.
+  releases may be skipped. This is what `/system update all` uses by default.
+- `available`: latest overall. Reached only with the explicit
+  `/system update all --i-know-versions-are-incompatible`; it may cross a DSH
+  line or product major.
+- `exact`: the updater's explicit target; must be a newer descendant tag, never
+  an older one.
+- `rollback` mode is deliberately not exposed. A failed health gate rolls back
+  automatically; a manual image rollback is a host operation.
 
 The image tag, `VERSION`, the connector pin and the Dockerfile DSH version are
-all hardcoded in a setup release; CI checks they agree.
+all hardcoded in a setup release; CI checks they agree. The entrypoint installs
+the connector tag derived from `VERSION`, so the setup release and connector
+release move together — see [`VERSIONS.md`](VERSIONS.md).
 
 ## Drain
 
@@ -123,19 +133,28 @@ Plain text to the control chat (`controlChatId` from
 - `update failed and rolled back to from` plus the last 20 log lines
 - Telegram token redaction is applied to the log tail.
 
+If the updater cannot post the report, it leaves `data/update/result.json`
+behind. The booting connector waits for a terminal state and sends the persisted
+result instead. The update card is closed with the same outcome.
+
 ## Rollback and data
 
-One previous image (`dsh-backend:self-previous`) and one
-`backups/self-*.tgz` (home + supervisor) are kept. On failed health:
+The updater keeps one previous image (`dsh-backend:self-previous`) and one
+`backups/self-*.tgz` (home + supervisor). On failed health, including a healthy
+container whose **published** web port does not answer:
 
 ```
 stop new dsh → restore snapshot → checkout previous tag
 → retag previous image → start previous → verify → report
 ```
 
-`data/workspace` is never snapshotted or restored. Data created after the
-snapshot is lost if a rollback restores it; that is the cost of a consistent
-freeze.
+Rollback starts the previous image without requiring the published web port, so
+Telegram can return even when the old web bind is broken.
+
+`data/workspace` is never snapshotted or restored. Data created under
+`data/home` or `data/supervisor` after the snapshot is lost if a rollback restores
+it; that is the cost of a consistent freeze. Workspace changes made by the failed
+deployment remain.
 
 ## Operating
 
@@ -189,7 +208,15 @@ Real stack, disposable setup:
 
 - Best-effort drain race with a new web turn.
 - No timeout/cancel after the request; a stuck session blocks the update.
-- The updater is not self-updated by `--self`; its new image applies on the next
-  host `docker compose build && up -d`.
-- A crash of the updater mid-apply is not automatically recovered; the result
-  file and container state are the recovery inputs.
+- The updater **code** reloads from the mounted checkout, but its **image** is not
+  rebuilt by `--self`. A change to `updater.Dockerfile`, Node, Docker CLI/compose,
+  git or curl needs a host `docker compose build updater && docker compose up -d
+  updater`.
+- A crash of the updater mid-apply is not automatically resumed. `result.json`,
+  the checkout, the images and the container state are the recovery inputs.
+- The updater cannot fix a dead Docker daemon, a corrupt checkout, a full disk,
+  a broken `.env`, or a runtime that cannot boot at all. Those need the host; see
+  [`LIMITS.md`](LIMITS.md).
+- Telegram is the only normal control path. If the connector cannot load or
+  cannot reach Telegram, the update card is unreachable even though the updater
+  may still be running.

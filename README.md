@@ -26,10 +26,13 @@ the `/data` volume expose; nothing else on the server is mounted.
 | `compose.yaml` | Hardened runtime: read-only rootfs, no caps, pids/mem caps, LAN-only port |
 | `.env.example` | Every knob, with comments |
 | `update.sh` | Check / apply / roll back dsh updates, refresh the adapter |
+| `updater.mjs`, `updater.Dockerfile` | Privileged sidecar for `/system update all`; no published port |
+| `docs/VERSIONS.md` | Version scheme, release coupling and update rules |
+| `docs/LIMITS.md` | What works without a host shell, what still needs one, and the hard limits |
 | `SECURITY.md` | Reporting, and the deployment's own rules |
 | `LICENSE` | MIT |
 | `.github/workflows/ci.yml` | Supervisor tests and shell syntax checks |
-| `host-install/` | Alternative: run dsh on the host as a systemd service (no Docker) |
+| `host-install/` | Alternative host install (no Docker); it does not provide the no-SSH updater path |
 
 ## Quick start
 
@@ -155,22 +158,48 @@ container is disposable and disappears with the container.
 | `DSH_TRIAL_SECONDS` | Rollback window for a trial, default `300` (5 min). Waiting longer is safer for slow checks; shorter is easier on a broken bot. |
 | `DSH_BOOT_GRACE_SECONDS` | How long a trial runtime may stay up without checking in, default `120`. After that it is rolled back. |
 | `DSH_UPDATE_TIMEOUT_SECONDS` | How long `/system update connector` may spend in `reset-plugin`, default `900`. |
-| `DSH_UPDATER_TOKEN` | Shared bearer token for the updater sidecar. Empty disables `/system update all` (it becomes a check). |
+| `DSH_UPDATER_TOKEN` | Shared bearer token for the updater sidecar. Empty disables apply; `/system update all` becomes a diagnostic that prints the host fallback. |
 | `DSH_DOCKER_GID` | GID of the host docker group; lets the updater use the socket without root. `getent group docker \| cut -d: -f3`. |
 
-## Compatibility
+## Versioning and compatibility
 
-Each setup release hardcodes its DSH version in the image tag and Dockerfile,
-and installs the connector version derived from the setup tag. The
-supported pairs and the policy for moving them
+The connector and the setup ship as **one tag**:
 
-are in the connector's [`COMPATIBILITY.md`](https://github.com/vladtsvirko/dsh-telegram-connector/blob/main/COMPATIBILITY.md).
-Inside the bot, `/about` reports the connector version, the runtime version (the
-image exports `DSH_RUNTIME_VERSION`) and the declared peer range.
+```
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.2-0.1.11
+         DSH part          product part
+```
 
-Upgrading the image does not upgrade the connector by itself: the entrypoint
-keeps an installed copy. Use the bot's `/system update connector` (or
-`docker compose run --rm dsh reset-plugin`) to move the connector too.
+- The DSH part is the exact tested runtime. It is hardcoded in the image tag and
+  `Dockerfile`; there is no `DSH_VERSION` `.env` knob.
+- Product `0.x` is compatible. A new major is a break. The product part resets to
+  `0.0.0` when the pair moves to a new DSH line.
+- Same DSH part and same product major may jump (`0.1.1 → 0.4.2`).
+- Crossing a DSH line or product major requires the explicit
+  `--i-know-versions-are-incompatible`; neither `/system` nor a scheduled update
+  crosses on its own.
+- Tags are immutable. The setup `VERSION`, image tags, Dockerfile args and the
+  connector `package.json` must agree; CI enforces this.
+
+The entrypoint does not float the connector. It forces
+`github:vladtsvirko/dsh-telegram-connector#v${DSH_SETUP_VERSION}` (the setup tag)
+and reinstalls when that ref changes. Therefore:
+
+- a setup release **needs** a matching connector tag — even when only setup code
+  changed;
+- a connector change deployed through the image **needs** a setup release with
+  the same version;
+- `/system update connector` reinstalls the **pinned** connector; it does not
+  select a newer connector tag.
+
+The full policy, release checklist and coupling rules are in
+[`docs/VERSIONS.md`](docs/VERSIONS.md). The connector's tested DSH rows are in
+[`COMPATIBILITY.md`](https://github.com/vladtsvirko/dsh-telegram-connector/blob/main/COMPATIBILITY.md).
+Inside the bot, `/about` reports the connector version, runtime version and
+updater state.
+
+What still needs the host — and what a failed update can and cannot restore — is
+in [`docs/LIMITS.md`](docs/LIMITS.md).
 
 ## Choosing the connector
 
@@ -274,9 +303,9 @@ From the bot chat:
 | `/system restart now` | restart without a trial; the current state becomes the rollback point |
 | `/system update connector` | reinstall the pinned connector: stop, run `reset-plugin`, start in a trial |
 | `/system update connector now` | same, without the trial |
-| `/system update all` | check the host-side setup update; the image is rebuilt on the host |
+| `/system update all` | drain all agents, then update the setup image through the updater sidecar; automatic rollback on failed health |
 | `/system confirm` | commit the trial: this state becomes the new rollback point |
-| `/system rollback` | restore the last committed state and restart |
+| `/system rollback` | restore the last committed **profile** state and restart (does not move the image) |
 
 The trial announcement carries **Commit** and **Roll back** buttons; the
 commands do the same thing. Every confirmed plugin change opens a trial *before*
@@ -298,58 +327,78 @@ starts. The supervisor sends the rollback notice itself, since it knows the bot
 token and the control chat id from `bindings.json`; the trial announcement comes
 from the connector once it is up.
 
-`/system update connector` is the SSH step moved into the bot: the supervisor
-stops the runtime, runs the entrypoint's own `reset-plugin` (including its
-allow-builds and version compatibility handling), then starts the runtime inside
-a trial. `now` skips the trial. If the reinstall fails, the snapshot is restored
-before the runtime comes back.
+`/system update connector` is the profile half of a host `reset-plugin` moved
+into the bot: the supervisor stops the runtime, runs the entrypoint's own
+`reset-plugin` (including its allow-builds and version compatibility handling),
+then starts the runtime inside a trial. `now` skips the trial. If the reinstall
+fails, the snapshot is restored before the runtime comes back. It reinstalls the
+**pinned** connector version; it cannot move to a different setup tag.
 
-`/system update all` is check-only: the container cannot rebuild its image. It
-reports the host command; setup updates run there with `./update.sh --self-check`
-and `./update.sh --self`. Same-major/DSH updates may jump; crossing either needs
-`--i-know-versions-are-incompatible`.
+`/system update all` is the image half: it drains every agent, asks the updater
+sidecar to check out, build and start the latest **compatible setup tag**, and
+reports the result to the control chat. The new entrypoint then installs the
+connector tag derived from that setup version. If `DSH_UPDATER_TOKEN` is empty,
+the command degrades to diagnostics and prints the host fallback
+(`./update.sh --self-check` / `--self`).
 
-Scope: this covers the **profile**, which is what plugins and their settings
-live in. Sessions and the workspace are outside it and are untouched by a
-rollback. It does not make image updates (`update.sh`) reversible, and a change
-made directly in `./data/home` before the container starts is outside any trial.
+Scopes:
+
+| Operation | Scope | Rollback |
+|---|---|---|
+| `/system restart`, `/system update connector`, plugins | profile (`data/home/profiles/web`) | supervisor trial: Commit / Roll back / deadline |
+| `/system update all` | setup checkout, DSH image, connector pin, profile snapshot | automatic on failed health; one previous image + one snapshot |
+| `/system rollback` | profile only | does not move the image or the setup tag |
+
+Sessions and the workspace are outside a profile trial. A change made directly
+in `./data/home` while the container is stopped is outside any trial. Image
+updates are reversible only through the automatic rollback or a manual host
+procedure, not `/system rollback`. The full boundary is in
+[`docs/LIMITS.md`](docs/LIMITS.md).
 
 ## Updating dsh
 
-`update.sh` is the whole story:
+The normal path is `/system update all` in the bot: it drains every agent, asks
+the updater sidecar, and the updater runs the same host update script. The host
+commands remain the bootstrap, break-glass and deliberate manual path:
 
 ```sh
 ./update.sh --status     # setup/DSH version, container health, adapter, HTTP
 ./update.sh --self-check # latest compatible setup tag, change nothing
 ./update.sh --self       # latest compatible tag, build, health gate, rollback
-./update.sh --plugin     # re-resolve the Telegram adapter from its git ref
+./update.sh --plugin     # re-resolve the pinned Telegram adapter
 ```
 
 `--self` checks out the target tag, builds while the old container runs, stops
 `dsh` to freeze the state, snapshots `data/home` + `data/supervisor`, starts the
 new image, and waits for health. On failure it restores the snapshot and the
-previous image. One previous image and one `backups/self-*.tgz` are kept.
+previous image. One previous image and one `backups/self-*.tgz` are kept. The
+rollback starts even when the published web port is broken, so Telegram can come
+back.
 
-The updater sidecar does the same from `/system update all` (after draining all
-agents); it reports the result to the control chat. It is opt-in only through
-the token: an empty `DSH_UPDATER_TOKEN` leaves `/system update all` as a check.
-Endpoint, modes, drain semantics and recovery are documented in
-[docs/UPDATER.md](docs/UPDATER.md).
+`/system update all` does the same after draining all agents and reports the
+result to the control chat. It is opt-in through the token: an empty
+`DSH_UPDATER_TOKEN` leaves `/system update all` as a diagnostic that prints the
+host fallback. Endpoint, modes, drain semantics and recovery are in
+[docs/UPDATER.md](docs/UPDATER.md); version rules are in
+[docs/VERSIONS.md](docs/VERSIONS.md).
 
-**The one thing that breaks on every dsh upgrade.** The adapter is a git
-dependency declaring `^0.1.0-rc.6` peers, and dsh only mounts it through an
-*exact-version* exemption stored in `<profile>/compatibility.json`:
+**Plugin compatibility exemptions.** DSH mounts a plugin only when its declared
+peer ranges match the runtime, or when the profile carries an *exact-version*
+exemption in `<profile>/compatibility.json`:
 
 ```json
-{ "dsh-telegram@0.1.0": ["0.2.1-rc.3"] }
+{ "dsh-telegram-connector@0.1.11": ["0.3.0"] }
 ```
 
-Neither a plugin upgrade nor a dsh upgrade inherits that permission — bump dsh
-and the adapter is denied at load, so the bot disappears while the web UI keeps
-working. The entrypoint now re-grants it on every boot (`ensure_compat`), so a
-plain `docker compose build && up -d` is enough. If the adapter itself has
-changed upstream, `--plugin` drops the plugin layer and re-installs it, then
-re-grants.
+The connector declares `>=0.1.0-rc.6 <0.3.0-0` for the DSH packages, so the
+tested `0.2.1-rc.2` needs no exemption. `ensure_compat` checks this on every boot
+and grants one only when the runtime is genuinely outside the declared ranges —
+that is the unsafe, out-of-matrix case, and it logs a warning. A plugin upgrade
+does not inherit the old exact-version key, which is why the boot check exists.
+
+Do not treat an exemption as permission to cross a DSH line silently. The
+version policy still requires the explicit incompatibility flag, and a DSH
+outside the tested row is a compatibility event, not a normal update.
 
 ### Staying on latest safely
 
@@ -370,7 +419,8 @@ one-step rollback. `ASSUME_YES=1` makes it unattended:
 | dsh itself | setup release tag (`VERSION`, hardcoded Dockerfile/image tag) | The only version that matters for compatibility |
 | Node base image | `docker compose build --pull` | Follows `24-bookworm-slim` within 24.x |
 | pnpm | rebuild | `pnpm@11` floats within 11.x |
-| Telegram adapter | `--plugin` | Tracks its git ref at install time, not continuously |
+| Telegram connector | setup release tag (`VERSION`); `/system update connector` re-runs the boot install | It tracks the setup tag, not a floating branch; `--plugin` re-resolves the same pinned ref |
+| updater sidecar | mounted `updater.mjs` reloads after an apply | Its image and OS packages need a host `docker compose build updater` |
 | Other plugins | add via `dsh plugin`, pinned in the profile's `pnpm-lock.yaml` | Lives in `data/home`, survives rebuilds |
 | Model names | `DSH_MODEL` in `.env` | Provider models change without any image change |
 
@@ -382,6 +432,11 @@ The updater sidecar is the one privileged component: it mounts the Docker socket
 (no published port, internal `ops` network, bearer token) because rebuilding an
 image from inside the runtime is impossible otherwise. The bot container never
 gets the socket. Keep `DSH_UPDATER_TOKEN` empty if you do not want that surface.
+
+Telegram is still the only **normal** control path. If the bot cannot load, the
+updater is wedged, Docker is down, or the host needs a `.env`/disk/ownership
+change, there is no remote repair. Decide deliberately whether to keep a
+break-glass host path; the full list is in [`docs/LIMITS.md`](docs/LIMITS.md).
 
 ## Optional: lock down egress
 
