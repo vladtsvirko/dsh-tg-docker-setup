@@ -28,7 +28,11 @@ host shell exposed to the bot, and no Docker socket in the runtime container.
 
 These cannot be done through the bot, by design or by physics:
 
-- the first install, cloning the setup, and editing `.env`;
+- the deployment checkout: first install and editing `.env`;
+- running `docker compose`, image builds or `update.sh` from a workspace **inside
+  the runtime container** — that container has no Docker CLI or socket. Node/npm
+  tests and static checks do work there; image/Compose checks need a host
+  checkout;
 - rebuilding or changing the **updater image** or its dependencies
   (`updater.Dockerfile`, Node, Docker CLI/compose, git, curl);
 - fixing Docker, the daemon, disk-full, bind mounts, file ownership outside the
