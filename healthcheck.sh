@@ -16,15 +16,17 @@ if command -v ip >/dev/null 2>&1; then
     | awk '{ for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }')"
 fi
 [ -n "$ip" ] || ip="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | head -n1)"
-[ -n "$ip" ] || exit 1
-
-code="$(curl --noproxy '*' -s -o /dev/null -m 4 -w '%{http_code}' "http://${ip}:${port}/" 2>/dev/null || true)"
-case "$code" in
-  200|302|303|401|403) exit 0 ;;   # 401 is the normal answer: token required
-esac
-
-# fall back to a plain TCP connect (bash-only syntax; the shebang is POSIX sh)
-if command -v bash >/dev/null 2>&1; then
-  timeout 4 bash -c "exec 3<>/dev/tcp/${ip}/${port}" 2>/dev/null && exit 0
-fi
+# Probe the address the runtime advertises, then loopback: a native install
+# with no default route binds 127.0.0.1 and has no other address to try.
+for host in "$ip" 127.0.0.1; do
+  [ -n "$host" ] || continue
+  code="$(curl --noproxy '*' -s -o /dev/null -m 4 -w '%{http_code}' "http://${host}:${port}/" 2>/dev/null || true)"
+  case "$code" in
+    200|302|303|401|403) exit 0 ;;   # 401 is the normal answer: token required
+  esac
+  # fall back to a plain TCP connect (bash-only; the shebang is POSIX sh)
+  if command -v bash >/dev/null 2>&1; then
+    timeout 4 bash -c "exec 3<>/dev/tcp/${host}/${port}" 2>/dev/null && exit 0
+  fi
+done
 exit 1

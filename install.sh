@@ -374,7 +374,9 @@ ProtectHome=yes
 PrivateTmp=yes
 NoNewPrivileges=yes
 ReadWritePaths=/srv/dsh/data
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# NETLINK is not a network service: `ip route`, `hostname -I` and
+# getifaddrs() need it to discover the interface the runtime binds.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 EOF
 )"
     # ReadWritePaths must match the configured directory.
