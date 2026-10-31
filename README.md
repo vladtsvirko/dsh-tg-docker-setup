@@ -187,7 +187,7 @@ container is disposable and disappears with the container.
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.2-0.2.0
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.2-0.2.1
          DSH part          product part
 ```
 

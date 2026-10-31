@@ -149,7 +149,16 @@ async function harness({ trialSeconds = 60, bootGrace = 30, entryExit = 0 } = {}
   }
 }
 
-const starts = async (log) => (await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).length
+/**
+ * Start lines in the fake runtime's log. The file does not exist until the
+ * child has written its first line, and "child: running" is reported as soon
+ * as it is spawned — a slow runner makes that gap visible, so a missing file
+ * counts as zero starts instead of failing the test.
+ */
+const starts = async (log) => {
+  const text = await readFile(log, 'utf8').catch(() => '')
+  return text.trim().split('\n').filter(Boolean).length
+}
 
 test('boots with a stable snapshot and a running runtime', async () => {
   const test1 = await harness()
