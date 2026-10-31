@@ -55,6 +55,23 @@ option (physical console, out-of-band management, or a documented SSH key) if
 the deployment matters. The update gate reduces the chance of a bad image, but it
 cannot repair a dead bot, a dead updater, or a dead Docker daemon.
 
+## Native mode (no Docker)
+
+`install.sh --mode native` trades the container boundary for a plain systemd
+service. What changes for the operator:
+
+- the agent can read the service user's files and reach the host network;
+- there is no image, so no image rollback: a failed update restores the previous
+  tag checkout and the profile snapshot instead;
+- `/system update all` still works from Telegram (the updater runs on
+  127.0.0.1), but the updater service is root because it restarts
+  `dsh.service`;
+- `/system update connector` and the supervisor trials behave the same;
+- root is not a supported runtime user — pick `privileged` (Docker group) or a
+  VM instead.
+
+See [HOST.md](HOST.md) for the layout, tiers and switching.
+
 ## Update restrictions
 
 - `/system update all` drains **all** agents, including sessions owned by a web

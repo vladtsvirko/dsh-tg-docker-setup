@@ -1,0 +1,62 @@
+name: Native smoke
+
+# Native mode cannot be exercised from the runtime container (no systemd, no
+# root), so a real install is verified here, on demand. This job installs the
+# current checkout with install.sh, asserts both services and the web port, and
+# tears everything down. It never runs on push: it is a manual check for a
+# change that touches install.sh, update.sh or the systemd units.
+on:
+  workflow_dispatch:
+
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # update.sh and the installer resolve release tags.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install natively
+        run: sudo -E ./install.sh --config .github/native-answers.env --yes
+
+      - name: The plan is readable and idempotent
+        run: sudo -E ./install.sh --check --config .github/native-answers.env
+
+      - name: Both services are active
+        run: |
+          sudo systemctl is-active --quiet dsh.service
+          sudo systemctl is-active --quiet dsh-updater.service
+          sudo systemctl status --no-pager dsh.service
+
+      - name: The runtime answers
+        run: |
+          export DSH_PORT=4311
+          for _ in $(seq 1 30); do
+            if sudo -E /usr/local/bin/dsh-healthcheck; then echo "healthy"; exit 0; fi
+            sleep 4
+          done
+          echo "dsh did not become healthy"
+          sudo journalctl -u dsh.service --no-pager -n 80
+          exit 1
+
+      - name: The updater answers on loopback only
+        run: |
+          curl -fsS -H "Authorization: Bearer ci-updater-token" http://127.0.0.1:8787/health
+          # No public listener: the port must not be reachable on the LAN address.
+          addr="$(ip -4 route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
+          if curl -fsS -m 3 "http://${addr}:8787/health" >/dev/null 2>&1; then
+            echo "updater is reachable on ${addr} — it must stay on loopback"
+            exit 1
+          fi
+
+      - name: Clean up
+        if: always()
+        run: |
+          sudo systemctl disable --now dsh-updater.service dsh.service || true
+          sudo rm -rf /srv/dsh-ci

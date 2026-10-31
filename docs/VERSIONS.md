@@ -105,8 +105,11 @@ image rollback is a host operation (`dsh-backend:self-previous`).
 5. Bump setup `VERSION`, all `image:` tags, `Dockerfile`'s `DSH_SETUP_VERSION`
    (and `DSH_VERSION` only on a real DSH alignment), and the version examples in
    `AGENTS.md`.
-6. Run `node --test supervisor.test.mjs git-credentials.test.mjs`, `bash -n` on
-   the shell entrypoints and `docker compose config`.
+6. Run `node --test *.test.mjs`, `bash -n` on the shell entrypoints
+   (`update.sh install.sh entrypoint.sh healthcheck.sh`) and `docker compose
+   config` (host only: the runtime container has no Docker CLI).
+   Both modes ship in the same release; `install.sh` is the entry point for
+   each, and `docs/HOST.md` states what native mode costs.
 7. Commit and tag the setup. Both CI version checks must pass.
 
 Do not tag only one repository. Do not tag a commit that is not on `main`.

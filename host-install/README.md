@@ -1,9 +1,10 @@
 # DSH backend on a home server
 
-> **Chosen deployment: Docker.** See the [repository README](../README.md) —
-> one container serves the web UI *and* the Telegram bot, with the container as
-> the security boundary. This file documents the alternative host install with a
-> dedicated Unix user, kept for reference only.
+> **Superseded.** Native (no-Docker) deployments are now a supported mode:
+> `./install.sh --mode native` (systemd, tiers, the same update path from
+> Telegram). Its contract is [docs/HOST.md](../docs/HOST.md). This directory is
+> kept only as a reference for the older one-off script; it installs an
+> unrelated Telegram adapter and does not follow the release tags.
 
 Goal: one DeepSeek Harness runtime on the Ubuntu 22.04 box, reachable from two clients.
 

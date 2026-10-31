@@ -25,8 +25,11 @@ jobs:
       - name: Updater tests
         run: node --test updater.test.mjs
 
+      - name: Installer tests
+        run: node --test install.test.mjs
+
       - name: Shell syntax
-        run: bash -n entrypoint.sh healthcheck.sh update.sh host-install/setup-dsh-server.sh
+        run: bash -n entrypoint.sh healthcheck.sh update.sh install.sh host-install/setup-dsh-server.sh
 
       - name: Compose configuration
         run: cp .env.example .env && docker compose config >/dev/null

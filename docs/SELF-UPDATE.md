@@ -72,6 +72,25 @@ skipped because it is not a descendant of the current one.
    the rollback. Rollback does not require the published web port, so Telegram
    can come back even if the new web bind is broken.
 
+## Native mode (no Docker)
+
+Without Docker there is no image, so `--self` applies the same tag policy to the
+checkout:
+
+1. snapshot `data/home` + `data/supervisor`;
+2. check out the target tag;
+3. rewrite `DSH_SETUP_VERSION` in `.env`;
+4. re-run the entrypoint's prepare step as the service user (this installs the
+   connector tag derived from the new version);
+5. `systemctl restart dsh.service`, then the health gate (service active and the
+   published web port answering).
+
+A failure checks the previous tag out again, restores the snapshot and restarts.
+There is no `self-previous` image to return to. Native updates need root
+(`sudo ./update.sh --self`), or they run unchanged from the updater service:
+`/system update all` from Telegram takes this same path. See
+[HOST.md](HOST.md).
+
 ## Limits
 
 - One rollback image (`dsh-backend:self-previous`), not a history. Tag more copies

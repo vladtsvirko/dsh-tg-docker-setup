@@ -32,7 +32,28 @@ the `/data` volume expose; nothing else on the server is mounted.
 | `SECURITY.md` | Reporting, and the deployment's own rules |
 | `LICENSE` | MIT |
 | `.github/workflows/ci.yml` | Supervisor tests and shell syntax checks |
-| `host-install/` | Alternative host install (no Docker); it does not provide the no-SSH updater path |
+| `install.sh` | One-command installer for both modes: interactive, `--check` for a dry run |
+| `docs/HOST.md` | Native (no-Docker) deployment: tiers, layout, updates, switching |
+
+## Install
+
+One command, two modes — the same release, the same tag policy:
+
+```sh
+./install.sh                 # interactive: asks for the mode and the few key values
+./install.sh --check         # print the plan, change nothing
+./install.sh --mode native --yes
+```
+
+- **docker** (default) — the compose stack; the container is the security
+  boundary and the agent cannot reach the host.
+- **native** — a systemd service on this host, no Docker at all; the agent runs
+  as an unprivileged user and *can* reach the host. Tiers, layout, update
+  behaviour and how to switch modes are in [docs/HOST.md](docs/HOST.md).
+
+Both modes update from Telegram the same way (`/system update all` goes
+through the updater), and the host keeps `./update.sh --self`. Switching modes
+keeps `data/`, so the profile, sessions and workspace survive.
 
 ## Quick start
 

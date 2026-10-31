@@ -50,6 +50,12 @@ exits and Docker's restart policy brings it back with the new checkout. The
 first adoption of that layout needs one `docker compose build updater && docker
 compose up -d updater`.
 
+In **native mode** the same `updater.mjs` runs as `dsh-updater.service`, bound
+to `127.0.0.1` (no Docker socket, no `ops` network). The endpoint, the token and
+the drain behaviour are identical; only the apply path differs — the native
+branch of `update.sh` checks out the tag, prepares the profile and restarts the
+systemd service. See [HOST.md](HOST.md).
+
 The updater runs as `DSH_UID:DSH_GID` with `DSH_DOCKER_GID` added to its groups.
 It is not root, but the Docker socket makes it host-root-equivalent.
 

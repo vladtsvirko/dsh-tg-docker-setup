@@ -8,6 +8,15 @@ boundary. Treat `/data` and the bot token as the sensitive material.
 Open a private GitHub security advisory. Do not file a public issue for a working
 exploit.
 
+## Two modes
+
+`install.sh --mode docker` (the default) keeps the boundary described below.
+`install.sh --mode native` runs the same runtime under systemd as the service
+user, without Docker: the agent can then read what that user can read, and the
+updater service (root, loopback only) is the only privileged component. Native
+mode's tiers, hardening and limits are in [docs/HOST.md](docs/HOST.md). Never
+run the runtime itself as root.
+
 ## The deployment's own rules
 
 - `DSH_BIND_IP` keeps the web UI on one host interface. Never publish it on

@@ -34,8 +34,9 @@ Dockerfile:   ARG DSH_VERSION=0.2.1-rc.2
    README compatibility notes and `docs/SELF-UPDATE.md` / `docs/VERSIONS.md` if
    semantics changed. There is no `.env.example` connector pin: the official ref
    is derived.
-3. Run `node --test supervisor.test.mjs git-credentials.test.mjs`,
-   `bash -n update.sh entrypoint.sh healthcheck.sh` and `docker compose config`
+3. Run `node --test *.test.mjs` (supervisor, git-credentials, updater,
+   installer), `bash -n update.sh install.sh entrypoint.sh healthcheck.sh` and
+   `docker compose config`
    (the service requires a `.env`; use a throwaway checkout with
    `cp .env.example .env`, never overwrite a deployed one).
 4. Commit and tag the matching **connector** release first; the setup image must

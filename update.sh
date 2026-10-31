@@ -34,6 +34,158 @@ dsh_version() {
   printf '%s\n' "${v%-*}"
 }
 
+# --- deployment mode ------------------------------------------------------
+# install.sh records MODE in .env. Older deployments have no MODE and are
+# Docker; a native deploy is identified by its systemd unit.
+MODE="${DSH_MODE:-$(env_get MODE)}"
+if [ -z "$MODE" ]; then
+  if [ -f /etc/systemd/system/dsh.service ] && ! docker inspect dsh >/dev/null 2>&1; then
+    MODE=native
+  else
+    MODE=docker
+  fi
+fi
+case "$MODE" in
+  docker|native) ;;
+  *) die "MODE=$MODE in $ENV_FILE — expected docker or native" ;;
+esac
+SERVICE_USER="${SERVICE_USER:-dsh}"
+DEPLOY_DIR="$(pwd -P)"
+NATIVE_DATA="$DEPLOY_DIR/data"
+
+# Write one key into .env without touching anything else.
+set_env() {
+  local key="$1" value="$2" file="$3" tmp
+  tmp="$(mktemp)"
+  [ -f "$file" ] && grep -v "^${key}=" "$file" > "$tmp" || true
+  printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  mv "$tmp" "$file"
+}
+
+service_active() { systemctl is-active --quiet dsh.service 2>/dev/null; }
+
+wait_native_healthy() {
+  local waited=0
+  while [ "$waited" -lt "$HEALTH_TIMEOUT" ]; do
+    if service_active && web_ready; then return 0; fi
+    sleep 3; waited=$((waited + 3))
+  done
+  warn "dsh.service did not become healthy within ${HEALTH_TIMEOUT}s"
+  return 1
+}
+
+# Run a command as the unprivileged runtime user, with the deployment's env.
+# Used by `--plugin` and by the native apply path to run the entrypoint's
+# prepare step without leaving root-owned files in the profile.
+run_as_service() {
+  local -a pass=(
+    "HOME=$NATIVE_DATA/home"
+    "DSH_HOME=$NATIVE_DATA/home"
+    "DSH_WORKSPACE=$NATIVE_DATA/workspace"
+    "DSH_SUPERVISOR_STATE=$NATIVE_DATA/supervisor"
+    "DSH_SETUP_VERSION=$(setup_version)"
+  )
+  local key value
+  for key in DSH_PROVIDER DSH_MODEL DSH_PROVIDER_API_KEY_ENV OPENCODE_GO_API_KEY \
+             DEEPSEEK_API_KEY DSH_TELEGRAM_BOT_TOKEN DSH_TELEGRAM_ENABLED \
+             ALLOWED_USER_IDS DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PERMISSION_MODE; do
+    value="$(env_get "$key")"
+    [ -n "$value" ] && pass+=("$key=$value")
+  done
+  runuser -u "$SERVICE_USER" -- env "${pass[@]}" "$@"
+}
+
+native_snapshot() {
+  local stamp=$1 file
+  [ -d "$NATIVE_DATA/home" ] || return 1
+  mkdir -p "$BACKUP_DIR"
+  file="$BACKUP_DIR/self-$stamp.tgz"
+  local paths=(home)
+  [ -d "$NATIVE_DATA/supervisor" ] && paths+=(supervisor)
+  tar czf "$file" -C "$NATIVE_DATA" "${paths[@]}"
+  ls -1t "$BACKUP_DIR"/self-*.tgz 2>/dev/null | tail -n +2 | while IFS= read -r old; do rm -f "$old"; done
+  printf '%s\n' "$file"
+}
+
+native_restore() {
+  local file=$1
+  [ -f "$file" ] || return 1
+  rm -rf "$NATIVE_DATA/home" "$NATIVE_DATA/supervisor"
+  tar xzf "$file" -C "$NATIVE_DATA"
+  chown -R "$SERVICE_USER:$SERVICE_USER" "$NATIVE_DATA/home" 2>/dev/null || true
+  [ -d "$NATIVE_DATA/supervisor" ] && chown -R "$SERVICE_USER:$SERVICE_USER" "$NATIVE_DATA/supervisor" 2>/dev/null || true
+}
+
+native_rollback() {
+  local cur=$1 snapshot=$2
+  git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 \
+    || warn "could not check out $cur"
+  set_env DSH_SETUP_VERSION "${cur#v}" "$ENV_FILE"
+  chown "root:$SERVICE_USER" "$ENV_FILE" 2>/dev/null || true
+  chmod 640 "$ENV_FILE" 2>/dev/null || true
+  if [ -n "$snapshot" ]; then native_restore "$snapshot" || warn "data restore failed — the snapshot is at $snapshot"; fi
+  systemctl restart dsh.service || warn "could not restart dsh.service"
+  if wait_native_healthy; then
+    verify || warn "rolled back, but verification complained — inspect: journalctl -u dsh.service"
+    warn "rolled back to $cur; the previous setup is running"
+    return 1
+  fi
+  die "rollback failed too — $snapshot remains for recovery"
+}
+
+# Native apply: same tag policy as Docker, but the "artifact" is the checkout
+# plus the connector it installs, and the restart belongs to systemd.
+native_apply() {
+  local cur=$1 target=$2 snapshot=""
+  log "snapshotting data/home and data/supervisor"
+  if ! snapshot="$(native_snapshot "$(date +%Y%m%d-%H%M%S)")"; then
+    warn "snapshot failed; the deployment was not touched"
+    return 1
+  fi
+  log "snapshot: $snapshot"
+
+  log "checking out $target"
+  if ! git -c advice.detachedHead=false checkout --detach "$target"; then
+    warn "checkout failed; still on $cur"
+    return 1
+  fi
+  set_env DSH_SETUP_VERSION "${target#v}" "$ENV_FILE"
+  chown "root:$SERVICE_USER" "$ENV_FILE" 2>/dev/null || true
+  chmod 640 "$ENV_FILE" 2>/dev/null || true
+
+  local target_dsh
+  target_dsh="$(tag_dsh "$target")"
+  if ! command -v dsh >/dev/null 2>&1 || \
+     [ "$(dsh --version 2>/dev/null | tr -d 'v[:space:]')" != "$target_dsh" ]; then
+    log "installing @deepseek-ai/dsh@$target_dsh"
+    npm install -g --silent "@deepseek-ai/dsh@$target_dsh" \
+      || warn "could not install dsh $target_dsh — the health gate will decide"
+  fi
+
+  log "preparing the profile and the pinned connector"
+  if ! run_as_service "$DEPLOY_DIR/dsh-entrypoint" init; then
+    warn "prepare failed — rolling back to $cur"
+    native_rollback "$cur" "$snapshot"
+    return 1
+  fi
+
+  log "restarting dsh.service"
+  if ! systemctl restart dsh.service; then
+    warn "restart failed — rolling back to $cur"
+    native_rollback "$cur" "$snapshot"
+    return 1
+  fi
+
+  if ! wait_native_healthy; then
+    warn "new tag did not become healthy; rolling back to $cur"
+    native_rollback "$cur" "$snapshot"
+    return 1
+  fi
+
+  verify || warn "healthy, but verification complained — inspect: journalctl -u dsh.service"
+  log "done — $target is running (detached HEAD)"
+}
+
 container_health() {
   local state
   state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' dsh 2>/dev/null || true)"
@@ -59,6 +211,7 @@ web_ready() {
 
 wait_healthy() {
   local waited=0 state
+  if [ "$MODE" = native ]; then wait_native_healthy; return $?; fi
   while [ "$waited" -lt "$HEALTH_TIMEOUT" ]; do
     state="$(container_health)"
     case "$state" in
@@ -255,6 +408,11 @@ self_update() {
     [ "$answer" = y ] || { log "cancelled"; return 0; }
   fi
 
+  if [ "$MODE" = native ]; then
+    native_apply "$cur" "$target"
+    return $?
+  fi
+
   prev_image="$(docker inspect --format '{{.Image}}' dsh 2>/dev/null || true)"
   [ -n "$prev_image" ] || die "cannot find the running dsh container"
   docker tag "$prev_image" dsh-backend:self-previous
@@ -318,8 +476,13 @@ verify() {
     *) warn "web did not answer (code $code)"; return 1 ;;
   esac
 
-  plugin_warn="$("${COMPOSE[@]}" logs --no-log-prefix --tail 200 dsh 2>/dev/null \
-    | grep -i 'incompatible with dsh\|did not activate\|Adapter install failed' || true)"
+  if [ "$MODE" = native ]; then
+    plugin_warn="$(journalctl -u dsh.service --no-pager -n 200 2>/dev/null \
+      | grep -i 'incompatible with dsh\|did not activate\|Adapter install failed' || true)"
+  else
+    plugin_warn="$("${COMPOSE[@]}" logs --no-log-prefix --tail 200 dsh 2>/dev/null \
+      | grep -i 'incompatible with dsh\|did not activate\|Adapter install failed' || true)"
+  fi
   if [ -n "$plugin_warn" ]; then
     warn "the harness reported a plugin problem:"
     printf '%s\n' "$plugin_warn" | sed 's/^/    /'
@@ -330,23 +493,41 @@ verify() {
 }
 
 status() {
+  printf '%-22s %s\n' "mode" "$MODE"
   printf '%-22s %s\n' "setup version" "$(setup_version)"
   printf '%-22s %s\n' "dsh version" "$(dsh_version)"
-  printf '%-22s %s\n' "container" "$(container_health)"
+  if [ "$MODE" = native ]; then
+    printf '%-22s %s\n' "service" "$(systemctl is-active dsh.service 2>/dev/null || echo missing)"
+    printf '%-22s %s\n' "updater" "$(systemctl is-active dsh-updater.service 2>/dev/null || echo missing)"
+  else
+    printf '%-22s %s\n' "container" "$(container_health)"
+  fi
   printf '%-22s %s\n' "web" "$(web_code)"
-  printf '%-22s %s\n' "telegram adapter" "$(
-    "${COMPOSE[@]}" exec -T dsh node -p "require('/data/home/profiles/web/node_modules/dsh-telegram/package.json').version" 2>/dev/null || echo 'not installed'
-  )"
+  if [ "$MODE" = native ]; then
+    printf '%-22s %s\n' "telegram adapter" "$(
+      node -p "require('$NATIVE_DATA/home/profiles/web/node_modules/dsh-telegram-connector/package.json').version" 2>/dev/null || echo 'not installed'
+    )"
+  else
+    printf '%-22s %s\n' "telegram adapter" "$(
+      "${COMPOSE[@]}" exec -T dsh node -p "require('/data/home/profiles/web/node_modules/dsh-telegram-connector/package.json').version" 2>/dev/null || echo 'not installed'
+    )"
+  fi
 }
 
 case "${1:---status}" in
   --status)   status ;;
   --plugin)
     log "re-resolving the Telegram adapter"
-    "${COMPOSE[@]}" run --rm dsh reset-plugin
-    log "restarting"
-    "${COMPOSE[@]}" up -d dsh
-    wait_healthy && verify
+    if [ "$MODE" = native ]; then
+      run_as_service "$DEPLOY_DIR/dsh-entrypoint" reset-plugin
+      systemctl restart dsh.service
+      wait_native_healthy && verify
+    else
+      "${COMPOSE[@]}" run --rm dsh reset-plugin
+      log "restarting"
+      "${COMPOSE[@]}" up -d dsh
+      wait_healthy && verify
+    fi
     ;;
   --self-check)
     if [ "${2:-}" = "--i-know-versions-are-incompatible" ]; then self_check 1
