@@ -65,6 +65,7 @@ files behind.
 ./install.sh --check         # print the plan, change nothing
 ./install.sh --mode native --yes
 ./install.sh --config answers.env   # MODE, DIR, DSH_PORT, tokens, ...
+./install.sh --ref <git ref>        # install a specific ref (default: the release tag)
 ```
 
 The installer is idempotent: re-running repairs the units, the symlinks and the

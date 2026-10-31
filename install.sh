@@ -25,7 +25,7 @@ SRC_DIR="$(pwd -P)"
 SETUP_VERSION="$(tr -d '\n' < "$SRC_DIR/VERSION")"
 DSH_VERSION="$(printf '%s' "$SETUP_VERSION" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+$//')"
 
-MODE="" TIER="" DIR="" CONFIG="" CHECK=0 YES=0
+MODE="" TIER="" DIR="" CONFIG="" REF="" CHECK=0 YES=0
 SERVICE_USER="${SERVICE_USER:-dsh}"
 DSH_PORT="${DSH_PORT:-}"
 DSH_BIND_IP="${DSH_BIND_IP:-}"
@@ -54,6 +54,7 @@ Options:
   --tier sandbox|privileged
                          native only: sandbox (default) or add the docker group
   --dir PATH             deployment directory (default: this checkout / /srv/dsh)
+  --ref REF              git ref for the native checkout (default: v<VERSION>)
   --config FILE          read answers from FILE (KEY=VALUE, no shell)
   --yes, -y              accept defaults, never prompt
   --check                print the plan and change nothing
@@ -99,6 +100,8 @@ while [ $# -gt 0 ]; do
     --mode=*) MODE="${1#*=}"; shift ;;
     --tier)   TIER="${2:?--tier needs a value}"; shift 2 ;;
     --tier=*) TIER="${1#*=}"; shift ;;
+    --ref)    REF="${2:?--ref needs a value}"; shift 2 ;;
+    --ref=*)  REF="${1#*=}"; shift ;;
     --dir)    DIR="${2:?--dir needs a value}"; shift 2 ;;
     --dir=*)  DIR="${1#*=}"; shift ;;
     --config) shift 2 ;;
@@ -233,6 +236,7 @@ UPDATER_URL_DOCKER="http://updater:8787"
 UPDATER_URL="$UPDATER_URL_NATIVE"
 [ "$MODE" = docker ] && UPDATER_URL="$UPDATER_URL_DOCKER"
 
+[ -n "$REF" ] || REF="v$SETUP_VERSION"
 [ "$MODE" = native ] && [ "$CHECK" != 1 ] && [ "$(id -u)" != 0 ] \
   && die "native mode installs a systemd service — run with sudo"
 
@@ -295,7 +299,8 @@ write_env() {
 }
 
 wait_health() {
-  local timeout="${1:-180}" deadline=$((SECONDS + timeout)) i
+  local timeout="${1:-180}"
+  local deadline=$((SECONDS + timeout)) i
   for ((i = 0; i < timeout; i += 2)); do
     if DSH_PORT="$DSH_PORT" "$SRC_DIR/healthcheck.sh" >/dev/null 2>&1; then return 0; fi
     [ "$SECONDS" -ge "$deadline" ] && break
@@ -474,8 +479,8 @@ native_apply() {
     run git -C "$DIR" remote add origin "$SRC_DIR"
     run git -C "$DIR" fetch --quiet --tags origin
   fi
-  run git -C "$DIR" checkout --quiet --detach "v$SETUP_VERSION" || \
-    warn "could not check out v$SETUP_VERSION in $DIR; staying on the current HEAD"
+  run git -C "$DIR" checkout --quiet --detach "$REF" || \
+    warn "could not check out $REF in $DIR; staying on the current HEAD"
 
   link_bins
 

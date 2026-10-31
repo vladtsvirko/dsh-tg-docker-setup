@@ -23,7 +23,8 @@ jobs:
           node-version: 24
 
       - name: Install natively
-        run: sudo -E ./install.sh --config .github/native-answers.env --yes
+        # --ref HEAD: smoke-test the working tree, not the previous release tag.
+        run: sudo -E ./install.sh --config .github/native-answers.env --yes --ref "$(git rev-parse HEAD)"
 
       - name: The plan is readable and idempotent
         run: sudo -E ./install.sh --check --config .github/native-answers.env
