@@ -14,12 +14,12 @@ repository.
 
 ```
 <dsh-version>-<major>.<minor>.<patch>          tag: v<same>
-v0.2.1-rc.2-0.1.14
+v0.2.1-rc.2-0.1.15
 ```
 
 - **DSH part** (`0.2.1-rc.2`) is the exact DSH release the pair was built and
   tested against. Prerelease suffixes are part of the version.
-- **Product part** (`0.1.14`) is ours.
+- **Product part** (`0.1.15`) is ours.
   - It resets to `0.0.0` when the pair aligns to a new DSH line.
   - `0.x` is the compatible line. A patch is a fix, a minor is a compatible
     feature, and `1.0.0` (or any new major) marks an incompatible change.
