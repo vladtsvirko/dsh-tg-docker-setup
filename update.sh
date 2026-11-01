@@ -514,8 +514,138 @@ status() {
   fi
 }
 
+# --- components ------------------------------------------------------------
+# Optional stacks registered in components.json (the design stack today). The
+# updater calls this with a validated name, action and config, so the shell does
+# the mechanics and the registry stays the single source of truth.
+
+component_field() {
+  local name=$1 expr=$2
+  node -e '
+    const [name, expr] = process.argv.slice(1)
+    const c = require("./components.json").components[name]
+    if (!c) process.exit(2)
+    const value = expr.split(".").reduce((o, k) => (o == null ? o : o[k]), c)
+    process.stdout.write(value == null ? "" : String(value))
+  ' "$name" "$expr"
+}
+
+component_names() {
+  node -e 'process.stdout.write(Object.keys(require("./components.json").components).join(" "))'
+}
+
+restart_runtime() {
+  if [ "$MODE" = native ]; then
+    systemctl restart dsh.service
+  else
+    "${COMPOSE[@]}" restart dsh
+  fi
+}
+
+component_health() {
+  local url=$1 codes=$2 waited=0 code
+  while [ "$waited" -lt 300 ]; do
+    code="$(curl -s -o /dev/null -m 4 -w '%{http_code}' "$url" 2>/dev/null || true)"
+    case " $codes " in *" $code "*) return 0 ;; esac
+    sleep 5; waited=$((waited + 5))
+  done
+  return 1
+}
+
+component_apply() {
+  local name=$1 action=$2 port=${3:-}
+  local names
+  names="$(component_names 2>/dev/null || true)"
+  case " $names " in
+    *" $name "*) ;;
+    *) die "unknown component: $name (known: ${names:-none})" ;;
+  esac
+  case "$action" in enable|disable|configure) ;; *) die "unknown action: $action" ;; esac
+
+  local compose_dir env_file template flag
+  compose_dir="$(component_field "$name" projectDir)"
+  env_file="$(component_field "$name" envFile)"
+  template="$(component_field "$name" template)"
+  flag="$(component_field "$name" flag)"
+  [ -n "$compose_dir" ] && [ -n "$env_file" ] || die "components.json entry for $name is incomplete"
+
+  if [ -n "$port" ]; then
+    case "$port" in ''|*[!0-9]*) die "port must be a number" ;; esac
+    [ "$port" -ge 1024 ] && [ "$port" -le 65535 ] || die "port must be between 1024 and 65535"
+  fi
+
+  if [ ! -f "$env_file" ]; then
+    [ "$action" = disable ] && { log "$name is not installed; nothing to disable"; return 0; }
+    [ -f "$template" ] || die "no $env_file and no $template to create it from"
+    mkdir -p "$compose_dir"
+    cp "$template" "$env_file"
+    set_env PENPOT_DB_PASSWORD "$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')" "$env_file"
+    set_env PENPOT_SECRET_KEY "$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')" "$env_file"
+    chmod 600 "$env_file"
+  fi
+
+  local bind port_default
+  bind="$(env_get DSH_BIND_IP)"; [ -n "$bind" ] || bind=127.0.0.1
+  port_default="$(component_field "$name" config.port.default)"
+  [ -n "$port" ] || port="$(sed -n "s/^$(component_field "$name" config.port.env)=//p" "$env_file" | head -1)"
+  [ -n "$port" ] || port="$port_default"
+
+  local port_key
+  port_key="$(component_field "$name" config.port.env)"
+  set_env DSH_BIND_IP "$bind" "$env_file"
+  if [ -n "$port_key" ]; then set_env "$port_key" "$port" "$env_file"; fi
+
+  case "$action" in
+    enable|configure)
+      log "starting $name on $bind:$port"
+      docker compose --project-directory "$compose_dir" -f "$compose_dir/$(basename "$(component_field "$name" compose)")" up -d || die "docker compose failed for $name"
+      set_env "$flag" 1 "$ENV_FILE"
+      local mcp_url
+      mcp_url="$(node -e '
+        const [name, mode] = process.argv.slice(1)
+        const c = require("./components.json").components[name]
+        const url = c.mcp.url[mode] ?? c.mcp.url.docker
+        process.stdout.write(url.replace("{port}", String(c.mcp.port)))
+      ' "$name" "$MODE")"
+      set_env DSH_DESIGN_MCP_URL "$mcp_url" "$ENV_FILE"
+      log "restarting the runtime so the tools appear"
+      restart_runtime || warn "could not restart the runtime"
+      ;;
+    disable)
+      log "stopping $name (data stays in $compose_dir/data)"
+      docker compose --project-directory "$compose_dir" -f "$compose_dir/$(basename "$(component_field "$name" compose)")" down || warn "docker compose down failed"
+      set_env "$flag" 0 "$ENV_FILE"
+      log "restarting the runtime so the tools disappear"
+      restart_runtime || warn "could not restart the runtime"
+      ;;
+  esac
+
+  local codes
+  codes="$(component_field "$name" health.codes | tr ',' ' ')"
+  if [ "$action" != disable ]; then
+    if ! component_health "$(printf '%s' "$(component_field "$name" health.url)" | sed -e "s/{bind}/$bind/" -e "s/{port}/$port/")" "${codes:-200}"; then
+      warn "$name did not answer within 5 minutes"
+      return 1
+    fi
+    log "$name is up"
+  fi
+}
+
 case "${1:---status}" in
   --status)   status ;;
+  --component)
+    comp_name="${2:-}"; comp_action="${3:-enable}"; comp_port=""
+    [ -n "$comp_name" ] || die "usage: ./update.sh --component <name> <enable|disable|configure> [--port N]"
+    shift 2 || true
+    [ $# -gt 0 ] && shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --port) comp_port="${2:-}"; shift 2 ;;
+        *) die "unknown option for --component: $1" ;;
+      esac
+    done
+    component_apply "$comp_name" "$comp_action" "$comp_port"
+    ;;
   --plugin)
     log "re-resolving the Telegram adapter"
     if [ "$MODE" = native ]; then

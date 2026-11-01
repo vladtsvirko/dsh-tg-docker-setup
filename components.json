@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "components": {
+    "design": {
+      "label": "Design (Penpot)",
+      "description": "Penpot and the headless MCP bridge",
+      "compose": "design/compose.yaml",
+      "projectDir": "design",
+      "envFile": "design/.env",
+      "template": "design/.env.example",
+      "flag": "DSH_DESIGN_ENABLED",
+      "health": {
+        "url": "http://{bind}:{port}/",
+        "codes": [200, 302, 303, 304]
+      },
+      "mcp": {
+        "port": 4401,
+        "url": {
+          "docker": "http://host.docker.internal:4401/mcp",
+          "native": "http://127.0.0.1:4401/mcp"
+        }
+      },
+      "config": {
+        "port": {
+          "label": "Penpot port",
+          "env": "DSH_DESIGN_PORT",
+          "default": 8090,
+          "min": 1024,
+          "max": 65535
+        }
+      }
+    }
+  }
+}

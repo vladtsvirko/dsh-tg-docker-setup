@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -115,5 +115,76 @@ test('an empty token disables updates', async () => {
     assert.equal((await fetch(`${base}/update`, { method: 'POST', body: '{}' })).status, 503)
   } finally {
     server.close()
+  }
+})
+
+test('components: catalog, validation and a fixed apply command', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'updater-components-'))
+  const logFile = join(dir, 'component.log')
+  try {
+    await writeFile(join(dir, 'components.json'), JSON.stringify({
+      version: 1,
+      components: {
+        design: {
+          label: 'Design (Penpot)',
+          description: 'Penpot',
+          compose: 'design/compose.yaml',
+          projectDir: 'design',
+          envFile: 'design/.env',
+          template: 'design/.env.example',
+          flag: 'DSH_DESIGN_ENABLED',
+          config: { port: { env: 'DSH_DESIGN_PORT', default: 8090, min: 1024, max: 65535 } },
+          mcp: { port: 4401, url: { docker: 'http://h:{port}/mcp', native: 'http://127.0.0.1:{port}/mcp' } },
+          health: { url: 'http://{bind}:{port}/', codes: [200] },
+        },
+      },
+    }))
+    await writeFile(join(dir, '.env'), 'DSH_DESIGN_ENABLED=0\nDSH_DESIGN_PORT=8090\n')
+    await writeFile(join(dir, 'update.sh'), '#!/bin/sh\necho "$*" > "$PWD/component.log"\nexit 0\n', { mode: 0o755 })
+
+    const app = createUpdater({ repo: dir, token: 'secret', apply: true, tags: async () => tags, current: async () => current })
+    const { server, base } = await start(app)
+    try {
+      assert.equal((await fetch(`${base}/components`)).status, 401)
+      const catalog = await fetch(`${base}/components`, { headers: { authorization: 'Bearer secret' } })
+      assert.equal(catalog.status, 200)
+      const { components } = await catalog.json()
+      assert.equal(components.length, 1)
+      assert.equal(components[0].name, 'design')
+      assert.equal(components[0].enabled, false)
+      assert.equal(components[0].port, 8090)
+
+      const post = (body) => fetch(`${base}/components`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer secret' },
+        body: JSON.stringify(body),
+      })
+
+      assert.equal((await post({ name: 'nope', action: 'enable' })).status, 422)
+      assert.equal((await post({ name: 'design', action: 'explode' })).status, 400)
+      assert.equal((await post({ name: 'design', action: 'enable', port: 80 })).status, 400)
+
+      const accepted = await post({ name: 'design', action: 'enable', port: 8091 })
+      assert.equal(accepted.status, 202)
+      const body = await accepted.json()
+      assert.equal(body.component, 'design')
+      assert.equal(body.action, 'enable')
+
+      let ran = ''
+      for (let i = 0; i < 50 && ran.length === 0; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        ran = await readFile(logFile, 'utf8').catch(() => '')
+      }
+      assert.match(ran, /^--component design enable --port 8091/m)
+
+      const status = await fetch(`${base}/status`, { headers: { authorization: 'Bearer secret' } })
+      const job = (await status.json()).job
+      assert.equal(job.state, 'done')
+      assert.equal(job.component, 'design')
+    } finally {
+      server.close()
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
   }
 })

@@ -250,3 +250,40 @@ test('an unknown design value is refused', async () => {
   assert.notEqual(code, 0)
   assert.match(out, /--design must be none or docker/)
 })
+
+// --- component actions, validation only (Docker does the rest) -------------
+
+test('update.sh --component validates the registry, the action and the port', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'update-component-'))
+  try {
+    await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
+    await cp(join(here, 'components.json'), join(dir, 'components.json'))
+    await mkdir(join(dir, 'design'), { recursive: true })
+    await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
+    await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.3.1\n')
+    await writeFile(join(dir, '.env'), 'MODE=docker\nDSH_BIND_IP=127.0.0.1\n')
+
+    const run = async (args) => {
+      try {
+        const { stdout, stderr } = await exec('bash', [join(dir, 'update.sh'), ...args], { timeout: 20000 })
+        return { code: 0, out: stdout + stderr }
+      } catch (error) {
+        return { code: error.code ?? 1, out: String(error.stdout ?? '') + String(error.stderr ?? '') }
+      }
+    }
+
+    const unknown = await run(['--component', 'nope', 'enable'])
+    assert.notEqual(unknown.code, 0)
+    assert.match(unknown.out, /unknown component: nope/)
+
+    const badAction = await run(['--component', 'design', 'explode'])
+    assert.notEqual(badAction.code, 0)
+    assert.match(badAction.out, /unknown action: explode/)
+
+    const badPort = await run(['--component', 'design', 'enable', '--port', '80'])
+    assert.notEqual(badPort.code, 0)
+    assert.match(badPort.out, /port must be between 1024 and 65535/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

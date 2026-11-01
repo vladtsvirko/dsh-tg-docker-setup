@@ -78,6 +78,8 @@ Authorization: Bearer <DSH_UPDATER_TOKEN>
 POST /target   {mode} -> 200 {from, target}   (resolve without applying)
 GET  /health   {ok, tag, canApply}
 GET  /status   {job: {id, state, from, target, exitCode?, logTail?}}
+GET  /components                      [{name,label,enabled,port}]
+POST /components {name,action,port?}   enable|disable|configure -> 202 {job}
 ```
 
 There is no result-polling requirement for the connector: the updater reports

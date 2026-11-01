@@ -240,6 +240,68 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
     if (reachedStop) reload()
   }
 
+  const readComponents = async () => {
+    try {
+      const parsed = JSON.parse(await readFile(join(repo, 'components.json'), 'utf8'))
+      return parsed.components ?? {}
+    } catch {
+      return {}
+    }
+  }
+
+  const readFlag = async (flag) => {
+    if (typeof flag !== 'string' || flag.length === 0) return undefined
+    try {
+      const text = await readFile(join(repo, '.env'), 'utf8')
+      const match = new RegExp('^' + flag + '=([^\\n]*)', 'm').exec(text)
+      return match?.[1]?.trim()
+    } catch {
+      return undefined
+    }
+  }
+
+  const componentPort = async (component) => {
+    const key = component?.config?.port?.env
+    if (typeof key !== 'string' || key.length === 0) return undefined
+    const value = await readFlag(key)
+    const port = Number(value ?? component.config.port.default)
+    return Number.isInteger(port) ? port : undefined
+  }
+
+  const runComponent = async (job) => {
+    job.state = 'applying'
+    const args = ['update.sh', '--component', job.component, job.action]
+    if (job.port !== undefined) args.push('--port', String(job.port))
+    let output = ''
+    let child
+    try {
+      child = spawn('bash', args, { cwd: repo, env: { ...process.env, PWD: repo, ASSUME_YES: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch (error) {
+      job.state = 'failed'
+      job.error = error instanceof Error ? error.message : String(error)
+      await report(`component ${job.component}: ${job.action} failed before starting`)
+      return
+    }
+    const capture = (chunk) => { output = (output + chunk.toString()).slice(-8000) }
+    child.stdout.on('data', capture)
+    child.stderr.on('data', capture)
+    const code = await new Promise((resolve) => {
+      child.on('error', () => resolve(-1))
+      child.on('close', (value) => resolve(value ?? -1))
+    })
+    const stripped = stripAnsi(output)
+    const safe = botToken.length > 0 ? stripped.replaceAll(botToken, '<redacted>') : stripped
+    const tail = safe.split('\n').filter((line) => line.trim().length > 0).slice(-12).join('\n')
+    job.exitCode = code
+    job.logTail = tail
+    job.state = code === 0 ? 'done' : 'failed'
+    const label = job.port === undefined ? job.action : `${job.action} (port ${job.port})`
+    const ok = await report(job.state === 'done'
+      ? `component ${job.component}: ${label} — done.`
+      : `component ${job.component}: ${label} failed (exit ${code}).\n\n${tail}`)
+    job.reported = ok
+  }
+
   const handler = async (request, response) => {
     const path = new URL(request.url ?? '/', 'http://updater').pathname
     try {
@@ -300,6 +362,64 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
         console.log(`updater: accepted ${from} → ${target} (${String(body.mode ?? 'compatible')})`)
         json(response, 202, { job: job.id, from, target })
         if (apply) setTimeout(() => void runApply(job), 100)
+        return undefined
+      }
+      if (path === '/components' && request.method === 'GET') {
+        if (token.length === 0) return json(response, 503, { error: 'updater is disabled' })
+        if (!authorized(request.headers.authorization, token)) return json(response, 401, { error: 'unauthorized' })
+        const catalog = await readComponents()
+        const components = []
+        for (const [name, component] of Object.entries(catalog)) {
+          components.push({
+            name,
+            label: component.label ?? name,
+            description: component.description ?? '',
+            enabled: (await readFlag(component.flag)) === '1',
+            port: await componentPort(component),
+          })
+        }
+        return json(response, 200, { components })
+      }
+      if (path === '/components' && request.method === 'POST') {
+        if (token.length === 0) return json(response, 503, { error: 'updater is disabled (DSH_UPDATER_TOKEN is empty)' })
+        if (!authorized(request.headers.authorization, token)) return json(response, 401, { error: 'unauthorized' })
+        if (state.job !== null && state.job.state !== 'done' && state.job.state !== 'failed' && state.job.state !== 'rolled-back') {
+          return json(response, 409, { error: 'another update or component change is running' })
+        }
+        const raw = await readBody(request)
+        let body
+        try {
+          body = raw.length === 0 ? {} : JSON.parse(raw)
+        } catch {
+          throw new UpdateError(400, 'body must be JSON')
+        }
+        const name = typeof body.name === 'string' ? body.name : ''
+        const action = typeof body.action === 'string' ? body.action : 'enable'
+        if (!['enable', 'disable', 'configure'].includes(action)) throw new UpdateError(400, `unknown action ${action}`)
+        const catalog = await readComponents()
+        const component = catalog[name]
+        if (component === undefined) throw new UpdateError(422, `unknown component ${name}`)
+        let port
+        if (body.port !== undefined) {
+          port = Number(body.port)
+          const spec = component.config?.port
+          if (spec === undefined) throw new UpdateError(400, `${name} has no configurable port`)
+          if (!Number.isInteger(port) || port < (spec.min ?? 1024) || port > (spec.max ?? 65535)) {
+            throw new UpdateError(400, `port must be an integer between ${spec.min ?? 1024} and ${spec.max ?? 65535}`)
+          }
+        }
+        state.job = {
+          id: randomUUID(),
+          state: 'accepted',
+          component: name,
+          action,
+          ...(port === undefined ? {} : { port }),
+          startedAt: new Date(now()).toISOString(),
+        }
+        const job = state.job
+        console.log(`updater: component ${name} ${action}${port === undefined ? '' : ` port=${port}`}`)
+        json(response, 202, { job: job.id, component: name, action, ...(port === undefined ? {} : { port }) })
+        if (apply) setTimeout(() => void runComponent(job), 100)
         return undefined
       }
       if (path === '/status' && request.method === 'GET') {
