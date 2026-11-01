@@ -126,7 +126,7 @@ const readBody = (request) => new Promise((resolve, reject) => {
  * Build the request handler. The git readers are injectable so tests do not
  * need a repository; `apply` is intentionally absent in slice 1.
  */
-export function createUpdater({ repo, dataDir, botToken = '', token = '', apply = false, refreshTags = async () => {}, tags = () => listTags(repo), current = () => currentTag(repo), now = Date.now }) {
+export function createUpdater({ repo, dataDir, botToken = '', token = '', apply = false, refreshTags = async () => {}, tags = () => listTags(repo), current = () => currentTag(repo), now = Date.now, exit = (code) => process.exit(code) }) {
   const state = { job: null }
 
   const report = async (text) => {
@@ -173,7 +173,7 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
     // build failure before the stop must keep the current process for /status.
     setTimeout(() => {
       console.log('updater: exiting to reload the checkout')
-      process.exit(0)
+      exit(0)
     }, 1000)
   }
 

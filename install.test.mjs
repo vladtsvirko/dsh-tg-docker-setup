@@ -287,3 +287,56 @@ test('update.sh --component validates the registry, the action and the port', as
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+// --- component apply, with Docker stubbed ---------------------------------
+
+test('update.sh --component enable starts the stack, wires the runtime and restarts', async () => {
+  const outer = await mkdtemp(join(tmpdir(), 'component-apply-'))
+  const dir = join(outer, 'repo')
+  const bins = join(outer, 'bin')
+  const calls = join(outer, 'docker.log')
+  await mkdir(dir, { recursive: true })
+  if (!(await canExec(outer))) {
+    await rm(outer, { recursive: true, force: true })
+    return
+  }
+  try {
+    await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
+    await cp(join(here, 'components.json'), join(dir, 'components.json'))
+    await mkdir(join(dir, 'design'), { recursive: true })
+    await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
+    await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.4.0\n')
+    await writeFile(join(dir, '.env'), 'MODE=docker\nDSH_BIND_IP=127.0.0.1\n')
+
+    await mkdir(bins, { recursive: true })
+    await stub(bins, 'docker', `echo "docker $*" >> ${calls}; exit 0`)
+    await stub(bins, 'curl', 'printf 200')
+    await stub(bins, 'systemctl', 'exit 0')
+
+    const run = (args) => exec('bash', [join(dir, 'update.sh'), ...args], {
+      env: { ...process.env, PATH: `${bins}:${process.env.PATH}` },
+      timeout: 30000,
+    })
+
+    await run(['--component', 'design', 'enable', '--port', '8091'])
+    const designEnv = await readFile(join(dir, 'design', '.env'), 'utf8')
+    const mainEnv = await readFile(join(dir, '.env'), 'utf8')
+    const log = await readFile(calls, 'utf8')
+
+    assert.match(designEnv, /DSH_DESIGN_PORT=8091/)
+    assert.match(designEnv, /DSH_BIND_IP=127\.0\.0\.1/)
+    assert.doesNotMatch(designEnv, /PENPOT_SECRET_KEY=change-me/)
+    assert.match(mainEnv, /DSH_DESIGN_ENABLED=1/)
+    assert.match(mainEnv, /DSH_DESIGN_MCP_URL=http:\/\/host\.docker\.internal:4401\/mcp/)
+    assert.match(log, /compose --project-directory design -f design\/compose\.yaml up -d/)
+    assert.match(log, /compose restart dsh/)
+
+    await run(['--component', 'design', 'disable'])
+    const after = await readFile(join(dir, '.env'), 'utf8')
+    const log2 = await readFile(calls, 'utf8')
+    assert.match(after, /DSH_DESIGN_ENABLED=0/)
+    assert.match(log2, /compose --project-directory design -f design\/compose\.yaml down/)
+  } finally {
+    await rm(outer, { recursive: true, force: true })
+  }
+})

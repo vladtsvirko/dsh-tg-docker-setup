@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { test } from 'node:test'
 import { createUpdater, parseTag, resolveTarget, UpdateError } from './updater.mjs'
+
+const exec = promisify(execFile)
 
 const tags = [
   'v0.2.1-rc.2-0.0.1',
@@ -87,7 +91,7 @@ test('apply runs update.sh and records the result', async () => {
   const repo = await mkdtemp(join(tmpdir(), 'updater-apply-'))
   try {
     await writeFile(join(repo, 'update.sh'), '#!/usr/bin/env bash\necho building dsh\nsleep 0.2\necho stopping dsh\necho starting dsh\nexit 0\n')
-    const app = createUpdater({ repo, token: 'secret', apply: true, tags: async () => tags, current: async () => current })
+    const app = createUpdater({ repo, token: 'secret', apply: true, tags: async () => tags, current: async () => current, exit: () => {} })
     const { server, base } = await start(app)
     try {
       const accepted = await fetch(`${base}/update`, {
@@ -186,5 +190,68 @@ test('components: catalog, validation and a fixed apply command', async () => {
     }
   } finally {
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('components: the endpoint runs the real update.sh and wires the runtime', async (t) => {
+  const outer = await mkdtemp(join(tmpdir(), 'updater-component-e2e-'))
+  const repo = join(outer, 'repo')
+  const bins = join(outer, 'bin')
+  await mkdir(repo, { recursive: true })
+  const probe = join(outer, '.probe')
+  await writeFile(probe, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+  try {
+    await exec(probe)
+  } catch {
+    t.skip('temp directory is noexec (run with TMPDIR on an exec-capable filesystem)')
+    await rm(outer, { recursive: true, force: true })
+    return
+  }
+
+  const originalPath = process.env.PATH
+  try {
+    await copyFile(new URL('./update.sh', import.meta.url), join(repo, 'update.sh'))
+    await copyFile(new URL('./components.json', import.meta.url), join(repo, 'components.json'))
+    await mkdir(join(repo, 'design'), { recursive: true })
+    await copyFile(new URL('./design/.env.example', import.meta.url), join(repo, 'design', '.env.example'))
+    await writeFile(join(repo, 'VERSION'), '0.2.1-rc.2-0.4.0\n')
+    await writeFile(join(repo, '.env'), 'MODE=docker\nDSH_BIND_IP=127.0.0.1\n')
+
+    await mkdir(bins, { recursive: true })
+    await writeFile(join(bins, 'docker'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    await writeFile(join(bins, 'curl'), '#!/bin/sh\nprintf 200\n', { mode: 0o755 })
+    await writeFile(join(bins, 'systemctl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    process.env.PATH = `${bins}:${originalPath}`
+
+    const app = createUpdater({ repo, token: 'secret', apply: true, tags: async () => tags, current: async () => current })
+    const { server, base } = await start(app)
+    try {
+      const accepted = await fetch(`${base}/components`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer secret' },
+        body: JSON.stringify({ name: 'design', action: 'enable', port: 8092 }),
+      })
+      assert.equal(accepted.status, 202)
+
+      let job
+      for (let i = 0; i < 100; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        const status = await fetch(`${base}/status`, { headers: { authorization: 'Bearer secret' } })
+        job = (await status.json()).job
+        if (job?.state === 'done' || job?.state === 'failed') break
+      }
+      assert.equal(job?.state, 'done', `job state: ${job?.state}\n${job?.logTail ?? ''}`)
+
+      const mainEnv = await readFile(join(repo, '.env'), 'utf8')
+      const designEnv = await readFile(join(repo, 'design', '.env'), 'utf8')
+      assert.match(mainEnv, /DSH_DESIGN_ENABLED=1/)
+      assert.match(mainEnv, /DSH_DESIGN_MCP_URL=http:\/\/host\.docker\.internal:4401\/mcp/)
+      assert.match(designEnv, /DSH_DESIGN_PORT=8092/)
+    } finally {
+      server.close()
+    }
+  } finally {
+    process.env.PATH = originalPath
+    await rm(outer, { recursive: true, force: true })
   }
 })
