@@ -32,7 +32,9 @@ jobs:
         run: bash -n entrypoint.sh healthcheck.sh update.sh install.sh host-install/setup-dsh-server.sh
 
       - name: Compose configuration
-        run: cp .env.example .env && docker compose config >/dev/null
+        run: |
+          cp .env.example .env && docker compose config >/dev/null
+          cp design/.env.example design/.env && docker compose --project-directory design -f design/compose.yaml config >/dev/null
 
       - name: Validate release tag
         run: node scripts/check-version.mjs

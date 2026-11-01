@@ -234,3 +234,19 @@ test('update.sh --self-to applies natively: checkout, env, restart, health gate'
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('the design stack is opt-in and named in the plan', async () => {
+  const off = await install(['--check', '--yes'])
+  assert.match(off.out, /design:\s+none \(re-run with --design docker to add it later\)/)
+
+  const on = await install(['--check', '--design', 'docker', '--yes'])
+  assert.equal(on.code, 0)
+  assert.match(on.out, /design:\s+Penpot on http:\/\/\S+:8090\//)
+  assert.match(on.out, /MCP on 127\.0\.0\.1:4401/)
+})
+
+test('an unknown design value is refused', async () => {
+  const { code, out } = await install(['--check', '--design', 'maybe', '--yes'])
+  assert.notEqual(code, 0)
+  assert.match(out, /--design must be none or docker/)
+})

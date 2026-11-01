@@ -1,0 +1,106 @@
+# Optional design stack: Penpot + a headless MCP server.
+#
+# Started by install.sh --design docker (or by re-running install.sh later).
+# It is a separate compose project on purpose: it has its own lifecycle, its own
+# data, and it can be removed without touching the runtime.
+#
+#   docker compose --project-directory design -f design/compose.yaml up -d
+#
+# Everything is LAN-only: the frontend is published on DSH_BIND_IP and the MCP
+# server on loopback, where the runtime reaches it through host.docker.internal.
+name: dsh-design
+
+x-penpot: &penpot
+  PENPOT_PUBLIC_URI: http://${DSH_BIND_IP:-127.0.0.1}:${DSH_DESIGN_PORT:-8090}
+  PENPOT_DATABASE_URI: postgresql://penpot:${PENPOT_DB_PASSWORD:?set PENPOT_DB_PASSWORD}@design-postgres:5432/penpot
+  PENPOT_REDIS_URI: redis://design-redis:6379/0
+  PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY:?set PENPOT_SECRET_KEY}
+  # Registration is on so the first account can be created; email verification is
+  # off because a LAN instance has no SMTP. Access tokens are what the MCP server
+  # authenticates with.
+  PENPOT_FLAGS: >-
+    enable-registration
+    enable-login-with-password
+    disable-email-verification
+    enable-access-tokens
+  PENPOT_TELEMETRY_ENABLED: "false"
+
+services:
+  design-postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_INITDB_ARGS: --data-checksums
+      POSTGRES_DB: penpot
+      POSTGRES_USER: penpot
+      POSTGRES_PASSWORD: ${PENPOT_DB_PASSWORD:?set PENPOT_DB_PASSWORD}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks: [design]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U penpot -d penpot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  design-redis:
+    image: redis:7.2
+    restart: unless-stopped
+    networks: [design]
+
+  design-backend:
+    image: penpotapp/backend:2.18
+    restart: unless-stopped
+    depends_on:
+      design-postgres:
+        condition: service_healthy
+      design-redis:
+        condition: service_started
+    environment:
+      <<: *penpot
+      PENPOT_ASSETS_STORAGE_BACKEND: assets-fs
+      PENPOT_STORAGE_ASSETS_FS_DIRECTORY: /opt/data/assets
+    volumes:
+      - ./data/assets:/opt/data/assets
+    networks: [design]
+
+  design-exporter:
+    image: penpotapp/exporter:2.18
+    restart: unless-stopped
+    depends_on: [design-redis]
+    environment:
+      PENPOT_PUBLIC_URI: http://design-frontend:8080
+      PENPOT_REDIS_URI: redis://design-redis:6379/0
+      PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY:?set PENPOT_SECRET_KEY}
+      PENPOT_BROWSER_CHROMIUM: "true"
+      PENPOT_BROWSER_HEADLESS: "true"
+    networks: [design]
+
+  design-frontend:
+    image: penpotapp/frontend:2.18
+    restart: unless-stopped
+    depends_on: [design-backend, design-exporter]
+    environment:
+      <<: *penpot
+    ports:
+      # LAN-only. Never 0.0.0.0: the instance has real accounts.
+      - "${DSH_BIND_IP:-127.0.0.1}:${DSH_DESIGN_PORT:-8090}:8080"
+    networks: [design]
+
+  # Headless bridge: talks to Penpot over its HTTP API, so the agent needs no
+  # browser tab. The runtime reaches it on loopback via host.docker.internal.
+  design-mcp:
+    image: ghcr.io/zcube/penpot-mcp-server:latest
+    restart: unless-stopped
+    depends_on: [design-frontend]
+    environment:
+      TRANSPORT: http
+      HTTP_PORT: "3000"
+      PENPOT_API_URL: http://design-frontend:8080
+      PENPOT_ACCESS_TOKEN: ${PENPOT_ACCESS_TOKEN:-}
+    ports:
+      - "127.0.0.1:${DSH_DESIGN_MCP_PORT:-4401}:3000"
+    networks: [design]
+
+networks:
+  design:

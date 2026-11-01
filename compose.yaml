@@ -37,6 +37,11 @@ services:
     environment:
       DSH_UID: ${DSH_UID:-1000}
       DSH_GID: ${DSH_GID:-1000}
+    extra_hosts:
+      # The design stack publishes its MCP server on host loopback; the runtime
+      # reaches it here rather than over a shared Docker network, so the design
+      # stack can be absent without breaking this one.
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/data
       # Optional git credentials: profiles.json, tokens/keys, known_hosts.

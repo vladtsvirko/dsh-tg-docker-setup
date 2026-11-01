@@ -34,6 +34,9 @@ DSH_MODEL="${DSH_MODEL:-}"
 DSH_TELEGRAM_BOT_TOKEN="${DSH_TELEGRAM_BOT_TOKEN:-}"
 ALLOWED_USER_IDS="${ALLOWED_USER_IDS:-}"
 DSH_UPDATER_TOKEN="${DSH_UPDATER_TOKEN:-}"
+DESIGN="${DESIGN:-}"
+DSH_DESIGN_PORT="${DSH_DESIGN_PORT:-}"
+DSH_DESIGN_MCP_PORT="${DSH_DESIGN_MCP_PORT:-}"
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
@@ -54,6 +57,7 @@ Options:
   --tier sandbox|privileged
                          native only: sandbox (default) or add the docker group
   --dir PATH             deployment directory (default: this checkout / /srv/dsh)
+  --design none|docker   optional Penpot design stack (default: ask, else none)
   --ref REF              git ref for the native checkout (default: v<VERSION>)
   --config FILE          read answers from FILE (KEY=VALUE, no shell)
   --yes, -y              accept defaults, never prompt
@@ -65,7 +69,7 @@ EOF
 # --- answers from a file ---------------------------------------------------
 # Strict KEY=VALUE parsing: no sourcing, so a config file cannot execute code.
 CONFIG_KEYS="MODE TIER DIR SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL
-DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_UPDATER_TOKEN"
+DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT"
 load_config() {
   local file="$1" line key value
   [ -f "$file" ] || die "no config file: $file"
@@ -100,6 +104,8 @@ while [ $# -gt 0 ]; do
     --mode=*) MODE="${1#*=}"; shift ;;
     --tier)   TIER="${2:?--tier needs a value}"; shift 2 ;;
     --tier=*) TIER="${1#*=}"; shift ;;
+    --design) DESIGN="${2:?--design needs a value}"; shift 2 ;;
+    --design=*) DESIGN="${1#*=}"; shift ;;
     --ref)    REF="${2:?--ref needs a value}"; shift 2 ;;
     --ref=*)  REF="${1#*=}"; shift ;;
     --dir)    DIR="${2:?--dir needs a value}"; shift 2 ;;
@@ -166,7 +172,7 @@ read_existing_env() {
   local key value
   [ -f "$DIR/.env" ] || return 0
   for key in DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL DSH_TELEGRAM_BOT_TOKEN \
-             ALLOWED_USER_IDS DSH_UPDATER_TOKEN; do
+             ALLOWED_USER_IDS DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT; do
     [ -n "${!key:-}" ] && continue
     value="$(sed -n "s/^${key}=//p" "$DIR/.env" | head -1)"
     if [ -n "$value" ]; then printf -v "$key" '%s' "$value"; fi
@@ -191,6 +197,11 @@ fi
 [ -n "$MODE" ] || MODE=docker
 case "$MODE" in docker|native) ;; *) die "--mode must be docker or native" ;; esac
 
+case "${DESIGN:-}" in
+  ""|none|docker) ;;
+  *) die "--design must be none or docker" ;;
+esac
+
 if [ "$MODE" = native ]; then
   [ -n "$TIER" ] || TIER=sandbox
   case "$TIER" in sandbox|privileged) ;; *) die "--tier must be sandbox or privileged" ;; esac
@@ -204,6 +215,9 @@ read_existing_env
 
 # Defaults apply after the existing .env, so a repair keeps the deployed values.
 [ -n "$DSH_PORT" ] || DSH_PORT=4310
+[ -n "$DESIGN" ] || DESIGN=none
+[ "$DESIGN" = docker ] && { [ -n "$DSH_DESIGN_PORT" ] || DSH_DESIGN_PORT=8090; }
+[ -n "$DSH_DESIGN_MCP_PORT" ] || DSH_DESIGN_MCP_PORT=4401
 [ -n "$DSH_PROVIDER" ] || DSH_PROVIDER=opencode-go
 if [ -z "$DSH_MODEL" ]; then
   case "$DSH_PROVIDER" in
@@ -220,6 +234,10 @@ if [ "$CHECK" != 1 ]; then
   ask_secret DSH_TELEGRAM_BOT_TOKEN "Telegram bot token"
   if [ -n "$DSH_TELEGRAM_BOT_TOKEN" ]; then
     ask ALLOWED_USER_IDS "Allowed Telegram user ids (comma separated)" ""
+  fi
+  ask DESIGN "Install the Penpot design stack? (docker/none)" none
+  if [ "$DESIGN" = docker ]; then
+    ask DSH_DESIGN_PORT "Penpot port" 8090
   fi
   if [ -z "$DSH_UPDATER_TOKEN" ]; then
     DSH_UPDATER_TOKEN="$(random_token)"
@@ -249,6 +267,11 @@ printf '    version:   %s (DSH %s)\n' "$SETUP_VERSION" "$DSH_VERSION"
 printf '    web:       http://%s:%s/\n' "$DSH_BIND_IP" "$DSH_PORT"
 printf '    provider:  %s / %s\n' "$DSH_PROVIDER" "$DSH_MODEL"
 printf '    telegram:  %s\n' "$([ -n "$DSH_TELEGRAM_BOT_TOKEN" ] && echo configured || echo disabled)"
+if [ "$DESIGN" = docker ]; then
+  printf '    design:    Penpot on http://%s:%s/ (MCP on 127.0.0.1:%s)\n' "$DSH_BIND_IP" "$DSH_DESIGN_PORT" "$DSH_DESIGN_MCP_PORT"
+else
+  printf '    design:    none (re-run with --design docker to add it later)\n'
+fi
 if [ "$MODE" = native ]; then
   printf '    tier:      %s\n' "$TIER"
   printf '    user:      %s\n' "$SERVICE_USER"
@@ -294,6 +317,18 @@ write_env() {
   set_env ALLOWED_USER_IDS "$ALLOWED_USER_IDS" "$file"
   set_env DSH_UPDATER_TOKEN "$DSH_UPDATER_TOKEN" "$file"
   set_env DSH_SETUP_VERSION "$SETUP_VERSION" "$file"
+  set_env DESIGN "$DESIGN" "$file"
+  if [ "$DESIGN" = docker ]; then
+    set_env DSH_DESIGN_PORT "$DSH_DESIGN_PORT" "$file"
+    set_env DSH_DESIGN_ENABLED 1 "$file"
+    if [ "$MODE" = docker ]; then
+      set_env DSH_DESIGN_MCP_URL "http://host.docker.internal:$DSH_DESIGN_MCP_PORT/mcp" "$file"
+    else
+      set_env DSH_DESIGN_MCP_URL "http://127.0.0.1:$DSH_DESIGN_MCP_PORT/mcp" "$file"
+    fi
+  else
+    set_env DSH_DESIGN_ENABLED 0 "$file"
+  fi
   set_env DSH_UPDATER_URL "$UPDATER_URL" "$file"
   chmod 600 "$file"
 }
@@ -307,6 +342,50 @@ wait_health() {
     sleep 2
   done
   return 1
+}
+
+# Optional Penpot stack. It is a separate compose project: its own data, its own
+# lifecycle, and it can be absent without touching the runtime.
+design_apply() {
+  [ "$DESIGN" = docker ] || return 0
+  if ! command -v docker >/dev/null 2>&1; then
+    warn "the design stack needs Docker — skipped; re-run with --design docker later"
+    return 0
+  fi
+  local dir="$DIR/design" env_file="$DIR/design/.env"
+  [ -f "$dir/compose.yaml" ] || { warn "no $dir/compose.yaml — skipping the design stack"; return 0; }
+
+  log "writing $env_file"
+  if [ ! -f "$env_file" ]; then
+    local template="$dir/.env.example"
+    [ -f "$template" ] || template="$SRC_DIR/design/.env.example"
+    cp "$template" "$env_file"
+    set_env PENPOT_DB_PASSWORD "$(random_token)" "$env_file"
+    set_env PENPOT_SECRET_KEY "$(random_token)$(random_token)" "$env_file"
+    chmod 600 "$env_file"
+  fi
+  set_env DSH_BIND_IP "$DSH_BIND_IP" "$env_file"
+  set_env DSH_DESIGN_PORT "$DSH_DESIGN_PORT" "$env_file"
+  set_env DSH_DESIGN_MCP_PORT "$DSH_DESIGN_MCP_PORT" "$env_file"
+
+  log "starting Penpot (the first start pulls the images)"
+  run docker compose --project-directory "$dir" -f "$dir/compose.yaml" up -d
+
+  log "waiting for Penpot on http://$DSH_BIND_IP:$DSH_DESIGN_PORT/"
+  local waited=0
+  while [ "$waited" -lt 300 ]; do
+    if curl -s -o /dev/null -m 4 -w '%{http_code}' "http://$DSH_BIND_IP:$DSH_DESIGN_PORT/" 2>/dev/null | grep -qE '200|302|303|304'; then
+      break
+    fi
+    sleep 5; waited=$((waited + 5))
+  done
+  if [ "$waited" -ge 300 ]; then
+    warn "Penpot did not answer within 5 minutes — inspect: docker compose --project-directory $dir ps"
+    return 1
+  fi
+
+  warn "create the first account at http://$DSH_BIND_IP:$DSH_DESIGN_PORT/ then Settings -> Access tokens,"
+  warn "and put the token in $env_file as PENPOT_ACCESS_TOKEN=... to enable the design tools"
 }
 
 # Stop the other deployment mode before this one starts: two runtimes sharing a
@@ -349,6 +428,7 @@ docker_apply() {
     docker compose logs --tail=40 dsh 2>/dev/null || true
     die "dsh did not become healthy — inspect: docker compose logs dsh"
   fi
+  design_apply
 }
 
 # --- native mode -----------------------------------------------------------
@@ -522,6 +602,7 @@ native_apply() {
     journalctl -u dsh.service --no-pager -n 40 2>/dev/null || true
     die "dsh did not become healthy — inspect: journalctl -u dsh.service -f"
   fi
+  design_apply
 }
 
 if [ "$MODE" = docker ]; then docker_apply; else native_apply; fi

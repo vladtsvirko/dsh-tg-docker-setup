@@ -14,3 +14,7 @@ backups/
 
 # scratch dirs used while testing the image
 _*/
+
+# design stack runtime data and answers
+design/.env
+design/data/
