@@ -548,8 +548,8 @@ component_running() {
 }
 
 component_health() {
-  local url=$1 codes=$2 waited=0 code
-  while [ "$waited" -lt 300 ]; do
+  local url=$1 codes=$2 timeout=${3:-${COMPONENT_HEALTH_TIMEOUT:-60}} waited=0 code
+  while [ "$waited" -lt "$timeout" ]; do
     code="$(curl -s -o /dev/null -m 4 -w '%{http_code}' "$url" 2>/dev/null || true)"
     case " $codes " in *" $code "*) return 0 ;; esac
     sleep 5; waited=$((waited + 5))
@@ -613,6 +613,12 @@ component_apply() {
   case "$action" in
     enable|configure)
       log "starting $name on $bind:$port"
+      local net
+      net="$(component_field "$name" network)"
+      if [ -n "$net" ]; then
+        docker network inspect "$net" >/dev/null 2>&1 || docker network create "$net" >/dev/null \
+          || warn "could not create the $net network"
+      fi
       docker compose --project-directory "$compose_dir" -f "$compose_dir/$(basename "$(component_field "$name" compose)")" up -d --build || die "docker compose failed for $name"
       set_env "$flag" 1 "$ENV_FILE"
       # The agent calls design/penpot.mjs from inside the runtime, so the
@@ -621,7 +627,9 @@ component_apply() {
       local plugin_ref
       plugin_ref="$(node -e 'process.stdout.write(require("./components.json").components.design.plugin.ref)' 2>/dev/null || true)"
       if [ -n "$plugin_ref" ]; then set_env PENPOT_PLUGIN_REF "$plugin_ref" "$ENV_FILE"; fi
-      set_env PENPOT_API_URL "http://$bind:$port" "$ENV_FILE"
+      local api_url
+      if [ "$MODE" = docker ]; then api_url="http://design-frontend:8080"; else api_url="http://$bind:$port"; fi
+      set_env PENPOT_API_URL "$api_url" "$ENV_FILE"
       local token
       token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
       if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$ENV_FILE"; fi
@@ -642,11 +650,23 @@ component_apply() {
   local codes
   codes="$(component_field "$name" health.codes | tr ',' ' ')"
   if [ "$action" != disable ]; then
-    if ! component_health "$(printf '%s' "$(component_field "$name" health.url)" | sed -e "s/{bind}/$bind/" -e "s/{port}/$port/")" "${codes:-200}"; then
-      warn "$name did not answer within 5 minutes"
-      return 1
+    # In Docker mode the probe runs inside the updater container, which shares
+    # the design network: use the service name. On the host, use the published
+    # address. A failed probe is advisory — compose already reported the
+    # containers up, and a host firewall may block container-to-host traffic.
+    local probe_url
+    if [ "$MODE" = docker ]; then
+      probe_url="http://design-frontend:8080/"
+    else
+      probe_url="$(printf '%s' "$(component_field "$name" health.url)" | sed -e "s/{bind}/$bind/" -e "s/{port}/$port/")"
     fi
-    log "$name is up"
+    if component_health "$probe_url" "${codes:-200}"; then
+      log "$name is up"
+    else
+      warn "$name containers are up, but $probe_url did not answer — check the port"
+      docker compose --project-directory "$compose_dir" -f "$compose_dir/$(basename "$(component_field "$name" compose)")" ps 2>/dev/null \
+        | sed 's/^/    /' >&2 || true
+    fi
   fi
 }
 

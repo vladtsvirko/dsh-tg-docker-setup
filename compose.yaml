@@ -16,7 +16,7 @@ services:
   # on `mkdir /data/home`. This container chowns the mount, then exits; it has no
   # network, a read-only rootfs, and only the two capabilities chown needs.
   init:
-    image: dsh-backend:0.2.1-rc.2-0.4.4
+    image: dsh-backend:0.2.1-rc.2-0.4.5
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -56,7 +56,7 @@ services:
       args:
         DSH_UID: ${DSH_UID:-1000}
         DSH_GID: ${DSH_GID:-1000}
-    image: dsh-backend:0.2.1-rc.2-0.4.4
+    image: dsh-backend:0.2.1-rc.2-0.4.5
     container_name: dsh
     depends_on:
       init:
@@ -84,6 +84,7 @@ services:
     networks:
       - default
       - ops
+      - design
 
     ports:
       # Bind to the LAN address only; 127.0.0.1 keeps it private to the host.
@@ -119,7 +120,7 @@ services:
     build:
       context: .
       dockerfile: updater.Dockerfile
-    image: dsh-updater:0.2.1-rc.2-0.4.4
+    image: dsh-updater:0.2.1-rc.2-0.4.5
     restart: unless-stopped
     stop_grace_period: 10s
     user: "${DSH_UID:-1000}:${DSH_GID:-1000}"
@@ -149,6 +150,7 @@ services:
     networks:
       - default
       - ops
+      - design
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/health"]
       interval: 15s
@@ -157,5 +159,9 @@ services:
       start_period: 10s
 
 networks:
+  # Shared with the optional design stack so the runtime reaches Penpot by
+  # service name instead of a published port (no host firewall in the path).
+  design:
+    name: dsh-design
   ops:
     internal: true

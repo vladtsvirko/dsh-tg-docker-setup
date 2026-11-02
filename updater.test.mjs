@@ -244,7 +244,7 @@ test('components: the endpoint runs the real update.sh and wires the runtime', a
       const mainEnv = await readFile(join(repo, '.env'), 'utf8')
       const designEnv = await readFile(join(repo, 'design', '.env'), 'utf8')
       assert.match(mainEnv, /DSH_DESIGN_ENABLED=1/)
-      assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:80\d\d/)
+      assert.match(mainEnv, /PENPOT_API_URL=http:\/\/design-frontend:8080/)
       assert.match(designEnv, /DSH_DESIGN_PORT=8092/)
     } finally {
       server.close()

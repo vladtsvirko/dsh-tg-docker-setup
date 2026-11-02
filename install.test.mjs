@@ -329,7 +329,7 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     assert.match(mainEnv, /DSH_DESIGN_ENABLED=1/)
     assert.match(mainEnv, /PENPOT_ENABLED=1/)
     assert.match(mainEnv, /PENPOT_PLUGIN_REF=github:vladtsvirko\/dsh-penpot-plugin#v\d+\.\d+\.\d+/)
-    assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:80\d\d/)
+    assert.match(mainEnv, /PENPOT_API_URL=http:\/\/design-frontend:8080/)
     assert.match(log, /compose --project-directory design -f design\/compose\.yaml up -d/)
     assert.match(log, /compose restart dsh/)
 
@@ -410,7 +410,36 @@ test('configuring a running stack recreates it on the new port', async () => {
     assert.match(stdout, /starting design on 127\.0\.0\.1:8094/)
     assert.match(log, / up -d --build/)
     assert.match(log, / restart dsh/)
-    assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:8094/)
+    assert.match(mainEnv, /PENPOT_API_URL=http:\/\/design-frontend:8080/)
+  } finally {
+    await rm(outer, { recursive: true, force: true })
+  }
+})
+
+test('a component whose probe never answers is still considered applied', async () => {
+  const outer = await mkdtemp(join(tmpdir(), 'component-probe-'))
+  const dir = join(outer, 'repo')
+  const bins = join(outer, 'bin')
+  await mkdir(dir, { recursive: true })
+  if (!(await canExec(outer))) { await rm(outer, { recursive: true, force: true }); return }
+  try {
+    await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
+    await cp(join(here, 'components.json'), join(dir, 'components.json'))
+    await mkdir(join(dir, 'design'), { recursive: true })
+    await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
+    await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.4.5\n')
+    await writeFile(join(dir, '.env'), 'MODE=docker\nDSH_BIND_IP=127.0.0.1\nDSH_DESIGN_ENABLED=1\n')
+    await mkdir(bins, { recursive: true })
+    await stub(bins, 'docker', `case "$*" in *"ps -q"*) echo abc123 ;; esac; exit 0`)
+    // The probe cannot reach the service (firewall, wrong address): 000.
+    await stub(bins, 'curl', 'printf 000')
+
+    const { stdout, stderr } = await exec('bash', [join(dir, 'update.sh'), '--component', 'design', 'enable'], {
+      env: { ...process.env, PATH: `${bins}:${process.env.PATH}`, COMPONENT_HEALTH_TIMEOUT: '2' },
+      timeout: 30000,
+    })
+    assert.match(stderr, /did not answer/)
+    assert.doesNotMatch(stdout, /design is up/)
   } finally {
     await rm(outer, { recursive: true, force: true })
   }

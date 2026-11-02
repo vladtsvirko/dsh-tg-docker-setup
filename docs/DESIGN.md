@@ -42,6 +42,12 @@ install. `install.sh` skips it with a warning when Docker is absent.
 The updater applies the change on the host, restarts the runtime and reports.
 `/system manage design port 8091` does the same without a tap.
 
+The runtime reaches Penpot as `http://design-frontend:8080` over the shared
+`dsh-design` network — no published port, no host firewall in the path. The
+published port exists for your browser only. The health probe after a change is
+advisory: if it cannot reach the service it prints the container states and
+still reports the change as applied.
+
 Changing the port is state-aware: on a stopped stack it only saves the value
 (nothing is started), and on a running stack the containers are recreated on the
 new port. Disable stops the stack and keeps `design/data/`. The runtime env keeps

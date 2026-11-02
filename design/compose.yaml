@@ -85,7 +85,10 @@ services:
     ports:
       # LAN-only. Never 0.0.0.0: the instance has real accounts.
       - "${DSH_BIND_IP:-127.0.0.1}:${DSH_DESIGN_PORT:-8090}:8080"
-    networks: [design]
+    networks: [design, dsh-design]
 
 networks:
   design:
+  dsh-design:
+    external: true
+    name: dsh-design

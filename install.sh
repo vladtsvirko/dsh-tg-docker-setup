@@ -325,7 +325,11 @@ write_env() {
     local plugin_ref=""
     [ -f "$comp" ] && plugin_ref="$(node -e 'process.stdout.write(require(process.argv[1]).components.design.plugin.ref)' "$comp" 2>/dev/null || true)"
     if [ -n "$plugin_ref" ]; then set_env PENPOT_PLUGIN_REF "$plugin_ref" "$file"; fi
-    set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$file"
+    if [ "$MODE" = docker ]; then
+      set_env PENPOT_API_URL "http://design-frontend:8080" "$file"
+    else
+      set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$file"
+    fi
   else
     set_env DSH_DESIGN_ENABLED 0 "$file"
     set_env PENPOT_ENABLED 0 "$file"
@@ -367,7 +371,11 @@ design_apply() {
   fi
   set_env DSH_BIND_IP "$DSH_BIND_IP" "$env_file"
   set_env DSH_DESIGN_PORT "$DSH_DESIGN_PORT" "$env_file"
-  set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$DIR/.env"
+  if [ "$MODE" = docker ]; then
+    set_env PENPOT_API_URL "http://design-frontend:8080" "$DIR/.env"
+  else
+    set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$DIR/.env"
+  fi
   local token
   token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
   if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$DIR/.env"; fi
@@ -379,6 +387,9 @@ design_apply() {
   fi
 
   log "starting Penpot (the first start pulls the images)"
+  if ! docker network inspect dsh-design >/dev/null 2>&1; then
+    run docker network create dsh-design || warn "could not create the dsh-design network"
+  fi
   run docker compose --project-directory "$dir" -f "$dir/compose.yaml" up -d --build
 
   log "waiting for Penpot on http://$DSH_BIND_IP:$DSH_DESIGN_PORT/"
