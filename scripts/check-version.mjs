@@ -20,11 +20,21 @@ if (version !== tag) fail(`VERSION is ${version}, tag is ${tag}`)
 const env = (await readFile(new URL('../.env.example', import.meta.url), 'utf8'))
 if (/^DSH_VERSION=/m.test(env)) fail('.env.example still sets DSH_VERSION; it is hardcoded per release')
 
+/**
+ * A whole line, not a substring.
+ *
+ * `includes('image: dsh-backend:0.7.4')` also matches `…:0.7.40` and would pass a
+ * release whose image tag points at a different build; the check has to be
+ * anchored to the end of the value.
+ */
+const hasLine = (file, pattern) => new RegExp(`^${pattern}\\s*$`, 'm').test(file)
+const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 const compose = await readFile(new URL('../compose.yaml', import.meta.url), 'utf8')
-if (!compose.includes(`image: dsh-backend:${tag}`)) fail(`compose.yaml has no dsh-backend:${tag}`)
-if (!compose.includes(`image: dsh-updater:${tag}`)) fail(`compose.yaml has no dsh-updater:${tag}`)
+if (!hasLine(compose, `\\s*image:\\s*dsh-backend:${escape(tag)}`)) fail(`compose.yaml has no dsh-backend:${tag}`)
+if (!hasLine(compose, `\\s*image:\\s*dsh-updater:${escape(tag)}`)) fail(`compose.yaml has no dsh-updater:${tag}`)
 const dockerfile = await readFile(new URL('../Dockerfile', import.meta.url), 'utf8')
-if (!dockerfile.includes(`ARG DSH_VERSION=${dsh}`)) fail(`Dockerfile DSH_VERSION is not ${dsh}`)
-if (!dockerfile.includes(`ARG DSH_SETUP_VERSION=${tag}`)) fail(`Dockerfile DSH_SETUP_VERSION is not ${tag}`)
+if (!hasLine(dockerfile, `ARG DSH_VERSION=${escape(dsh)}`)) fail(`Dockerfile DSH_VERSION is not ${dsh}`)
+if (!hasLine(dockerfile, `ARG DSH_SETUP_VERSION=${escape(tag)}`)) fail(`Dockerfile DSH_SETUP_VERSION is not ${tag}`)
 
 console.log(`version check ok: setup ${tag} (DSH ${dsh}, connector derived from setup version)`)

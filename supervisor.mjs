@@ -126,8 +126,14 @@ async function snapshotStable(reason) {
   if (!await exists(profileDir)) throw new Error(`profile directory is missing: ${profileDir}`)
   const stagingStable = join(stateDir, 'stable.tmp')
   await copyTree(profileDir, stagingStable)
-  await rm(stableDir, { recursive: true, force: true })
+  // Swap, do not delete-then-rename: a crash between the two used to leave no
+  // rollback point at all. The old snapshot is retired only after the new one
+  // is in place, and a leftover from an interrupted run is cleared first.
+  const retired = join(stateDir, 'stable.previous')
+  await rm(retired, { recursive: true, force: true })
+  if (await exists(stableDir)) await rename(stableDir, retired)
   await rename(stagingStable, stableDir)
+  await rm(retired, { recursive: true, force: true })
   state.stableAt = now()
   await saveState()
   log(`stable snapshot refreshed (${reason})`)
@@ -287,6 +293,9 @@ async function commit() {
 }
 
 function arm() {
+  // A restart or a rollback is moving files; arming a trial underneath it would
+  // set a deadline for a runtime that is about to be replaced.
+  if (busy) return { ok: false, code: 409, error: 'another operation is running' }
   if (state.trial === null) return { ok: false, code: 409, error: 'no trial is running' }
   if (child === undefined || child.exitCode !== null) {
     return { ok: false, code: 503, error: 'the runtime is not running' }
@@ -348,6 +357,7 @@ async function beginLiveTrial() {
 
 /** Close a trial without restoring: the change did not land, or the manager undid it. */
 async function abandonTrial() {
+  if (busy) return { ok: false, code: 409, error: 'another operation is running' }
   if (state.trial === null) return { ok: false, code: 409, error: 'no trial is running' }
   clearTimeout(bootTimer)
   state.trial = null

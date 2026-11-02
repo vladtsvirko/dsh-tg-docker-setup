@@ -512,3 +512,18 @@ needsExec('a state write that fails does not kill the supervisor mid-rollback', 
     await test.stop()
   }
 })
+
+needsExec('arming a trial during another operation is refused', async () => {
+  const test = await harness({ entrySleep: 3 })
+  try {
+    const update = await test.call('/update', { trial: true })
+    assert.equal(update.status, 200)
+    await waitFor(async () => (await test.status()).busy === true, { what: 'the supervisor to report busy' })
+    const armed = await test.call('/trial/arm', {})
+    assert.equal(armed.status, 409)
+    assert.match(String(armed.body.error), /another operation is running/)
+    await waitFor(async () => (await test.status()).busy === false, { timeout: 15000, what: 'the update to finish' })
+  } finally {
+    await test.stop()
+  }
+})

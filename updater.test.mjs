@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { test } from 'node:test'
-import { createUpdater, parseTag, resolveTarget, UpdateError } from './updater.mjs'
+import { createUpdater, crossesCompat, parseTag, resolveTarget, UpdateError } from './updater.mjs'
 
 const exec = promisify(execFile)
 
@@ -334,5 +334,31 @@ test('cancel stops a running job and says so', async () => {
     }
   } finally {
     await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('a cross-line target needs the explicit flag', async () => {
+  // "available" is a mode, not a permission: without this, whoever holds the
+  // token could jump a DSH line or a product major without the flag that both
+  // /system and update.sh require.
+  assert.equal(crossesCompat('v0.2.1-rc.2-0.4.0', 'v0.2.1-rc.2-0.5.0'), false)
+  assert.equal(crossesCompat('v0.2.1-rc.2-0.5.0', 'v0.3.0-0.0.1'), true)
+  assert.equal(crossesCompat('v0.2.1-rc.2-0.5.0', 'v0.2.1-rc.2-1.0.0'), true)
+
+  const app = createUpdater({ repo: '/unused', token: 'secret', tags: async () => tags, current: async () => current })
+  const { server, base } = await start(app)
+  try {
+    const refused = await fetch(`${base}/update`, {
+      method: 'POST', headers: { authorization: 'Bearer secret' }, body: '{"mode":"available"}',
+    })
+    assert.equal(refused.status, 422)
+    assert.match((await refused.json()).error, /crosses a DSH line or a product major/)
+
+    const allowed = await fetch(`${base}/update`, {
+      method: 'POST', headers: { authorization: 'Bearer secret' }, body: '{"mode":"available","incompatible":true}',
+    })
+    assert.equal(allowed.status, 202)
+  } finally {
+    server.close()
   }
 })

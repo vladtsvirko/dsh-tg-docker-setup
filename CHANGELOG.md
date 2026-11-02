@@ -8,6 +8,28 @@ supervisor, the updater and the entrypoint changed.
 Earlier releases are the git tags `v0.2.1-rc.2-0.1.x` … `v0.2.1-rc.2-0.4.11`;
 this file starts here.
 
+## 0.2.1-rc.2-0.8.0
+
+### Fixed
+
+- **A cross-line update needs the flag on every path.** The updater accepted
+  `mode: available` from anyone holding the token and would jump a DSH line or a
+  product major without `--i-know-versions-are-incompatible`, which both
+  `/system` and `update.sh` require. The request now has to carry
+  `"incompatible": true`, and `/target` reports whether a move would cross.
+- **`/trial/arm` and `/trial/abandon` respect a running operation**, so a restart
+  or a rollback cannot be armed underneath.
+- **The rollback point is swapped, not deleted first.** `snapshotStable` removed
+  the old snapshot before renaming the new one into place; a crash between the
+  two left no rollback point at all.
+- **`check-version.mjs` matches whole values.** `includes('image: dsh-backend:0.7.4')`
+  also matches `…:0.7.40`, so a release could pass with the wrong image tag.
+
+### Notes
+
+- The connector now sends `incompatible: true` with `mode: available`, which is
+  what `/system update all --i-know-versions-are-incompatible` means.
+
 ## 0.2.1-rc.2-0.7.4
 
 ### Fixed

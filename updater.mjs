@@ -64,6 +64,14 @@ export async function listTags(repo) {
  *   available:  latest tag overall
  *   exact:      the named tag, not older than the current one
  */
+/** Whether moving from `current` to `target` crosses a DSH line or a major. */
+export function crossesCompat(current, target) {
+  const from = parseTag(current)
+  const to = parseTag(target)
+  if (from === undefined || to === undefined) return true
+  return from.dsh !== to.dsh || from.major !== to.major
+}
+
 export function resolveTarget(current, tags, { mode, version } = {}) {
   const at = tags.indexOf(current)
   if (at < 0) throw new UpdateError(422, `current tag ${current} is not in the tag list`)
@@ -401,7 +409,11 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
         const from = await current()
         if (from === undefined) throw new UpdateError(409, 'checkout is not on a release tag')
         const target = resolveTarget(from, await tags(), { mode: body.mode, version: body.version })
-        return json(response, 200, { from, target })
+        return json(response, 200, {
+          from,
+          target,
+          incompatible: crossesCompat(from, target),
+        })
       }
       if (path === '/update' && request.method === 'POST') {
         if (token.length === 0) return json(response, 503, { error: 'updater is disabled (DSH_UPDATER_TOKEN is empty)' })
@@ -425,6 +437,14 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
         if (from === undefined) throw new UpdateError(409, 'checkout is not on a release tag')
         const all = await tags()
         const target = resolveTarget(from, all, { mode: body.mode, version: body.version })
+        // The flag is part of the contract on every path: a body cannot ask for a
+        // cross-line jump by choosing "available" and skipping the check.
+        if (crossesCompat(from, target) && body.incompatible !== true) {
+          throw new UpdateError(
+            422,
+            `${target} crosses a DSH line or a product major; send "incompatible": true to allow it`,
+          )
+        }
         state.job = {
           id: randomUUID(),
           state: 'accepted',
