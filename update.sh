@@ -542,6 +542,11 @@ restart_runtime() {
   fi
 }
 
+component_running() {
+  local dir=$1 file=$2
+  docker compose --project-directory "$dir" -f "$file" ps -q 2>/dev/null | grep -q .
+}
+
 component_health() {
   local url=$1 codes=$2 waited=0 code
   while [ "$waited" -lt 300 ]; do
@@ -594,6 +599,16 @@ component_apply() {
   port_key="$(component_field "$name" config.port.env)"
   set_env DSH_BIND_IP "$bind" "$env_file"
   if [ -n "$port_key" ]; then set_env "$port_key" "$port" "$env_file"; fi
+
+  local running=0
+  if component_running "$compose_dir" "$compose_dir/$(basename "$(component_field "$name" compose)")"; then running=1; fi
+
+  # Configuring a stopped stack is a preference, not a start: save the value and
+  # leave the runtime alone. Only a running stack is recreated for a new port.
+  if [ "$action" = configure ] && [ "$running" = 0 ]; then
+    log "$name is not running; port $port saved — enable it to start"
+    return 0
+  fi
 
   case "$action" in
     enable|configure)

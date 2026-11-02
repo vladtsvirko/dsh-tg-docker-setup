@@ -343,3 +343,75 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     await rm(outer, { recursive: true, force: true })
   }
 })
+
+test('configuring a stopped stack saves the port and does not start it', async () => {
+  const outer = await mkdtemp(join(tmpdir(), 'component-config-'))
+  const dir = join(outer, 'repo')
+  const bins = join(outer, 'bin')
+  const calls = join(outer, 'docker.log')
+  await mkdir(dir, { recursive: true })
+  if (!(await canExec(outer))) { await rm(outer, { recursive: true, force: true }); return }
+  try {
+    await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
+    await cp(join(here, 'components.json'), join(dir, 'components.json'))
+    await mkdir(join(dir, 'design'), { recursive: true })
+    await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
+    await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.4.3\n')
+    await writeFile(join(dir, '.env'), 'MODE=docker\nDSH_BIND_IP=127.0.0.1\nDSH_DESIGN_ENABLED=0\n')
+    await mkdir(bins, { recursive: true })
+    // `ps -q` prints nothing: nothing is running.
+    await stub(bins, 'docker', `echo "docker $*" >> ${calls}; exit 0`)
+    await stub(bins, 'curl', 'printf 200')
+
+    const { stdout } = await exec('bash', [join(dir, 'update.sh'), '--component', 'design', 'configure', '--port', '8093'], {
+      env: { ...process.env, PATH: `${bins}:${process.env.PATH}` },
+      timeout: 30000,
+    })
+    const designEnv = await readFile(join(dir, 'design', '.env'), 'utf8')
+    const mainEnv = await readFile(join(dir, '.env'), 'utf8')
+    const log = await readFile(calls, 'utf8')
+
+    assert.match(stdout, /not running; port 8093 saved/)
+    assert.match(designEnv, /DSH_DESIGN_PORT=8093/)
+    assert.doesNotMatch(log, / up -d/)
+    assert.doesNotMatch(log, / restart dsh/)
+    assert.match(mainEnv, /DSH_DESIGN_ENABLED=0/)
+  } finally {
+    await rm(outer, { recursive: true, force: true })
+  }
+})
+
+test('configuring a running stack recreates it on the new port', async () => {
+  const outer = await mkdtemp(join(tmpdir(), 'component-config-run-'))
+  const dir = join(outer, 'repo')
+  const bins = join(outer, 'bin')
+  const calls = join(outer, 'docker.log')
+  await mkdir(dir, { recursive: true })
+  if (!(await canExec(outer))) { await rm(outer, { recursive: true, force: true }); return }
+  try {
+    await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
+    await cp(join(here, 'components.json'), join(dir, 'components.json'))
+    await mkdir(join(dir, 'design'), { recursive: true })
+    await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
+    await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.4.3\n')
+    await writeFile(join(dir, '.env'), 'MODE=docker\nDSH_BIND_IP=127.0.0.1\nDSH_DESIGN_ENABLED=1\n')
+    await mkdir(bins, { recursive: true })
+    // `ps -q` prints a container id: something is running.
+    await stub(bins, 'docker', `echo "docker $*" >> ${calls}; case "$*" in *"ps -q"*) echo abc123 ;; esac; exit 0`)
+    await stub(bins, 'curl', 'printf 200')
+
+    const { stdout } = await exec('bash', [join(dir, 'update.sh'), '--component', 'design', 'configure', '--port', '8094'], {
+      env: { ...process.env, PATH: `${bins}:${process.env.PATH}` },
+      timeout: 30000,
+    })
+    const log = await readFile(calls, 'utf8')
+    const mainEnv = await readFile(join(dir, '.env'), 'utf8')
+
+    assert.match(stdout, /starting design on 127\.0\.0\.1:8094/)
+    assert.match(log, / up -d --build/)
+    assert.match(log, / restart dsh/)
+    assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:8094/)
+  } finally {
+    await rm(outer, { recursive: true, force: true })
+  }
+})

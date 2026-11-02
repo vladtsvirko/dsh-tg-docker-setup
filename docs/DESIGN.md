@@ -42,7 +42,9 @@ install. `install.sh` skips it with a warning when Docker is absent.
 The updater applies the change on the host, restarts the runtime and reports.
 `/system manage design port 8091` does the same without a tap.
 
-Disable stops the stack and keeps `design/data/`. The runtime env keeps
+Changing the port is state-aware: on a stopped stack it only saves the value
+(nothing is started), and on a running stack the containers are recreated on the
+new port. Disable stops the stack and keeps `design/data/`. The runtime env keeps
 `PENPOT_API_URL` but the token is cleared, so the CLI fails closed.
 
 ## The plugin
