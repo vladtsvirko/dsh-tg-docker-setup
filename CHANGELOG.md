@@ -37,24 +37,6 @@ this file starts here.
 - **`./update.sh --plugin` works in native mode.** A stray `local` outside a
   function made the branch fail under `set -e`.
 
-### Added
-
-- **`update.test.mjs`**: `update.sh` can be sourced and its helpers tested —
-  the probe URL for every bind/mode combination, launcher resolution, the tag
-  split, and a full docker `--self-to` with Docker stubbed, asserting the
-  deployed version is rewritten, the runtime recreated, and both restored when
-  the health gate fails.
-
-### Changed
-
-- `docs/LIMITS.md` and `SECURITY.md` describe what the updater can actually
-  reach (it joins `default` and `design` to probe those services by name) and
-  the new timeout/cancel behaviour instead of "no timeout and no cancel".
-
-## 0.2.1-rc.2-0.5.0
-
-### Fixed
-
 - **Native updates work again.** `update.sh` ran `$DEPLOY_DIR/dsh-entrypoint`,
   which no installer creates (it links `/usr/local/bin/dsh-entrypoint`), so every
   native update, `update connector` and `--plugin` failed to prepare and rolled
@@ -88,6 +70,12 @@ this file starts here.
 
 ### Added
 
+- **`update.test.mjs`**: `update.sh` can be sourced and its helpers tested —
+  the probe URL for every bind/mode combination, launcher resolution, the tag
+  split, and a full docker `--self-to` with Docker stubbed, asserting the
+  deployed version is rewritten, the runtime recreated, and both restored when
+  the health gate fails.
+
 - **`install.sh --uninstall [--purge]`** stops and removes the deployment, keeps
   `data/`, `.env` and `backups/` unless `--purge` is given, and prints what is
   left (service user, checkout).
@@ -101,6 +89,10 @@ this file starts here.
   the UI is protected only by the sign-in token printed in the startup log.
 
 ### Changed
+
+- `docs/LIMITS.md` and `SECURITY.md` describe what the updater can actually
+  reach (it joins `default` and `design` to probe those services by name) and
+  the new timeout/cancel behaviour instead of "no timeout and no cancel".
 
 - Mode switching is documented as "stops the other mode, does not move data"
   (the two modes have different default directories); the installer stops a
