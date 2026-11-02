@@ -600,14 +600,12 @@ component_apply() {
       log "starting $name on $bind:$port"
       docker compose --project-directory "$compose_dir" -f "$compose_dir/$(basename "$(component_field "$name" compose)")" up -d --build || die "docker compose failed for $name"
       set_env "$flag" 1 "$ENV_FILE"
-      local mcp_url
-      mcp_url="$(node -e '
-        const [name, mode] = process.argv.slice(1)
-        const c = require("./components.json").components[name]
-        const url = c.mcp.url[mode] ?? c.mcp.url.docker
-        process.stdout.write(url.replace("{port}", String(c.mcp.port)))
-      ' "$name" "$MODE")"
-      set_env DSH_DESIGN_MCP_URL "$mcp_url" "$ENV_FILE"
+      # The agent calls design/penpot.mjs from inside the runtime, so the
+      # runtime environment needs the API root and the token.
+      set_env PENPOT_API_URL "http://$bind:$port" "$ENV_FILE"
+      local token
+      token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
+      if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$ENV_FILE"; fi
       log "restarting the runtime so the tools appear"
       restart_runtime || warn "could not restart the runtime"
       ;;
@@ -615,6 +613,7 @@ component_apply() {
       log "stopping $name (data stays in $compose_dir/data)"
       docker compose --project-directory "$compose_dir" -f "$compose_dir/$(basename "$(component_field "$name" compose)")" down || warn "docker compose down failed"
       set_env "$flag" 0 "$ENV_FILE"
+      set_env PENPOT_ACCESS_TOKEN "" "$ENV_FILE"
       log "restarting the runtime so the tools disappear"
       restart_runtime || warn "could not restart the runtime"
       ;;

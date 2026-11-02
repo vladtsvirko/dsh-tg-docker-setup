@@ -1,13 +1,14 @@
 # Design stack (optional)
 
-Penpot — the self-hosted design tool — plus a headless MCP bridge, so the agent
-can read and write design files as tools instead of round-tripping screenshots.
+Penpot — the self-hosted design tool — plus a small `penpot` CLI inside the
+runtime, so the agent can read, export and import design files without a browser
+and without third-party code in the image.
 
 The stack is **opt-in** and separate from the runtime:
 
 ```
-runtime  ──MCP (HTTP)──►  design-mcp  ──Penpot API──►  design-frontend
-                                                     design-backend ──► postgres / redis
+runtime ──penpot CLI──HTTP──► design-frontend ──► design-backend ──► postgres / redis
+                                 └──────────────► design-exporter
 ```
 
 It is its own compose project (`design/compose.yaml`, project `dsh-design`) with
@@ -16,64 +17,77 @@ its own data under `design/data/`. Removing it does not touch the runtime.
 ## Install
 
 ```sh
-./install.sh --design docker          # ask nothing else; adds the stack
+./install.sh --design docker          # add the stack
 ./install.sh --design none            # skip it (the default when unattended)
 ```
 
 Interactive installs ask once. Re-running `install.sh` later is how you **add it
-afterwards** — the answers already in `.env` are preserved, so it is a repair,
-not a reinstall.
+afterwards**: the answers already in `.env` are preserved.
 
-The first start builds the MCP bridge before anything else comes up, which
-takes a couple of minutes.
-
-Once installed, the stack is managed from the control chat: `/system manage` posts
-a card with Enable / Disable / Port for every component in `components.json`. The
-updater applies the change and restarts the runtime so the tools follow.
-
-In **native mode** the stack is still Docker: Penpot has no supported
-machine install (Clojure backend, ClojureScript frontend, a Chromium-based
-exporter). `install.sh` skips the stack with a warning when Docker is absent and
-leaves the rest working.
+In **native mode** the stack is still Docker: Penpot has no supported machine
+install. `install.sh` skips it with a warning when Docker is absent.
 
 ## First run
 
 1. Open `http://<DSH_BIND_IP>:<DSH_DESIGN_PORT>/` and create the first account
-   (registration is enabled; email verification is off, a LAN instance has no
-   SMTP).
+   (registration is on; email verification is off, a LAN instance has no SMTP).
 2. Settings → **Access tokens** → create one.
 3. Put it in `design/.env` as `PENPOT_ACCESS_TOKEN=...`.
-4. Restart the runtime (`/system restart` or `docker compose restart dsh`).
+4. Re-run the component once so the runtime picks the token up: `/system manage`
+   → Enable (idempotent), or `./update.sh --component design enable`.
 
-On boot the entrypoint writes one managed row into the profile:
+## Managing it from the control chat
 
-```yaml
-- insert:
-    - id: mcp-penpot
-      name: '@deepseek-ai/dsh-mcp-client'
-      config:
-        transport: streamable-http
-        serverName: penpot
-        url: 'http://host.docker.internal:4401/mcp'
-        failOnStartupError: false
+`/system manage` posts a card with one row per component: Enable / Disable / Port.
+The updater applies the change on the host, restarts the runtime and reports.
+`/system manage design port 8091` does the same without a tap.
+
+Disable stops the stack and keeps `design/data/`. The runtime env keeps
+`PENPOT_API_URL` but the token is cleared, so the CLI fails closed.
+
+## The `penpot` CLI
+
+Shipped in the image at `/usr/local/bin/penpot` (native: symlinked from the
+checkout). One dependency-free Node file, MIT like the rest of the repo.
+
+```sh
+penpot whoami
+penpot teams
+penpot projects [--team <id>]
+penpot files <project-id>
+penpot search <term>
+penpot summary <file-id>
+penpot export <file-id> design.penpot
+penpot import design.penpot --project <project-id> [--name "New name"]
+penpot import design.penpot --into <file-id>     # in-place, binfile-v3
 ```
 
-The agent then has `mcp__penpot__*` tools: projects, files, pages, shapes,
-components, export. `failOnStartupError: false` means a missing or tokenless
-MCP server never blocks the runtime from booting.
+Auth comes from the environment: `PENPOT_API_URL` (the stack's origin) and
+`PENPOT_ACCESS_TOKEN`. Both are written into the runtime `.env` when the
+component is enabled, so the agent calls the CLI from its bash tool directly.
 
-## Configuration
+`--json` prints the raw payload. Exit codes: `0` ok, `1` usage or environment,
+`2` the API refused the request.
 
-| Key | Where | Meaning |
-|---|---|---|
-| `DSH_DESIGN_PORT` | main `.env` | Penpot port, published on `DSH_BIND_IP` only |
-| `DSH_DESIGN_MCP_PORT` | main `.env` | loopback port for the MCP bridge (default `4401`) |
-| `DSH_DESIGN_ENABLED` | main `.env` | `1` writes the MCP row on boot |
-| `DSH_DESIGN_MCP_URL` | main `.env` | what the runtime dials (`host.docker.internal` in Docker mode, `127.0.0.1` natively) |
-| `PENPOT_ACCESS_TOKEN` | `design/.env` | the agent's credential for Penpot |
-| `PENPOT_DB_PASSWORD`, `PENPOT_SECRET_KEY` | `design/.env` | generated on first install |
+### The round-trip
 
-Change the port in the main `.env` and re-run `./install.sh --design docker`.
+`export` writes a `.penpot` file — a ZIP of the design's JSON. The agent can
+unzip it, read or edit the JSON with its usual tools, and `import` it back as a
+new file, or in place with `--into` on binfile-v3. That is deliberate: Penpot's
+write API needs its own change format (`update-file`) with add/mod/touched
+operations, and reimplementing that is a project, not a wrapper.
+
+## Limits
+
+- **No live canvas.** The CLI reads and writes files; it cannot watch a designer
+  work or comment in real time.
+- **In-place import requires binfile-v3** (Penpot ≥ 2.x) and a file produced by
+  `export`; Penpot refuses other shapes.
+- The multipart field names for `import-binfile` follow Penpot's own frontend.
+  They are tested against a fake server here and need one real run on your
+  instance.
+- The token is a credential: anyone with it can read and rewrite every design
+  the account can reach. Use a dedicated account scoped to one team.
 
 ## Data, backup, removal
 
@@ -86,35 +100,14 @@ Change the port in the main `.env` and re-run `./install.sh --design docker`.
 docker compose --project-directory design -f design/compose.yaml down
 ```
 
-`down -v` plus deleting `design/data/` removes everything. Then set
-`DESIGN=none` in the main `.env` and restart the runtime to drop the MCP tools.
+`down -v` plus deleting `design/data/` removes everything; then set `DESIGN=none`
+in the main `.env` and restart the runtime.
 
-## Resources and security
+## Why no MCP server
 
-- Roughly 2–3 GB RAM and 1–2 CPUs for five containers; Penpot's exporter runs
-  Chromium.
-- Published on `DSH_BIND_IP` only — never `0.0.0.0`, the same rule as the web UI.
-- If you expose it beyond the LAN, put TLS in front and turn registration off
-  (`PENPOT_FLAGS` in `design/compose.yaml`).
-- The access token is a credential: anyone with it can read and modify every
-  design the account can reach. Keep `design/.env` at `0600`.
-
-## Why the bridge is built locally
-
-Upstream publishes `ghcr.io/zcube/penpot-mcp-server`, but that package is not
-publicly pullable (anonymous manifest requests are denied), so the stack builds
-it from a pinned commit with `design/mcp.Dockerfile`. The pin is
-`MCP_REF`, defaulting to a commit in the file; change it deliberately, never by
-moving to `latest`. CI builds the image and starts it on every change under
-`design/`.
-
-## Why an MCP bridge
-
-The official Penpot MCP is driven by a browser plugin: a human keeps a Penpot
-tab open and clicks "Connect". That is unusable from a headless runtime, so the
-stack ships the community HTTP MCP server
-(`ghcr.io/zcube/penpot-mcp-server`), which talks to Penpot's API with an access
-token and needs no browser.
-
-If that server drifts or proves incomplete, the fallback is our own client over
-the same API: the profile row, the URL and the token stay the same.
+The shortcuts were all worse. The popular Penpot MCP servers carry **no license**
+(unusable in an MIT repository); one licensed alternative needs direct Postgres
+access, which is more privilege than a token; the official MCP is MPL-2.0 and
+clean, but it drives a Penpot browser tab through a plugin — the least reliable
+thing to put in a tool path. A CLI plus the `.penpot` round-trip covers the work
+without any of that.

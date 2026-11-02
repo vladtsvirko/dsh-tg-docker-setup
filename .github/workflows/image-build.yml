@@ -1,0 +1,27 @@
+name: Image build
+
+# Builds the runtime image on demand. The config check in CI cannot catch a bad
+# COPY or a broken Dockerfile, and the image is what a release ships, so this
+# runs before tagging a release and whenever the Dockerfile changes.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'Dockerfile'
+      - 'compose.yaml'
+      - '.github/workflows/image-build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the runtime image
+        run: |
+          cp .env.example .env
+          docker compose build dsh
+
+      - name: The image carries the penpot CLI
+        run: docker run --rm --entrypoint /usr/local/bin/penpot dsh-backend:$(cat VERSION) --help | head -5

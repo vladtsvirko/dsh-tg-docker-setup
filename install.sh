@@ -36,7 +36,6 @@ ALLOWED_USER_IDS="${ALLOWED_USER_IDS:-}"
 DSH_UPDATER_TOKEN="${DSH_UPDATER_TOKEN:-}"
 DESIGN="${DESIGN:-}"
 DSH_DESIGN_PORT="${DSH_DESIGN_PORT:-}"
-DSH_DESIGN_MCP_PORT="${DSH_DESIGN_MCP_PORT:-}"
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
@@ -217,7 +216,6 @@ read_existing_env
 [ -n "$DSH_PORT" ] || DSH_PORT=4310
 [ -n "$DESIGN" ] || DESIGN=none
 [ "$DESIGN" = docker ] && { [ -n "$DSH_DESIGN_PORT" ] || DSH_DESIGN_PORT=8090; }
-[ -n "$DSH_DESIGN_MCP_PORT" ] || DSH_DESIGN_MCP_PORT=4401
 [ -n "$DSH_PROVIDER" ] || DSH_PROVIDER=opencode-go
 if [ -z "$DSH_MODEL" ]; then
   case "$DSH_PROVIDER" in
@@ -268,7 +266,7 @@ printf '    web:       http://%s:%s/\n' "$DSH_BIND_IP" "$DSH_PORT"
 printf '    provider:  %s / %s\n' "$DSH_PROVIDER" "$DSH_MODEL"
 printf '    telegram:  %s\n' "$([ -n "$DSH_TELEGRAM_BOT_TOKEN" ] && echo configured || echo disabled)"
 if [ "$DESIGN" = docker ]; then
-  printf '    design:    Penpot on http://%s:%s/ (MCP on 127.0.0.1:%s)\n' "$DSH_BIND_IP" "$DSH_DESIGN_PORT" "$DSH_DESIGN_MCP_PORT"
+  printf '    design:    Penpot on http://%s:%s/\n' "$DSH_BIND_IP" "$DSH_DESIGN_PORT"
 else
   printf '    design:    none (re-run with --design docker to add it later)\n'
 fi
@@ -321,11 +319,7 @@ write_env() {
   if [ "$DESIGN" = docker ]; then
     set_env DSH_DESIGN_PORT "$DSH_DESIGN_PORT" "$file"
     set_env DSH_DESIGN_ENABLED 1 "$file"
-    if [ "$MODE" = docker ]; then
-      set_env DSH_DESIGN_MCP_URL "http://host.docker.internal:$DSH_DESIGN_MCP_PORT/mcp" "$file"
-    else
-      set_env DSH_DESIGN_MCP_URL "http://127.0.0.1:$DSH_DESIGN_MCP_PORT/mcp" "$file"
-    fi
+    set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$file"
   else
     set_env DSH_DESIGN_ENABLED 0 "$file"
   fi
@@ -366,7 +360,10 @@ design_apply() {
   fi
   set_env DSH_BIND_IP "$DSH_BIND_IP" "$env_file"
   set_env DSH_DESIGN_PORT "$DSH_DESIGN_PORT" "$env_file"
-  set_env DSH_DESIGN_MCP_PORT "$DSH_DESIGN_MCP_PORT" "$env_file"
+  set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$DIR/.env"
+  local token
+  token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
+  if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$DIR/.env"; fi
 
   log "starting Penpot (the first start pulls the images)"
   run docker compose --project-directory "$dir" -f "$dir/compose.yaml" up -d --build
@@ -538,6 +535,7 @@ link_bins() {
   run ln -sf "$DIR/supervisor.mjs" /usr/local/bin/dsh-supervisor
   run ln -sf "$DIR/healthcheck.sh" /usr/local/bin/dsh-healthcheck
   run ln -sf "$DIR/updater.mjs" /usr/local/bin/dsh-updater.mjs
+  run ln -sf "$DIR/design/penpot.mjs" /usr/local/bin/penpot
 }
 
 native_apply() {

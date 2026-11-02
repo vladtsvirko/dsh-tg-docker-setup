@@ -33,8 +33,8 @@ the `/data` volume expose; nothing else on the server is mounted.
 | `LICENSE` | MIT |
 | `.github/workflows/ci.yml` | Supervisor tests and shell syntax checks |
 | `install.sh` | One-command installer for both modes: interactive, `--check` for a dry run |
-| `design/` | Optional Penpot stack + MCP bridge for design work (`--design docker`) |
-| `docs/DESIGN.md` | The design stack: install, access token, data, removal |
+| `design/` | Optional Penpot stack + the `penpot` CLI for design work (`--design docker`) |
+| `docs/DESIGN.md` | The design stack: install, token, the `penpot` CLI, data, removal |
 | `docs/HOST.md` | Native (no-Docker) deployment: tiers, layout, updates, switching |
 
 ## Install

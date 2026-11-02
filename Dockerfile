@@ -66,8 +66,9 @@ COPY entrypoint.sh /usr/local/bin/dsh-entrypoint
 COPY healthcheck.sh /usr/local/bin/dsh-healthcheck
 COPY supervisor.mjs /usr/local/bin/dsh-supervisor
 COPY git-credentials.mjs /usr/local/bin/dsh-git-credentials.mjs
+COPY design/penpot.mjs /usr/local/bin/penpot
 RUN printf '#!/bin/sh\nexec node /usr/local/bin/dsh-git-credentials.mjs "$@"\n' > /usr/local/bin/dsh-git-credentials \
- && chmod 0755 /usr/local/bin/dsh-entrypoint /usr/local/bin/dsh-healthcheck /usr/local/bin/dsh-supervisor /usr/local/bin/dsh-git-credentials /usr/local/bin/dsh-git-credentials.mjs
+ && chmod 0755 /usr/local/bin/dsh-entrypoint /usr/local/bin/dsh-healthcheck /usr/local/bin/dsh-supervisor /usr/local/bin/dsh-git-credentials /usr/local/bin/dsh-git-credentials.mjs /usr/local/bin/penpot
 
 RUN mkdir -p /data/home /data/workspace && chown -R "${DSH_UID}:${DSH_GID}" /data
 

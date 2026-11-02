@@ -11,14 +11,12 @@
       "flag": "DSH_DESIGN_ENABLED",
       "health": {
         "url": "http://{bind}:{port}/",
-        "codes": [200, 302, 303, 304]
-      },
-      "mcp": {
-        "port": 4401,
-        "url": {
-          "docker": "http://host.docker.internal:4401/mcp",
-          "native": "http://127.0.0.1:4401/mcp"
-        }
+        "codes": [
+          200,
+          302,
+          303,
+          304
+        ]
       },
       "config": {
         "port": {
@@ -28,6 +26,11 @@
           "min": 1024,
           "max": 65535
         }
+      },
+      "agent": {
+        "urlEnv": "PENPOT_API_URL",
+        "tokenEnv": "PENPOT_ACCESS_TOKEN",
+        "cli": "penpot"
       }
     }
   }

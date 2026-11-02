@@ -159,29 +159,6 @@ apply_managed_block() {
 
 # Non-DeepSeek routes need their provider registered on the pi-ai plugin, plus an
 # explicit default model for new sessions.
-# The design stack's MCP server, when install.sh enabled it. The row is only
-# written while it is enabled, so removing the stack is one .env edit.
-set_design_patch() {
-  local block
-  block="$(mktemp)"
-  if [ "${DSH_DESIGN_ENABLED:-0}" = 1 ] && [ -n "${DSH_DESIGN_MCP_URL:-}" ]; then
-    cat > "$block" <<BLOCK
-# >>> dsh-design (managed by entrypoint.sh — edits here are overwritten)
-- insert:
-    - id: mcp-penpot
-      name: '@deepseek-ai/dsh-mcp-client'
-      config:
-        transport: streamable-http
-        serverName: penpot
-        url: '$DSH_DESIGN_MCP_URL'
-        failOnStartupError: false
-# <<< dsh-design
-BLOCK
-  fi
-  apply_managed_block dsh-design "$block"
-  rm -f "$block"
-}
-
 set_provider_patch() {
   local block
   block="$(mktemp)"
@@ -361,7 +338,6 @@ prepare() {
   setup_git_credentials
   init_profile
   set_provider_patch
-  set_design_patch
 
   log "model route: $PROVIDER/$MODEL"
   if [ -n "$KEY_ENV" ] && [ -z "$(printenv "$KEY_ENV" 2>/dev/null || true)" ]; then

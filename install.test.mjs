@@ -242,7 +242,7 @@ test('the design stack is opt-in and named in the plan', async () => {
   const on = await install(['--check', '--design', 'docker', '--yes'])
   assert.equal(on.code, 0)
   assert.match(on.out, /design:\s+Penpot on http:\/\/\S+:8090\//)
-  assert.match(on.out, /MCP on 127\.0\.0\.1:4401/)
+
 })
 
 test('an unknown design value is refused', async () => {
@@ -327,7 +327,7 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     assert.match(designEnv, /DSH_BIND_IP=127\.0\.0\.1/)
     assert.doesNotMatch(designEnv, /PENPOT_SECRET_KEY=change-me/)
     assert.match(mainEnv, /DSH_DESIGN_ENABLED=1/)
-    assert.match(mainEnv, /DSH_DESIGN_MCP_URL=http:\/\/host\.docker\.internal:4401\/mcp/)
+    assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:80\d\d/)
     assert.match(log, /compose --project-directory design -f design\/compose\.yaml up -d/)
     assert.match(log, /compose restart dsh/)
 

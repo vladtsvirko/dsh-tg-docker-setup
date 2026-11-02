@@ -138,7 +138,6 @@ test('components: catalog, validation and a fixed apply command', async () => {
           template: 'design/.env.example',
           flag: 'DSH_DESIGN_ENABLED',
           config: { port: { env: 'DSH_DESIGN_PORT', default: 8090, min: 1024, max: 65535 } },
-          mcp: { port: 4401, url: { docker: 'http://h:{port}/mcp', native: 'http://127.0.0.1:{port}/mcp' } },
           health: { url: 'http://{bind}:{port}/', codes: [200] },
         },
       },
@@ -245,7 +244,7 @@ test('components: the endpoint runs the real update.sh and wires the runtime', a
       const mainEnv = await readFile(join(repo, '.env'), 'utf8')
       const designEnv = await readFile(join(repo, 'design', '.env'), 'utf8')
       assert.match(mainEnv, /DSH_DESIGN_ENABLED=1/)
-      assert.match(mainEnv, /DSH_DESIGN_MCP_URL=http:\/\/host\.docker\.internal:4401\/mcp/)
+      assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:80\d\d/)
       assert.match(designEnv, /DSH_DESIGN_PORT=8092/)
     } finally {
       server.close()

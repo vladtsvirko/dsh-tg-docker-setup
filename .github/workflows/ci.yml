@@ -28,6 +28,9 @@ jobs:
       - name: Installer tests
         run: node --test install.test.mjs
 
+      - name: Penpot CLI tests
+        run: node --test penpot.test.mjs
+
       - name: Shell syntax
         run: bash -n entrypoint.sh healthcheck.sh update.sh install.sh host-install/setup-dsh-server.sh
 
