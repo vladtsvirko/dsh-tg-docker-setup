@@ -114,10 +114,21 @@ Native updates run as root (the updater service is root because restarting
 ./install.sh --mode docker      # from a native deployment
 ```
 
-Both modes use the same `<dir>/data`, so switching keeps the profile, sessions
-and workspace; `install.sh` stops the other mode first (one poller per bot
-token), then chowns the data to the new runtime user. The Telegram token, the
-updater token and the model route carry over from `.env`.
+Data lives in `<dir>/data` and the two modes have different default
+directories: docker uses the checkout, native uses `/srv/dsh`. `install.sh`
+stops the other mode first (one poller per bot token) and chowns the new data
+directory, but it does not copy anything. To switch without losing the profile,
+sessions and workspace, either install both modes with the same `--dir`, or copy
+`data/` across before the first start of the new mode:
+
+```sh
+sudo ./install.sh --mode native --dir /srv/dsh --check   # plan first
+sudo rsync -a ./data/ /srv/dsh/data/                     # then carry the data over
+sudo ./install.sh --mode native --dir /srv/dsh
+```
+
+The Telegram token, the updater token and the model route carry over from
+`.env`; copy that file too if the directories differ.
 
 What changes is the update authority: in Docker mode the agent cannot touch its
 runtime; in native mode it owns the checkout.

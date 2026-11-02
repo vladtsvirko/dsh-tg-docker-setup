@@ -25,7 +25,7 @@ SRC_DIR="$(pwd -P)"
 SETUP_VERSION="$(tr -d '\n' < "$SRC_DIR/VERSION")"
 DSH_VERSION="$(printf '%s' "$SETUP_VERSION" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+$//')"
 
-MODE="" TIER="" DIR="" CONFIG="" REF="" CHECK=0 YES=0
+MODE="" TIER="" DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0
 SERVICE_USER="${SERVICE_USER:-dsh}"
 DSH_PORT="${DSH_PORT:-}"
 DSH_BIND_IP="${DSH_BIND_IP:-}"
@@ -61,6 +61,8 @@ Options:
   --config FILE          read answers from FILE (KEY=VALUE, no shell)
   --yes, -y              accept defaults, never prompt
   --check                print the plan and change nothing
+  --uninstall            stop and remove the deployment (keeps data/)
+  --purge                with --uninstall: also delete data/, .env and backups/
   -h, --help             this text
 EOF
 }
@@ -68,7 +70,7 @@ EOF
 # --- answers from a file ---------------------------------------------------
 # Strict KEY=VALUE parsing: no sourcing, so a config file cannot execute code.
 CONFIG_KEYS="MODE TIER DIR SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL
-DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT"
+DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT PROVIDER_KEY"
 load_config() {
   local file="$1" line key value
   [ -f "$file" ] || die "no config file: $file"
@@ -113,11 +115,17 @@ while [ $# -gt 0 ]; do
     --config=*) shift ;;
     --yes|-y) YES=1; shift ;;
     --check)  CHECK=1; shift ;;
+    --uninstall) UNINSTALL=1; shift ;;
+    --purge)  PURGE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
 done
 
+
+if [ "$PURGE" = 1 ] && [ "$UNINSTALL" != 1 ]; then
+  die "--purge only makes sense with --uninstall"
+fi
 
 # --- prompts ---------------------------------------------------------------
 ask() {
@@ -172,11 +180,98 @@ read_existing_env() {
   [ -f "$DIR/.env" ] || return 0
   for key in DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL DSH_TELEGRAM_BOT_TOKEN \
              ALLOWED_USER_IDS DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT; do
-    [ -n "${!key:-}" ] && continue
     value="$(sed -n "s/^${key}=//p" "$DIR/.env" | head -1)"
+    if [ -n "${!key:-}" ]; then
+      # An exported variable silently winning over the deployed value is how a
+      # repair run rewrites a working allowlist by accident.
+      if [ -n "$value" ] && [ "${!key}" != "$value" ]; then
+        warn "$key is set in the environment and overrides the deployed value in $DIR/.env"
+      fi
+      continue
+    fi
     if [ -n "$value" ]; then printf -v "$key" '%s' "$value"; fi
   done
   return 0
+}
+
+# A repair run keeps the mode the deployment chose. Without this, `./install.sh`
+# or `./install.sh --yes` on a native host defaults to docker and converts (or
+# silently disables) the running install.
+if [ -z "$MODE" ]; then
+  for candidate in "$SRC_DIR/.env" /srv/dsh/.env; do
+    [ -f "$candidate" ] || continue
+    MODE="$(sed -n 's/^MODE=//p' "$candidate" | head -1)"
+    [ -n "$MODE" ] && break
+  done
+fi
+
+# --- uninstall -------------------------------------------------------------
+# Removing a deployment is a first-class operation: stopping stray containers by
+# hand is how a second poller survives. Data is kept unless --purge is passed,
+# and the checkout is never deleted — the last line says what to remove.
+uninstall_plan() {
+  printf '    mode:      %s\n' "$MODE"
+  printf '    directory: %s\n' "$DIR"
+  case "$MODE" in
+    docker) printf '    removes:   the compose stack (dsh, updater and the design stack if present)\n' ;;
+    native) printf '    removes:   dsh.service, dsh-updater.service and the /usr/local/bin launchers\n' ;;
+  esac
+  if [ "$PURGE" = 1 ]; then
+    printf '    deletes:   %s/data, %s/.env, %s/backups\n' "$DIR" "$DIR" "$DIR"
+  else
+    printf '    keeps:     %s/data, %s/.env, %s/backups (pass --purge to delete them)\n' "$DIR" "$DIR" "$DIR"
+  fi
+}
+
+uninstall_run() {
+  if [ "$MODE" = docker ]; then
+    if command -v docker >/dev/null 2>&1 && [ -f "$DIR/compose.yaml" ]; then
+      log "stopping the compose stack"
+      run bash -c "cd '$DIR' && docker compose down --remove-orphans" || warn "compose down failed; check docker compose ps"
+      if [ "$PURGE" = 1 ]; then
+        log "removing the images built for this deployment"
+        docker rmi "dsh-backend:$SETUP_VERSION" dsh-backend:self-previous \
+          "dsh-updater:$SETUP_VERSION" >/dev/null 2>&1 || true
+      fi
+    else
+      warn "no compose.yaml in $DIR — nothing to stop"
+    fi
+  else
+    if [ -f /etc/systemd/system/dsh.service ]; then
+      log "stopping and disabling the systemd units"
+      run systemctl disable --now dsh-updater.service 2>/dev/null || true
+      run systemctl disable --now dsh.service 2>/dev/null || true
+      run rm -f /etc/systemd/system/dsh.service /etc/systemd/system/dsh-updater.service
+      run systemctl daemon-reload
+    fi
+    local launcher
+    for launcher in dsh-entrypoint dsh-supervisor dsh-healthcheck dsh-updater.mjs penpot; do
+      [ -L "/usr/local/bin/$launcher" ] && run rm -f "/usr/local/bin/$launcher"
+    done
+    if [ "$PURGE" = 1 ]; then
+      if command -v systemctl >/dev/null 2>&1 && id "$SERVICE_USER" >/dev/null 2>&1; then
+        if command -v loginctl >/dev/null 2>&1; then
+          run loginctl disable-linger "$SERVICE_USER" 2>/dev/null || true
+        fi
+      fi
+    fi
+  fi
+
+  if [ "$PURGE" = 1 ]; then
+    log "deleting data, .env and backups in $DIR"
+    run rm -rf "$DIR/data" "$DIR/backups"
+    run rm -f "$DIR/.env"
+  fi
+
+  echo
+  log "uninstalled ($MODE mode)"
+  if [ "$PURGE" != 1 ]; then
+    printf '    kept:    %s/data, %s/.env, %s/backups\n' "$DIR" "$DIR" "$DIR"
+  fi
+  if id "$SERVICE_USER" >/dev/null 2>&1; then
+    printf '    user:    %s still exists (userdel -r %s if it owns nothing else)\n' "$SERVICE_USER" "$SERVICE_USER"
+  fi
+  printf '    dir:     %s still exists (rm -rf %s to remove the checkout)\n' "$DIR" "$DIR"
 }
 
 # --- decide ----------------------------------------------------------------
@@ -217,18 +312,52 @@ read_existing_env
 [ -n "$DESIGN" ] || DESIGN=none
 [ "$DESIGN" = docker ] && { [ -n "$DSH_DESIGN_PORT" ] || DSH_DESIGN_PORT=8090; }
 [ -n "$DSH_PROVIDER" ] || DSH_PROVIDER=opencode-go
-if [ -z "$DSH_MODEL" ]; then
-  case "$DSH_PROVIDER" in
-    opencode-go) DSH_MODEL=deepseek-v4.1-flash ;;
-    *)           DSH_MODEL=deepseek-v4-flash ;;
+provider_key_env() {
+  case "$1" in
+    opencode-go) printf %s OPENCODE_GO_API_KEY ;;
+    deepseek-official) printf %s DEEPSEEK_API_KEY ;;
+    *) printf %s DSH_PROVIDER_API_KEY ;;
   esac
+}
+
+model_default() {
+  case "$1" in
+    opencode-go) printf %s deepseek-v4.1-flash ;;
+    *) printf %s deepseek-v4-flash ;;
+  esac
+}
+
+if [ "$UNINSTALL" = 1 ]; then
+  echo
+  log "uninstall plan"
+  uninstall_plan
+  if [ "$CHECK" = 1 ]; then
+    echo
+    log "check only — nothing was changed"
+    exit 0
+  fi
+  if [ "$YES" != 1 ]; then
+    if [ ! -t 0 ]; then
+      die "refusing to uninstall without a terminal — add --yes to confirm"
+    fi
+    printf 'Type "yes" to continue: '
+    read -r answer || answer=""
+    [ "$answer" = yes ] || die "cancelled"
+  fi
+  uninstall_run
+  exit 0
 fi
 
 if [ "$CHECK" != 1 ]; then
   ask DSH_PORT "Web UI port" 4310
-  ask DSH_BIND_IP "Address to advertise (LAN IP, or 127.0.0.1 for host-only)" "$(detect_lan_ip)"
-  ask DSH_PROVIDER "Model provider" opencode-go
-  ask DSH_MODEL "Model" deepseek-v4.1-flash
+  ask DSH_BIND_IP "Web UI address: your LAN IP (phone/browser access) or 127.0.0.1 (host only)" "$(detect_lan_ip)"
+  ask DSH_PROVIDER "Model provider (opencode-go or deepseek-official)" opencode-go
+  # the model default follows the provider that was just chosen, not the one
+  # the pre-prompt default guessed
+  [ -n "$DSH_MODEL" ] || DSH_MODEL="$(model_default "$DSH_PROVIDER")"
+  ask DSH_MODEL "Model" "$(model_default "$DSH_PROVIDER")"
+  PROVIDER_KEY_ENV="$(provider_key_env "$DSH_PROVIDER")"
+  ask_secret PROVIDER_KEY "$PROVIDER_KEY_ENV (leave blank to add later)"
   ask_secret DSH_TELEGRAM_BOT_TOKEN "Telegram bot token"
   if [ -n "$DSH_TELEGRAM_BOT_TOKEN" ]; then
     ask ALLOWED_USER_IDS "Allowed Telegram user ids (comma separated)" ""
@@ -242,6 +371,10 @@ if [ "$CHECK" != 1 ]; then
     log "generated an updater token (stored in the deployment .env)"
   fi
 fi
+# Unattended runs never asked, so derive both from the provider that applies.
+[ -n "$DSH_PROVIDER" ] || DSH_PROVIDER=opencode-go
+[ -n "$DSH_MODEL" ] || DSH_MODEL="$(model_default "$DSH_PROVIDER")"
+
 [ -n "$DSH_BIND_IP" ] || DSH_BIND_IP="$(detect_lan_ip)"
 
 DATA_HOME="$DIR/data/home"
@@ -280,6 +413,15 @@ else
   printf '    updater:   sidecar on the internal ops network\n'
 fi
 
+if [ "$DSH_BIND_IP" != "127.0.0.1" ] && [ "$DSH_BIND_IP" != "localhost" ]; then
+  echo
+  warn "the web UI on http://$DSH_BIND_IP:$DSH_PORT/ is protected only by a sign-in"
+  warn "  token printed in the startup log. Anyone who can read that log, or follow the"
+  warn "  link, drives this agent and runs tools on this host as ${SERVICE_USER:-dsh}."
+  warn "  Keep it on a trusted network, or bind 127.0.0.1 and tunnel with:"
+  warn "  ssh -L $DSH_PORT:127.0.0.1:$DSH_PORT <user>@<host>"
+fi
+
 if [ "$CHECK" = 1 ]; then
   echo
   log "check only — nothing was changed"
@@ -311,6 +453,9 @@ write_env() {
   set_env DSH_BIND_IP "$DSH_BIND_IP" "$file"
   set_env DSH_PROVIDER "$DSH_PROVIDER" "$file"
   set_env DSH_MODEL "$DSH_MODEL" "$file"
+  if [ -n "${PROVIDER_KEY:-}" ]; then
+    set_env "${PROVIDER_KEY_ENV:-$(provider_key_env "$DSH_PROVIDER")}" "$PROVIDER_KEY" "$file"
+  fi
   set_env DSH_TELEGRAM_BOT_TOKEN "$DSH_TELEGRAM_BOT_TOKEN" "$file"
   set_env ALLOWED_USER_IDS "$ALLOWED_USER_IDS" "$file"
   set_env DSH_UPDATER_TOKEN "$DSH_UPDATER_TOKEN" "$file"
@@ -413,11 +558,18 @@ design_apply() {
 # bot token fight over the update queue, and two pollers drop messages.
 stop_other_mode() {
   if [ "$MODE" = native ]; then
-    if command -v docker >/dev/null 2>&1 && [ -f "$DIR/compose.yaml" ]; then
-      if ( cd "$DIR" && docker compose ps -q dsh 2>/dev/null | grep -q . ); then
-        log "stopping the docker deployment in $DIR"
-        run bash -c "cd '$DIR' && docker compose down --remove-orphans"
-      fi
+    # The docker deployment may live anywhere: the default docker dir is the
+    # checkout and the default native dir is /srv/dsh, so probing only $DIR
+    # left a running stack holding the port and the Telegram poller.
+    if command -v docker >/dev/null 2>&1; then
+      local candidate
+      for candidate in "$DIR" "$SRC_DIR" /srv/dsh /opt/dsh "$HOME/dsh"; do
+        [ -f "$candidate/compose.yaml" ] || continue
+        if ( cd "$candidate" && docker compose ps -q dsh 2>/dev/null | grep -q . ); then
+          log "stopping the docker deployment in $candidate"
+          run bash -c "cd '$candidate' && docker compose down --remove-orphans"
+        fi
+      done
     fi
   else
     if [ -f /etc/systemd/system/dsh.service ]; then
@@ -591,7 +743,15 @@ native_apply() {
   if ! command -v dsh >/dev/null 2>&1 || \
      [ "$(dsh --version 2>/dev/null | tr -d 'v[:space:]')" != "$DSH_VERSION" ]; then
     log "installing @deepseek-ai/dsh@$DSH_VERSION globally"
-    run npm install -g --silent "@deepseek-ai/dsh@$DSH_VERSION"
+    # Same two extras the image installs: pnpm builds the Telegram adapter, and
+    # --allow-scripts lets node-pty/koffi/dsh-subprocess-local build, without
+    # which the bash tool breaks. Omitting either leaves a half-working install.
+    run npm install -g --silent \
+      --allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs \
+      "@deepseek-ai/dsh@$DSH_VERSION" pnpm@11
+  elif ! command -v pnpm >/dev/null 2>&1; then
+    log "installing pnpm (the Telegram adapter builds with it)"
+    run npm install -g --silent pnpm@11
   fi
 
   # The unit resolves `dsh` through PATH; make sure the npm prefix is on it.
@@ -610,11 +770,19 @@ native_apply() {
 
   native_units
 
-  log "starting dsh.service"
-  run systemctl enable --now dsh.service
+  # A re-run must apply the new .env: `enable --now` leaves a running unit alone.
+  if systemctl is-active --quiet dsh.service 2>/dev/null; then
+    log "restarting dsh.service to apply the new environment"
+    run systemctl enable dsh.service
+    run systemctl restart dsh.service
+  else
+    log "starting dsh.service"
+    run systemctl enable --now dsh.service
+  fi
   if [ -n "$DSH_UPDATER_TOKEN" ]; then
-    log "starting dsh-updater.service"
-    run systemctl enable --now dsh-updater.service
+    log "restarting dsh-updater.service"
+    run systemctl enable dsh-updater.service
+    run systemctl restart dsh-updater.service
   else
     warn "no updater token — /system update all will degrade to host instructions"
   fi
@@ -631,14 +799,17 @@ if [ "$MODE" = docker ]; then docker_apply; else native_apply; fi
 
 echo
 log "installed: $SETUP_VERSION ($MODE mode)"
-printf '    web:     %s\n' "http://$DSH_BIND_IP:$DSH_PORT/"
+printf '    web:     %s\n' "http://$DSH_BIND_IP:$DSH_PORT/ (send /web in the bot chat for a signed link)"
 case "$MODE" in
   docker) printf '    logs:    docker compose logs -f dsh\n' ;;
   native) printf '    logs:    journalctl -u dsh.service -f\n' ;;
 esac
-if [ "$MODE" = native ] && [ -z "$(grep -E '^(OPENCODE_GO_API_KEY|DEEPSEEK_API_KEY)=.+' "$DIR/.env" 2>/dev/null || true)" ]; then
-  printf '    key:     add your provider key to %s/.env, then systemctl restart dsh\n' "$DIR"
+if [ -z "$(grep -E '^(OPENCODE_GO_API_KEY|DEEPSEEK_API_KEY)=.+' "$DIR/.env" 2>/dev/null || true)" ]; then
+  case "$MODE" in
+    native) printf '    key:     none yet — add %s to %s/.env, then systemctl restart dsh\n' "$(provider_key_env "$DSH_PROVIDER")" "$DIR" ;;
+    docker) printf '    key:     none yet — add %s to %s/.env, then docker compose up -d dsh\n' "$(provider_key_env "$DSH_PROVIDER")" "$DIR" ;;
+  esac
 fi
 printf '    update:  /system update all (Telegram) or ./update.sh --self (host)\n'
-printf '    switch:  ./install.sh --mode %s (migrates the data and stops the other mode)\n' \
+printf '    switch:  ./install.sh --mode %s (stops the other mode; data is not moved, see docs/HOST.md)\n' \
   "$([ "$MODE" = docker ] && echo native || echo docker)"

@@ -20,6 +20,40 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 const supervisor = join(here, 'supervisor.mjs')
 
+/**
+ * The harness writes `entrypoint.sh` stubs and executes them directly, so the
+ * temp directory must be mounted exec-capable. A hardened sandbox mounts /tmp
+ * `noexec`, and the symptom is a 15-second timeout rather than an error, so the
+ * capability is probed once and the suite skips instead of failing. Override the
+ * location with `DSH_TEST_TMPDIR=/some/exec/path`.
+ */
+const tmpRoot = process.env.DSH_TEST_TMPDIR ?? tmpdir()
+
+async function canExecIn(dir) {
+  const probe = join(await mkdtemp(join(dir, 'exec-probe-')), 'probe.sh')
+  try {
+    await writeFile(probe, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    await new Promise((resolve, reject) => {
+      spawn(probe, [], { stdio: 'ignore' })
+        .once('error', reject)
+        .once('exit', (code) => (code === 0 ? resolve() : reject(new Error(`exit ${String(code)}`))))
+    })
+    return true
+  } catch {
+    return false
+  } finally {
+    await rm(dirname(probe), { recursive: true, force: true })
+  }
+}
+
+const execAllowed = await canExecIn(tmpRoot)
+
+/** Skip the suite with a reason where a shell script cannot be executed. */
+const needsExec = (name, fn) =>
+  execAllowed
+    ? test(name, fn)
+    : test(name, (t) => t.skip(`temp directory ${tmpRoot} is mounted noexec; set DSH_TEST_TMPDIR`))
+
 const fakeRuntime = `import { appendFileSync, existsSync } from 'node:fs'
 if (process.env.FAKE_LOG) appendFileSync(process.env.FAKE_LOG, 'start\\n')
 if (process.env.FAKE_CRASH_FILE) {
@@ -53,7 +87,7 @@ async function waitFor(probe, { timeout = 10000, interval = 100, what = 'conditi
 }
 
 async function harness({ trialSeconds = 60, bootGrace = 30, entryExit = 0 } = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'supervisor-'))
+  const root = await mkdtemp(join(tmpRoot, 'supervisor-'))
   const profile = join(root, 'profiles', 'web')
   const state = join(root, 'state')
   const crash = join(root, 'crash')
@@ -160,7 +194,7 @@ const starts = async (log) => {
   return text.trim().split('\n').filter(Boolean).length
 }
 
-test('boots with a stable snapshot and a running runtime', async () => {
+needsExec('boots with a stable snapshot and a running runtime', async () => {
   const test1 = await harness()
   try {
     const status = await test1.status()
@@ -173,7 +207,7 @@ test('boots with a stable snapshot and a running runtime', async () => {
   }
 })
 
-test('a trial arms and commits, keeping the new state', async () => {
+needsExec('a trial arms and commits, keeping the new state', async () => {
   const test2 = await harness()
   try {
     const before = await starts(test2.log)
@@ -201,7 +235,7 @@ test('a trial arms and commits, keeping the new state', async () => {
   }
 })
 
-test('rollback restores the committed state', async () => {
+needsExec('rollback restores the committed state', async () => {
   const test3 = await harness()
   try {
     await test3.call('/restart', { trial: true })
@@ -224,7 +258,7 @@ test('rollback restores the committed state', async () => {
   }
 })
 
-test('a trial that never arms rolls back after the boot grace', async () => {
+needsExec('a trial that never arms rolls back after the boot grace', async () => {
   const test4 = await harness({ bootGrace: 1 })
   try {
     await test4.call('/restart', { trial: true })
@@ -238,7 +272,7 @@ test('a trial that never arms rolls back after the boot grace', async () => {
   }
 })
 
-test('a crash during the trial rolls back', async () => {
+needsExec('a crash during the trial rolls back', async () => {
   const test5 = await harness()
   try {
     await test5.call('/restart', { trial: true })
@@ -257,7 +291,7 @@ test('a crash during the trial rolls back', async () => {
   }
 })
 
-test('the deadline rolls the trial back', async () => {
+needsExec('the deadline rolls the trial back', async () => {
   const test6 = await harness({ trialSeconds: 5 })
   try {
     await test6.call('/restart', { trial: true })
@@ -274,7 +308,7 @@ test('the deadline rolls the trial back', async () => {
   }
 })
 
-test('a live trial opens without a restart and commits', async () => {
+needsExec('a live trial opens without a restart and commits', async () => {
   const test11 = await harness()
   try {
     const before = await starts(test11.log)
@@ -291,7 +325,7 @@ test('a live trial opens without a restart and commits', async () => {
   }
 })
 
-test('a live trial can be abandoned without touching the profile', async () => {
+needsExec('a live trial can be abandoned without touching the profile', async () => {
   const test12 = await harness()
   try {
     await writeFile(join(test12.profile, 'keep.txt'), 'keep')
@@ -306,7 +340,7 @@ test('a live trial can be abandoned without touching the profile', async () => {
   }
 })
 
-test('a live trial rolls back on the deadline', async () => {
+needsExec('a live trial rolls back on the deadline', async () => {
   const test13 = await harness({ trialSeconds: 5 })
   try {
     assert.equal((await test13.call('/trial/open', {})).status, 200)
@@ -322,7 +356,7 @@ test('a live trial rolls back on the deadline', async () => {
   }
 })
 
-test('a crash during a live trial rolls back', async () => {
+needsExec('a crash during a live trial rolls back', async () => {
   const test14 = await harness()
   try {
     assert.equal((await test14.call('/trial/open', {})).status, 200)
@@ -336,7 +370,7 @@ test('a crash during a live trial rolls back', async () => {
   }
 })
 
-test('the trial survives a supervisor restart and can still be committed', async () => {
+needsExec('the trial survives a supervisor restart and can still be committed', async () => {
   const test7 = await harness()
   try {
     await test7.call('/restart', { trial: true })
@@ -360,7 +394,7 @@ test('the trial survives a supervisor restart and can still be committed', async
   }
 })
 
-test('an update runs the entrypoint under a trial', async () => {
+needsExec('an update runs the entrypoint under a trial', async () => {
   const test15 = await harness()
   try {
     const before = await starts(test15.log)
@@ -379,7 +413,7 @@ test('an update runs the entrypoint under a trial', async () => {
   }
 })
 
-test('a failed update restores the previous state', async () => {
+needsExec('a failed update restores the previous state', async () => {
   const test16 = await harness({ entryExit: 1 })
   try {
     assert.equal((await test16.call('/update', {})).status, 200)
@@ -395,7 +429,7 @@ test('a failed update restores the previous state', async () => {
   }
 })
 
-test('a plain restart records an event the connector can announce', async () => {
+needsExec('a plain restart records an event the connector can announce', async () => {
   const test10 = await harness()
   try {
     const restarted = await test10.call('/restart', { trial: false })
@@ -409,7 +443,7 @@ test('a plain restart records an event the connector can announce', async () => 
   }
 })
 
-test('rollback without a trial is refused', async () => {
+needsExec('rollback without a trial is refused', async () => {
   const test9 = await harness()
   try {
     const rolled = await test9.call('/trial/rollback', {})
@@ -420,7 +454,7 @@ test('rollback without a trial is refused', async () => {
   }
 })
 
-test('requests without the token are refused', async () => {
+needsExec('requests without the token are refused', async () => {
   const test8 = await harness()
   try {
     const response = await fetch(`http://127.0.0.1:${test8.port}/status`)

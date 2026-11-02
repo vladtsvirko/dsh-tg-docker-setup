@@ -54,8 +54,12 @@ One command, two modes — the same release, the same tag policy:
   behaviour and how to switch modes are in [docs/HOST.md](docs/HOST.md).
 
 Both modes update from Telegram the same way (`/system update all` goes
-through the updater), and the host keeps `./update.sh --self`. Switching modes
-keeps `data/`, so the profile, sessions and workspace survive.
+through the updater), and the host keeps `./update.sh --self`.
+
+Switching modes stops the other mode first (one poller per bot token) but does
+**not** move data: the defaults are `./data` for docker and `/srv/dsh/data` for
+native, so point both at the same directory with `--dir`, or copy the data over
+yourself, before switching. [docs/HOST.md](docs/HOST.md) walks through it.
 
 ## Quick start
 
@@ -189,7 +193,7 @@ container is disposable and disappears with the container.
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.2-0.4.11
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.2-0.5.0
          DSH part          product part
 ```
 
@@ -248,13 +252,17 @@ public, since it holds no secrets.
 ```sh
 docker compose logs -f dsh            # runtime + adapter logs
 docker compose exec dsh /usr/local/bin/dsh-healthcheck   # exit 0 = serving (this is what the healthcheck runs)
-docker compose restart dsh            # after editing .env
+docker compose up -d dsh              # recreate after editing .env (restart keeps the old env)
 docker compose exec dsh dsh --version # what's actually installed
 docker compose run --rm dsh init      # re-run preparation only (e.g. new allowlist)
 ```
 
-**Change the allowlist / model after first boot:** edit `./data/home/profiles/web/cordis.patch.yml`
-directly (it's pinned once and left alone afterwards), then restart.
+**Change the allowlist / model after first boot:** edit `.env` (`ALLOWED_USER_IDS`,
+`DSH_MODEL`, `OPENCODE_GO_API_KEY`/`DEEPSEEK_API_KEY`), then `docker compose up -d dsh`.
+
+Do not edit `data/home/profiles/web/cordis.patch.yml` for this: the entrypoint
+regenerates its managed `# >>> dsh-telegram` and `# >>> dsh-provider` blocks from
+`.env` on every boot, so a hand edit there is reverted without a message.
 
 ## Publisher bots
 
@@ -485,11 +493,32 @@ container's subnet. Worth doing if you ever expose the bot to a group chat.
 | `docker compose ps` shows `(health: starting)` for a long time | the probe runs every 10s; the first ones land before the runtime is listening | `docker compose exec dsh /usr/local/bin/dsh-healthcheck; echo $?` — `0` means it is serving, whatever `ps` says |
 | UI loads but keeps saying **reconnecting** | the browser dials the address the container advertises (`172.x`), which it cannot reach | set `DSH_PUBLIC_URL` to the root you actually use, e.g. `http://192.0.2.10:4310/` (a documentation address; use your own) |
 | Bot silent after a dsh upgrade | adapter no longer mounts | re-grant the exemption, or move to the previous setup tag |
-| Bot says `⛔ You are not authorized` | your id isn't in `allowedUserIds` | edit `./data/home/profiles/web/cordis.patch.yml`, `docker compose restart dsh` |
+| Bot says `⛔ You are not authorized` | your id isn't in `allowedUserIds` | add it to `ALLOWED_USER_IDS` in `.env`, then `docker compose up -d dsh` |
 | `no space left on device` | sessions + pnpm store in `/data/home` | prune old sessions, move `DSH_HOME` to a bigger volume |
 | `/system update all` says updater unreachable | updater not running, token mismatch, or wrong `DSH_DOCKER_GID` | `docker compose ps updater`; `docker compose logs updater` |
 | `/system update all` says `canApply` false | `DSH_UPDATER_TOKEN` is empty | set it in `.env` and `docker compose up -d updater` |
 | Updater can't access Docker | `DSH_DOCKER_GID` does not match `getent group docker` | fix `.env`, `docker compose up -d updater` |
+
+## Removing it
+
+```sh
+./install.sh --uninstall --check     # the plan: what is stopped, what is kept
+./install.sh --uninstall             # asks for confirmation
+```
+
+It stops and removes the compose stack (or disables the systemd units and their
+`/usr/local/bin` launchers in native mode). It keeps `data/`, `.env` and
+`backups/` so a reinstall picks up where the old one left off, and it never
+deletes the checkout.
+
+`--purge` also deletes those three, plus the images built for the deployment:
+
+```sh
+./install.sh --uninstall --purge
+```
+
+The last lines of the run print what still exists — the service user and the
+checkout directory — and the exact command to remove each.
 
 ## Why not just a Unix user?
 

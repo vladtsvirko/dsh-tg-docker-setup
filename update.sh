@@ -77,6 +77,24 @@ wait_native_healthy() {
 # Run a command as the unprivileged runtime user, with the deployment's env.
 # Used by `--plugin` and by the native apply path to run the entrypoint's
 # prepare step without leaving root-owned files in the profile.
+# The systemd unit runs the launcher from /usr/local/bin; a partial install may
+# only have it inside the deployment directory. update.sh used to assume the
+# latter existed in $DEPLOY_DIR, so every native update failed to prepare.
+entrypoint_bin() {
+  # DSH_ENTRYPOINT lets a test (or an unusual install) name the launcher.
+  if [ -n "${DSH_ENTRYPOINT:-}" ] && [ -x "${DSH_ENTRYPOINT}" ]; then
+    printf %s "$DSH_ENTRYPOINT"
+  elif [ -x /usr/local/bin/dsh-entrypoint ]; then
+    printf %s /usr/local/bin/dsh-entrypoint
+  elif command -v dsh-entrypoint >/dev/null 2>&1; then
+    command -v dsh-entrypoint
+  elif [ -x "$DEPLOY_DIR/entrypoint.sh" ]; then
+    printf %s "$DEPLOY_DIR/entrypoint.sh"
+  else
+    return 1
+  fi
+}
+
 run_as_service() {
   local -a pass=(
     "HOME=$NATIVE_DATA/home"
@@ -158,12 +176,20 @@ native_apply() {
   if ! command -v dsh >/dev/null 2>&1 || \
      [ "$(dsh --version 2>/dev/null | tr -d 'v[:space:]')" != "$target_dsh" ]; then
     log "installing @deepseek-ai/dsh@$target_dsh"
-    npm install -g --silent "@deepseek-ai/dsh@$target_dsh" \
+    npm install -g --silent \
+      --allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs \
+      "@deepseek-ai/dsh@$target_dsh" pnpm@11 \
       || warn "could not install dsh $target_dsh — the health gate will decide"
   fi
 
   log "preparing the profile and the pinned connector"
-  if ! run_as_service "$DEPLOY_DIR/dsh-entrypoint" init; then
+  local entry
+  if ! entry="$(entrypoint_bin)"; then
+    warn "no entrypoint launcher in /usr/local/bin or $DEPLOY_DIR — rolling back to $cur"
+    native_rollback "$cur" "$snapshot"
+    return 1
+  fi
+  if ! run_as_service "$entry" init; then
     warn "prepare failed — rolling back to $cur"
     native_rollback "$cur" "$snapshot"
     return 1
@@ -360,6 +386,8 @@ snapshot_state() {
   local paths=(home)
   [ -d data/supervisor ] && paths+=(supervisor)
   tar czf "$file" -C data "${paths[@]}"
+  # the snapshot holds home/.dsh/git, i.e. live git tokens: never world-readable
+  chmod 600 "$file"
   # one rollback snapshot is enough (portable: no xargs -r in busybox)
   ls -1t "$BACKUP_DIR"/self-*.tgz 2>/dev/null | tail -n +2 | while IFS= read -r old; do rm -f "$old"; done
   printf '%s\n' "$file"
@@ -444,10 +472,16 @@ self_update() {
     "${COMPOSE[@]}" stop dsh >/dev/null 2>&1 || true
     git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 || true
     docker tag dsh-backend:self-previous "$(image_ref)"
+    set_env DSH_SETUP_VERSION "${cur#v}" "$ENV_FILE"
     start_and_wait force 0 || die "could not restart the previous setup"
     die "snapshot failed; previous setup restored"
   fi
   log "snapshot: $snapshot"
+
+  # compose passes .env into the container, and an env_file value beats the
+  # image ENV: without this the entrypoint keeps installing the connector tag of
+  # the release we are leaving, so /system update all silently kept the old bot.
+  set_env DSH_SETUP_VERSION "${target#v}" "$ENV_FILE"
 
   log "starting dsh"
   if ! start_and_wait; then
@@ -456,6 +490,7 @@ self_update() {
     restore_state "$snapshot" || warn "data restore failed — the snapshot is at $snapshot"
     git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 || true
     docker tag dsh-backend:self-previous "$(image_ref)"
+    set_env DSH_SETUP_VERSION "${cur#v}" "$ENV_FILE"
     if start_and_wait force 0; then
       verify || warn "rolled back, but verification complained — inspect: docker compose logs dsh"
       warn "rolled back to $cur; the previous setup is running"
@@ -538,7 +573,9 @@ restart_runtime() {
   if [ "$MODE" = native ]; then
     systemctl restart dsh.service
   else
-    "${COMPOSE[@]}" restart dsh
+    # recreate, not restart: restart keeps the container environment that
+    # env_file produced at create time, so a changed port or token never lands
+    "${COMPOSE[@]}" up -d dsh
   fi
 }
 
@@ -688,7 +725,9 @@ case "${1:---status}" in
   --plugin)
     log "re-resolving the Telegram adapter"
     if [ "$MODE" = native ]; then
-      run_as_service "$DEPLOY_DIR/dsh-entrypoint" reset-plugin
+      local entry
+      entry="$(entrypoint_bin)" || die "no entrypoint launcher found — reinstall with ./install.sh"
+      run_as_service "$entry" reset-plugin
       systemctl restart dsh.service
       wait_native_healthy && verify
     else

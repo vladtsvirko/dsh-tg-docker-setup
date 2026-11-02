@@ -459,6 +459,14 @@ prepare() {
 # where the published port never forwards. The default route uniquely names
 # the right interface (`ops` is internal and has no default route).
 web_bind_ip() {
+  # Native mode runs on the host, so DSH_BIND_IP is the real bind address and a
+  # host-only install must stay off the LAN. Inside the container the bind has
+  # to be the container's own address (dsh rejects wildcards) and the published
+  # port decides reachability, so the host-side value is not usable there.
+  if [ "${MODE:-docker}" = native ] && [ -n "${DSH_BIND_IP:-}" ]; then
+    printf '%s\n' "$DSH_BIND_IP"
+    return 0
+  fi
   local ip=""
   if command -v ip >/dev/null 2>&1; then
     ip="$(ip -4 route get 1.1.1.1 2>/dev/null \

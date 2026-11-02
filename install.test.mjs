@@ -188,7 +188,8 @@ test('update.sh --self-to applies natively: checkout, env, restart, health gate'
     await mkdir(join(dir, 'data', 'home'), { recursive: true })
     await mkdir(join(dir, 'data', 'supervisor'), { recursive: true })
     await writeFile(join(dir, 'data', 'home', 'profile.txt'), 'stable')
-    await stub(dir, 'dsh-entrypoint', `echo "entrypoint $*" >> ${log}`)
+    await mkdir(bins, { recursive: true })
+    await stub(bins, 'dsh-entrypoint', `echo "entrypoint $*" >> ${log}`)
 
     const git = (...args) => exec('git', ['-C', dir, ...args])
     await git('init', '-q')
@@ -217,7 +218,7 @@ test('update.sh --self-to applies natively: checkout, env, restart, health gate'
     await stub(bins, 'runuser', 'while [ "$1" != "--" ]; do shift; done; shift; exec "$@"')
 
     const { stdout } = await exec('bash', [join(dir, 'update.sh'), '--self-to', 'v0.2.1-rc.2-0.1.19'], {
-      env: { ...process.env, PATH: `${bins}:${process.env.PATH}`, ASSUME_YES: '1' },
+      env: { ...process.env, PATH: `${bins}:${process.env.PATH}`, ASSUME_YES: '1', DSH_ENTRYPOINT: join(bins, 'dsh-entrypoint') },
       timeout: 30000,
     })
     const calls = await readFile(log, 'utf8')
@@ -331,7 +332,7 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     assert.match(mainEnv, /PENPOT_PLUGIN_REF=github:vladtsvirko\/dsh-penpot-plugin#v\d+\.\d+\.\d+/)
     assert.match(mainEnv, /PENPOT_API_URL=http:\/\/design-frontend:8080/)
     assert.match(log, /compose --project-directory design -f design\/compose\.yaml up -d/)
-    assert.match(log, /compose restart dsh/)
+    assert.match(log, /compose up -d dsh/)
 
     await run(['--component', 'design', 'disable'])
     const after = await readFile(join(dir, '.env'), 'utf8')
@@ -409,7 +410,9 @@ test('configuring a running stack recreates it on the new port', async () => {
 
     assert.match(stdout, /starting design on 127\.0\.0\.1:8094/)
     assert.match(log, / up -d --build/)
-    assert.match(log, / restart dsh/)
+    // recreate, not restart: only `up -d` re-reads .env, so a changed port or
+    // token actually reaches the container
+    assert.match(log, / up -d dsh/)
     assert.match(mainEnv, /PENPOT_API_URL=http:\/\/design-frontend:8080/)
   } finally {
     await rm(outer, { recursive: true, force: true })
@@ -443,4 +446,30 @@ test('a component whose probe never answers is still considered applied', async 
   } finally {
     await rm(outer, { recursive: true, force: true })
   }
+})
+
+test('--uninstall --check prints what it would remove and touches nothing', async () => {
+  const result = await install(['--uninstall', '--check', '--yes'])
+  assert.equal(result.code, 0, result.err)
+  assert.match(result.out, /uninstall plan/)
+  assert.match(result.out, /keeps:\s+.*data, .*\.env, .*backups/)
+  assert.match(result.out, /check only — nothing was changed/)
+})
+
+test('--uninstall --purge --check says the data goes too', async () => {
+  const result = await install(['--uninstall', '--purge', '--check', '--yes'])
+  assert.equal(result.code, 0, result.err)
+  assert.match(result.out, /deletes:\s+.*data, .*\.env, .*backups/)
+})
+
+test('--purge without --uninstall is refused', async () => {
+  const result = await install(['--purge', '--check'])
+  assert.notEqual(result.code, 0)
+  assert.match(result.out, /--purge only makes sense with --uninstall/)
+})
+
+test('--uninstall without --yes and without a terminal refuses to run', async () => {
+  const result = await install(['--uninstall'], { env: { CI: '1' } })
+  assert.notEqual(result.code, 0)
+  assert.match(result.out, /refusing to uninstall without a terminal/)
 })
