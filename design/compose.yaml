@@ -87,7 +87,5 @@ services:
       - "${DSH_BIND_IP:-127.0.0.1}:${DSH_DESIGN_PORT:-8090}:8080"
     networks: [design]
 
-networks: [design]
-
 networks:
   design:
