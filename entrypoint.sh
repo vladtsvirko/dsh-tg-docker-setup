@@ -32,6 +32,8 @@ if [ -z "$PLUGIN_PKG" ]; then
   PLUGIN_PKG="${PLUGIN_PKG##*/}"
 fi
 ALLOWED_USER_IDS="${ALLOWED_USER_IDS:-}"
+# The one account that may run /system update|restart|rollback and /plugin.
+ADMIN_USER_ID="${DSH_ADMIN_USER_ID:-}"
 BOT_TOKEN="${DSH_TELEGRAM_BOT_TOKEN:-}"
 TELEGRAM_ENABLED="${DSH_TELEGRAM_ENABLED:-auto}"
 PENPOT_ENABLED="${PENPOT_ENABLED:-0}"
@@ -192,9 +194,14 @@ set_telegram_patch() {
   if [ "$mode" = none ]; then
     : # leave the block empty: removes any stale managed entry
   elif [ "$mode" = on ]; then
-    local ids=""
+    local ids="" admin_line=""
     if [ -n "$ALLOWED_USER_IDS" ]; then
       ids="$(printf '%s' "$ALLOWED_USER_IDS" | tr ',' ' ' | tr -s ' ' | sed 's/^ *//; s/ *$//; s/ /, /g')"
+    fi
+    # Omitted rather than defaulted: the connector then treats the control
+    # chat's owner as admin, which is what an upgraded deployment expects.
+    if [ -n "$ADMIN_USER_ID" ]; then
+      admin_line="    adminUserId: $ADMIN_USER_ID"
     fi
     # config keys shared by both connectors; no cwd, so an adapter that does not
     # declare one still validates
@@ -204,6 +211,7 @@ set_telegram_patch() {
   config:
     botToken: !!js process.env.DSH_TELEGRAM_BOT_TOKEN ?? ''
     allowedUserIds: [$ids]
+$admin_line
     provider: '$PROVIDER'
     model: '$MODEL'
 # <<< dsh-telegram

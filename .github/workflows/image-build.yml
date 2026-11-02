@@ -5,9 +5,14 @@ name: Image build
 # runs before tagging a release and whenever the Dockerfile changes.
 on:
   workflow_dispatch:
+  # Every release ships this image: build it whenever a release tag is pushed.
   push:
+    tags: ['v*']
+  # And when the image inputs change, before the tag exists.
+  pull_request:
     paths:
       - 'Dockerfile'
+      - 'updater.Dockerfile'
       - 'compose.yaml'
       - '.github/workflows/image-build.yml'
 

@@ -210,7 +210,7 @@ container is disposable and disappears with the container.
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.2-0.6.0
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.2-0.7.0
          DSH part          product part
 ```
 
@@ -235,6 +235,25 @@ and reinstalls when that ref changes. Therefore:
   the same version;
 - `/system update connector` reinstalls the **pinned** connector; it does not
   select a newer connector tag.
+
+### What 1.0 will mean
+
+`0.x` is the compatible line. A first `1.0.0` is not planned until these hold,
+each one backed by a test or a drill:
+
+1. **Upgrades are safe without flags** across minors, in both modes, including a
+   rollback that can be triggered from Telegram — `docs/UPGRADE.md` is the drill.
+2. **Data and configuration survive an upgrade** with no hand-editing:
+   `bindings.json`, `.env`, the profile and the workspace.
+3. **The surface is stable**: commands, environment names and the tag scheme stop
+   moving between minors.
+4. **Any failure is recoverable without reading the source**, from the chat or
+   with the two commands in `docs/LIMITS.md`.
+
+Known limits that 1.0 will not remove, and that are documented rather than
+hidden: the agent cannot send files to Telegram, one admin account owns the
+deployment-wide commands, and the provider key is the only thing that makes the
+agent answer — `/system status` reports both.
 
 The full policy, release checklist and coupling rules are in
 [`docs/VERSIONS.md`](docs/VERSIONS.md). The connector's tested DSH rows are in
@@ -263,6 +282,9 @@ previous plugin stays installed and two pollers fight over the same token.
 **The connector repo must be readable by the container.** A private repo needs a
 token or deploy key inside the image; the simplest path is to make the connector
 public, since it holds no secrets.
+
+Before the first upgrade you actually need, read
+[`docs/UPGRADE.md`](docs/UPGRADE.md) and run its rollback drill.
 
 ## Operating it
 
@@ -515,6 +537,9 @@ container's subnet. Worth doing if you ever expose the bot to a group chat.
 | `/system update all` says updater unreachable | updater not running, token mismatch, or wrong `DSH_DOCKER_GID` | `docker compose ps updater`; `docker compose logs updater` |
 | `/system update all` says `canApply` false | `DSH_UPDATER_TOKEN` is empty | set it in `.env` and `docker compose up -d updater` |
 | Updater can't access Docker | `DSH_DOCKER_GID` does not match `getent group docker` | fix `.env`, `docker compose up -d updater` |
+
+If you are validating a release, [`docs/UAT.md`](docs/UAT.md) is the
+step-by-step acceptance run for both modes.
 
 ## Removing it
 

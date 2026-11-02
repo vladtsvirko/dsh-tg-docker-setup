@@ -33,6 +33,7 @@ DSH_PROVIDER="${DSH_PROVIDER:-}"
 DSH_MODEL="${DSH_MODEL:-}"
 DSH_TELEGRAM_BOT_TOKEN="${DSH_TELEGRAM_BOT_TOKEN:-}"
 ALLOWED_USER_IDS="${ALLOWED_USER_IDS:-}"
+DSH_ADMIN_USER_ID="${DSH_ADMIN_USER_ID:-}"
 DSH_UPDATER_TOKEN="${DSH_UPDATER_TOKEN:-}"
 DESIGN="${DESIGN:-}"
 DSH_DESIGN_PORT="${DSH_DESIGN_PORT:-}"
@@ -70,7 +71,7 @@ EOF
 # --- answers from a file ---------------------------------------------------
 # Strict KEY=VALUE parsing: no sourcing, so a config file cannot execute code.
 CONFIG_KEYS="MODE TIER DIR SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL
-DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT PROVIDER_KEY"
+DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT PROVIDER_KEY"
 load_config() {
   local file="$1" line key value
   [ -f "$file" ] || die "no config file: $file"
@@ -179,7 +180,7 @@ read_existing_env() {
   local key value
   [ -f "$DIR/.env" ] || return 0
   for key in DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL DSH_TELEGRAM_BOT_TOKEN \
-             ALLOWED_USER_IDS DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT; do
+             ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT; do
     value="$(sed -n "s/^${key}=//p" "$DIR/.env" | head -1)"
     if [ -n "${!key:-}" ]; then
       # An exported variable silently winning over the deployed value is how a
@@ -364,6 +365,10 @@ if [ "$CHECK" != 1 ]; then
   ask_secret DSH_TELEGRAM_BOT_TOKEN "Telegram bot token"
   if [ -n "$DSH_TELEGRAM_BOT_TOKEN" ]; then
     ask ALLOWED_USER_IDS "Allowed Telegram user ids (comma separated)" ""
+    # Access and administration are separate questions: everyone allowed may use
+    # the agent, one account may update or roll back the deployment.
+    first_allowed="$(printf %s "${ALLOWED_USER_IDS%%,*}" | tr -d " ")"
+    ask DSH_ADMIN_USER_ID "Admin user id (may update/restart/roll back)" "$first_allowed"
   fi
   ask DESIGN "Install the Penpot design stack? (docker/none)" none
   if [ "$DESIGN" = docker ]; then
@@ -401,6 +406,9 @@ printf '    version:   %s (DSH %s)\n' "$SETUP_VERSION" "$DSH_VERSION"
 printf '    web:       http://%s:%s/\n' "$DSH_BIND_IP" "$DSH_PORT"
 printf '    provider:  %s / %s\n' "$DSH_PROVIDER" "$DSH_MODEL"
 printf '    telegram:  %s\n' "$([ -n "$DSH_TELEGRAM_BOT_TOKEN" ] && echo configured || echo disabled)"
+if [ -n "$DSH_ADMIN_USER_ID" ]; then
+  printf '    admin:     %s (may update, restart and roll back)\n' "$DSH_ADMIN_USER_ID"
+fi
 if [ "$DESIGN" = docker ]; then
   printf '    design:    Penpot on http://%s:%s/\n' "$DSH_BIND_IP" "$DSH_DESIGN_PORT"
 else
@@ -461,6 +469,7 @@ write_env() {
   fi
   set_env DSH_TELEGRAM_BOT_TOKEN "$DSH_TELEGRAM_BOT_TOKEN" "$file"
   set_env ALLOWED_USER_IDS "$ALLOWED_USER_IDS" "$file"
+  set_env DSH_ADMIN_USER_ID "$DSH_ADMIN_USER_ID" "$file"
   set_env DSH_UPDATER_TOKEN "$DSH_UPDATER_TOKEN" "$file"
   set_env DSH_SETUP_VERSION "$SETUP_VERSION" "$file"
   set_env DESIGN "$DESIGN" "$file"

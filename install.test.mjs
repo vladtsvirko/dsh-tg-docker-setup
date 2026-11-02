@@ -25,9 +25,16 @@ const exec = promisify(execFile)
 /** Run the installer, returning status and output instead of throwing. */
 async function install(args, { env = {}, cwd = here } = {}) {
   try {
+    // `undefined` in `env` deletes the variable: a test must not inherit
+    // the runner's ALLOWED_USER_IDS and silently test another deployment.
+    const merged = { ...process.env }
+    for (const [key, value] of Object.entries(env)) {
+      if (value === undefined) delete merged[key]
+      else merged[key] = value
+    }
     const { stdout, stderr } = await exec('bash', [join(here, 'install.sh'), ...args], {
       cwd,
-      env: { ...process.env, ...env },
+      env: merged,
     })
     return { code: 0, out: stdout + stderr }
   } catch (error) {
@@ -472,4 +479,36 @@ test('--uninstall without --yes and without a terminal refuses to run', async ()
   const result = await install(['--uninstall'], { env: { CI: '1' } })
   assert.notEqual(result.code, 0)
   assert.match(result.out, /refusing to uninstall without a terminal/)
+})
+
+test('an .env from an older release is repaired, not rejected', async () => {
+  // 0.4.0-era keys: no MODE, no DESIGN, no admin id, no provider key. The
+  // installer must fill the gaps from defaults and leave the file alone under
+  // --check, or an upgrade dirties a working deployment.
+  const dir = await mkdtemp(join(tmpdir(), 'install-old-env-'))
+  try {
+    const legacy = [
+      'DSH_PORT=4311',
+      'DSH_BIND_IP=127.0.0.1',
+      'DSH_PROVIDER=opencode-go',
+      'DSH_MODEL=deepseek-v4.1-flash',
+      'DSH_TELEGRAM_BOT_TOKEN=1:abc',
+      'ALLOWED_USER_IDS=42',
+      'DSH_UPDATER_TOKEN=secret',
+      '',
+    ].join('\n')
+    await writeFile(join(dir, '.env'), legacy)
+    const before = await readFile(join(dir, '.env'), 'utf8')
+    const result = await install(['--check', '--yes', '--dir', dir], {
+      env: { ALLOWED_USER_IDS: undefined, DSH_ADMIN_USER_ID: undefined, DESIGN: undefined },
+    })
+    assert.equal(result.code, 0, result.out)
+    assert.match(result.out, /mode:\s+docker/)
+    assert.match(result.out, /web:\s+http:\/\/127\.0\.0\.1:4311\//)
+    assert.match(result.out, /telegram:\s+configured/)
+    assert.match(result.out, /design:\s+none/)
+    assert.equal(await readFile(join(dir, '.env'), 'utf8'), before, '--check must not rewrite .env')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })

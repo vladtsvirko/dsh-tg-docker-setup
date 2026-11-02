@@ -41,6 +41,56 @@ run the runtime itself as root.
   It has no network, a read-only rootfs, and only `CHOWN` and `DAC_OVERRIDE`;
   the runtime itself never runs as root.
 
+## If a credential leaks
+
+The bot token, the provider key, the updater token and the web UI's sign-in
+token are all passwords. What to do, in the order that limits damage:
+
+**Bot token** (it can read every message the bot sees, and send as it):
+
+```sh
+# 1. revoke it: @BotFather → /revoke → pick the bot (the old token dies at once)
+# 2. put the new one in .env
+sed -i 's|^DSH_TELEGRAM_BOT_TOKEN=.*|DSH_TELEGRAM_BOT_TOKEN=<new>|' .env
+# 3. recreate the runtime so the entrypoint rewrites the connector config
+docker compose up -d dsh
+# 4. confirm the old poller is gone: no 409 "terminated by other getUpdates"
+docker compose logs --since 2m dsh | grep -i 'conflict\|terminated'
+```
+
+**Web UI sign-in token** (it grants browser access to the agent):
+
+```sh
+docker compose restart dsh   # a restart mints a new launch token
+```
+Every link handed out before the restart stops working. The token lives in the
+container log (`dsh web: …`), which is why the log is a credential: use
+`/web` in the bot chat instead of grepping it, and do not paste it in a group.
+
+**Provider key** (billing and rate limits):
+
+Revoke it in the provider console, put the new value in `.env`, then
+`docker compose up -d dsh`. `/system status` reports `key: set|missing`.
+
+**Updater token** (equivalent to root: it restarts the stack with a Docker
+socket):
+
+```sh
+# rotate it in .env, then recreate BOTH services so the sidecar and runtime agree
+sed -i 's|^DSH_UPDATER_TOKEN=.*|DSH_UPDATER_TOKEN=<new>|' .env
+docker compose up -d updater dsh
+```
+Empty (`DSH_UPDATER_TOKEN=`) disables apply entirely: `/system update all` then
+tells the user to update from the host.
+
+**Git token** (repository access only): rotate the profile in
+`data/home/.dsh/git`, and check the rollback snapshots — `backups/self-*.tgz`
+contains them and is `0600` for that reason.
+
+After any rotation, run `/system status` in the bot chat: it reports the web
+port, the key and the last agent error, which is the fastest way to see that the
+new credential is the one in use.
+
 ## What is not protected
 
 - A leaked bot token lets the holder poll and act as the bot until revoked with

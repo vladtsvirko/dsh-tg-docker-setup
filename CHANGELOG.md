@@ -8,6 +8,35 @@ supervisor, the updater and the entrypoint changed.
 Earlier releases are the git tags `v0.2.1-rc.2-0.1.x` … `v0.2.1-rc.2-0.4.11`;
 this file starts here.
 
+## 0.2.1-rc.2-0.7.0
+
+### Added
+
+- **`install.sh` asks who the admin is.** `DSH_ADMIN_USER_ID` is written to
+  `.env` (it defaults to the first allowed id) and the plan shows it. Access and
+  administration are now separate: one account may update, restart, roll back or
+  change plugins.
+- **`docs/UPGRADE.md`**: what an upgrade touches, compatible vs crossing, the
+  trial and how to confirm or roll it back, a rollback drill you can run while
+  nothing is at stake, the recovery table for every stranded state, and the
+  upgrade path from 0.4.x.
+- **`docs/UAT.md`**: the acceptance run for both modes, with the exact commands
+  and the expected output per step.
+- **`SECURITY.md` has a credential runbook**: bot token, web sign-in token,
+  provider key, updater token and git token — how to revoke each, how to apply
+  the replacement, and how to confirm the new one is live.
+- **CI on every release tag**: the image is built, and native mode runs a real
+  install → update → uninstall (`native-smoke.yml`, also weekly and on PRs that
+  touch the installer, the updater or the units).
+- `update.test.mjs` runs in CI.
+
+### Fixed
+
+- `README.md` gains "What 1.0 will mean" (the four promises) so the release
+  policy is stated where a user meets it.
+- An `.env` from an older release is covered by a test: missing keys are filled
+  from defaults, and `--check` leaves the file untouched.
+
 ## 0.2.1-rc.2-0.6.0
 
 ### Fixed

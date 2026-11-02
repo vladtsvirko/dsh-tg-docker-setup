@@ -1,43 +1,72 @@
 name: Native smoke
 
 # Native mode cannot be exercised from the runtime container (no systemd, no
-# root), so a real install is verified here, on demand. This job installs the
-# current checkout with install.sh, asserts both services and the web port, and
-# tears everything down. It never runs on push: it is a manual check for a
-# change that touches install.sh, update.sh or the systemd units.
+# root), so a real install is verified here: install from the previous release,
+# update to the tag pushed, assert the launcher/units/ports, then uninstall.
+# This is the leg that only ever ran on a maintainer's host — and the one where
+# a missing launcher went unnoticed for several releases.
 on:
   workflow_dispatch:
+  push:
+    tags: ['v*']
+  schedule:
+    # A moving target: a runner image change or an upstream DSH release should
+    # not wait for the next tag to be noticed.
+    - cron: '17 4 * * 1'
+  pull_request:
+    paths:
+      - 'install.sh'
+      - 'update.sh'
+      - 'entrypoint.sh'
+      - 'healthcheck.sh'
+      - 'supervisor.mjs'
+      - 'updater.mjs'
+      - 'host-install/**'
+      - '.github/native-answers.env'
+      - '.github/workflows/native-smoke.yml'
 
 jobs:
   native:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
-          # update.sh and the installer resolve release tags.
+          # update.sh resolves release tags and install.sh fetches them.
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: 24
 
-      - name: Install natively
-        # --ref HEAD: smoke-test the working tree, not the previous release tag.
-        run: sudo -E ./install.sh --config .github/native-answers.env --yes --ref "$(git rev-parse HEAD)"
+      - name: Which release is this, and what came before it
+        id: versions
+        run: |
+          version="$(cat VERSION)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          previous="$(git tag --list 'v*' --sort=-v:refname | awk -v v="v$version" '$0 != v' | head -1)"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          echo "this: v$version, previous: ${previous:-none}"
 
-      - name: The plan is readable and idempotent
-        run: sudo -E ./install.sh --check --config .github/native-answers.env
+      - name: Install the previous release
+        if: steps.versions.outputs.previous != ''
+        # Installing the previous tag first is what makes the next step a real
+        # update rather than a re-install of the same tree.
+        run: |
+          sudo -E ./install.sh --config .github/native-answers.env --yes \
+            --ref "${{ steps.versions.outputs.previous }}"
+
+      - name: Install from this checkout when there is no previous release
+        if: steps.versions.outputs.previous == ''
+        run: sudo -E ./install.sh --config .github/native-answers.env --yes --ref HEAD
 
       - name: Both services are active
         run: |
           sudo systemctl is-active --quiet dsh.service
           sudo systemctl is-active --quiet dsh-updater.service
-          sudo systemctl status --no-pager dsh.service
 
       - name: The runtime answers
         run: |
-          export DSH_PORT=4311
           for _ in $(seq 1 30); do
             if sudo -E /usr/local/bin/dsh-healthcheck; then echo "healthy"; exit 0; fi
             sleep 4
@@ -46,18 +75,43 @@ jobs:
           sudo journalctl -u dsh.service --no-pager -n 80
           exit 1
 
+      - name: The launcher exists where update.sh looks for it
+        # The native update path used to run $DEPLOY_DIR/dsh-entrypoint, which no
+        # installer creates: every native update failed to prepare and rolled back.
+        run: test -x /usr/local/bin/dsh-entrypoint
+
+      - name: Update to this release
+        if: steps.versions.outputs.previous != ''
+        run: |
+          sudo -E ASSUME_YES=1 ./update.sh --self-to "v${{ steps.versions.outputs.version }}"
+          grep -q "^DSH_SETUP_VERSION=${{ steps.versions.outputs.version }}$" /srv/dsh-ci/.env
+          sudo systemctl is-active --quiet dsh.service
+
+      - name: The plan is readable and idempotent
+        run: sudo -E ./install.sh --check --config .github/native-answers.env
+
       - name: The updater answers on loopback only
         run: |
           curl -fsS -H "Authorization: Bearer ci-updater-token" http://127.0.0.1:8787/health
-          # No public listener: the port must not be reachable on the LAN address.
           addr="$(ip -4 route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
           if curl -fsS -m 3 "http://${addr}:8787/health" >/dev/null 2>&1; then
             echo "updater is reachable on ${addr} — it must stay on loopback"
             exit 1
           fi
 
+      - name: Uninstall removes the units and keeps the data
+        run: |
+          sudo -E ./install.sh --uninstall --yes --config .github/native-answers.env
+          if sudo systemctl is-active --quiet dsh.service; then
+            echo "dsh.service is still active after uninstall"
+            exit 1
+          fi
+          test -f /srv/dsh-ci/.env
+          test -d /srv/dsh-ci/data/home
+
       - name: Clean up
         if: always()
         run: |
           sudo systemctl disable --now dsh-updater.service dsh.service || true
-          sudo rm -rf /srv/dsh-ci
+          sudo rm -f /etc/systemd/system/dsh.service /etc/systemd/system/dsh-updater.service
+          sudo rm -rf /srv/dsh-ci /srv/dsh
