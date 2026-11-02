@@ -294,3 +294,22 @@ needsExec('a docker update that fails its health gate restores the old version',
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+needsExec('the native entrypoint runs from the workspace directory', async () => {
+  // `dsh` loads the .env of its working directory and refuses launch-only keys
+  // there. Running prepare from the deployment directory — where .env lives, and
+  // where the documented `./update.sh --self` is executed — made every native
+  // update fail with "DSH_BIND_IP … export it instead".
+  const dir = await deployment({
+    env: 'MODE=native\nDSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n',
+    bins: { runuser: 'while [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"' },
+  })
+  try {
+    const workspace = join(dir, 'data', 'workspace')
+    await mkdir(workspace, { recursive: true })
+    const out = await source(dir, 'run_as_service pwd')
+    assert.equal(out, workspace)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

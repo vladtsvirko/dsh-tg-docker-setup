@@ -8,6 +8,20 @@ supervisor, the updater and the entrypoint changed.
 Earlier releases are the git tags `v0.2.1-rc.2-0.1.x` … `v0.2.1-rc.2-0.4.11`;
 this file starts here.
 
+## 0.2.1-rc.2-0.7.2
+
+### Fixed
+
+- **Native prepare ran from the wrong directory.** `run_as_service` inherited
+  the caller's cwd, so `cd /srv/dsh && ./update.sh --self` — the way the header
+  says to run it — invoked `dsh plugin add` in the directory that holds `.env`.
+  `dsh` loads the `.env` of its working directory and refuses launch-only keys
+  there (`DSH_BIND_IP … export it instead`), so every native update failed to
+  prepare and rolled back. It now runs from `data/workspace`, exactly as the
+  systemd unit does, with a test that asserts the directory.
+- The native smoke workflow prints the update log and the journal when its update
+  step fails, instead of only "step failed".
+
 ## 0.2.1-rc.2-0.7.1
 
 ### Fixed

@@ -88,7 +88,15 @@ jobs:
         # From the deployment, the way an operator runs it: update.sh reads .env
         # and VERSION next to itself, and the deployment is a separate checkout.
         run: |
-          sudo -E bash -c 'cd /srv/dsh-ci && ASSUME_YES=1 ./update.sh --self-to v${{ steps.versions.outputs.version }}'
+          set -o pipefail
+          if ! sudo -E bash -c 'cd /srv/dsh-ci && ASSUME_YES=1 ./update.sh --self-to v${{ steps.versions.outputs.version }}' 2>&1 | tee /tmp/update.log; then
+            echo "::group::update.sh tail"
+            tail -60 /tmp/update.log
+            echo "::endgroup::"
+            sudo journalctl -u dsh.service --no-pager -n 60 || true
+            sudo -E bash -c 'cd /srv/dsh-ci && ./update.sh --status' || true
+            exit 1
+          fi
           grep -q "^DSH_SETUP_VERSION=${{ steps.versions.outputs.version }}$" /srv/dsh-ci/.env
           sudo systemctl is-active --quiet dsh.service
 

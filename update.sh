@@ -123,7 +123,13 @@ run_as_service() {
     value="$(env_get "$key")"
     [ -n "$value" ] && pass+=("$key=$value")
   done
-  runuser -u "$SERVICE_USER" -- env "${pass[@]}" "$@"
+  # Run from the workspace directory, exactly as the systemd unit does. `dsh`
+  # loads the .env of its working directory and refuses launch-only keys there
+  # ("DSH_BIND_IP … export it instead"), so running this from the deployment
+  # directory — the documented way — made every native prepare fail.
+  local workdir="$NATIVE_DATA/workspace"
+  [ -d "$workdir" ] || workdir=/
+  ( cd "$workdir" && runuser -u "$SERVICE_USER" -- env "${pass[@]}" "$@" )
 }
 
 native_snapshot() {
