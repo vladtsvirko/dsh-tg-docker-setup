@@ -8,6 +8,16 @@ supervisor, the updater and the entrypoint changed.
 Earlier releases are the git tags `v0.2.1-rc.2-0.1.x` … `v0.2.1-rc.2-0.4.11`;
 this file starts here.
 
+## 0.2.1-rc.2-0.7.1
+
+### Fixed
+
+- **The native smoke workflow had two bugs of its own**, which is why its 0.7.0
+  run failed on the first real tag: it probed the runtime on the default port
+  4310 while the CI answers pin 4311, and it ran `update.sh` from the checkout
+  instead of the deployment directory (where `.env` and `VERSION` live). Both are
+  fixed; the tag exists so the released workflow is one that runs green.
+
 ## 0.2.1-rc.2-0.7.0
 
 ### Added

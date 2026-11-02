@@ -67,11 +67,14 @@ jobs:
 
       - name: The runtime answers
         run: |
+          # The answers file may pin a non-default port; the probe defaults to
+          # 4310, so pass what the deployment actually wrote.
+          port="$(sed -n 's/^DSH_PORT=//p' /srv/dsh-ci/.env | head -1)"
           for _ in $(seq 1 30); do
-            if sudo -E /usr/local/bin/dsh-healthcheck; then echo "healthy"; exit 0; fi
+            if sudo -E env DSH_PORT="${port:-4311}" /usr/local/bin/dsh-healthcheck; then echo "healthy"; exit 0; fi
             sleep 4
           done
-          echo "dsh did not become healthy"
+          echo "dsh did not become healthy on port ${port:-4311}"
           sudo journalctl -u dsh.service --no-pager -n 80
           exit 1
 
@@ -82,8 +85,10 @@ jobs:
 
       - name: Update to this release
         if: steps.versions.outputs.previous != ''
+        # From the deployment, the way an operator runs it: update.sh reads .env
+        # and VERSION next to itself, and the deployment is a separate checkout.
         run: |
-          sudo -E ASSUME_YES=1 ./update.sh --self-to "v${{ steps.versions.outputs.version }}"
+          sudo -E bash -c 'cd /srv/dsh-ci && ASSUME_YES=1 ./update.sh --self-to v${{ steps.versions.outputs.version }}'
           grep -q "^DSH_SETUP_VERSION=${{ steps.versions.outputs.version }}$" /srv/dsh-ci/.env
           sudo systemctl is-active --quiet dsh.service
 
