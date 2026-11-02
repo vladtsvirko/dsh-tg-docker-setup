@@ -8,6 +8,16 @@ supervisor, the updater and the entrypoint changed.
 Earlier releases are the git tags `v0.2.1-rc.2-0.1.x` … `v0.2.1-rc.2-0.4.11`;
 this file starts here.
 
+## 0.2.1-rc.2-0.7.4
+
+### Fixed
+
+- **The native smoke job installed a ref its deployment repository did not
+  have.** `install.sh` initialises its own git repository and fetches tags, so
+  `--ref HEAD` (a commit from the workflow checkout) was never there; the run
+  now installs the release tag the workflow was triggered by, and on a branch run
+  the latest tag. The PR trigger is gone: a branch ref cannot be installed.
+
 ## 0.2.1-rc.2-0.7.3
 
 ### Fixed

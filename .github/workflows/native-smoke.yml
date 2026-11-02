@@ -1,10 +1,11 @@
 name: Native smoke
 
 # Native mode cannot be exercised from the runtime container (no systemd, no
-# root), so a real install is verified here: install from the previous release,
-# update to the tag pushed, assert the launcher/units/ports, then uninstall.
-# This is the leg that only ever ran on a maintainer's host — and the one where
-# a missing launcher went unnoticed for several releases.
+# root), so a real install is verified here: install the release tag, assert the
+# units, the health probe and the launcher, run the update path from the
+# deployment directory, then uninstall. This is the leg that only ever ran on a
+# maintainer's host — and the one where a missing launcher went unnoticed for
+# several releases.
 on:
   workflow_dispatch:
   push:
@@ -13,17 +14,6 @@ on:
     # A moving target: a runner image change or an upstream DSH release should
     # not wait for the next tag to be noticed.
     - cron: '17 4 * * 1'
-  pull_request:
-    paths:
-      - 'install.sh'
-      - 'update.sh'
-      - 'entrypoint.sh'
-      - 'healthcheck.sh'
-      - 'supervisor.mjs'
-      - 'updater.mjs'
-      - 'host-install/**'
-      - '.github/native-answers.env'
-      - '.github/workflows/native-smoke.yml'
 
 jobs:
   native:
@@ -39,21 +29,27 @@ jobs:
         with:
           node-version: 24
 
-      - name: Which release is this, and what came before it
-        id: versions
+      - name: Which release to install
+        id: release
+        # The installer initialises its own git repository and checks out a ref
+        # there, so the ref has to exist on the remote: a release tag. A branch
+        # run (nightly) tests the latest release instead.
         run: |
-          version="$(cat VERSION)"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          previous="$(git tag --list 'v*' --sort=-v:refname | awk -v v="v$version" '$0 != v' | head -1)"
-          echo "previous=$previous" >> "$GITHUB_OUTPUT"
-          echo "this: v$version, previous: ${previous:-none}"
+          if tag="$(git describe --tags --exact-match 2>/dev/null)"; then
+            echo "ref=$tag" >> "$GITHUB_OUTPUT"
+            echo "on a release tag: $tag"
+          else
+            tag="$(git describe --tags --abbrev=0)"
+            echo "ref=$tag" >> "$GITHUB_OUTPUT"
+            echo "not on a tag; testing the latest release $tag"
+          fi
 
       - name: Install this release
-        # The job exercises the code in `git rev-parse HEAD`, not the previous
-        # tag: an update is driven by the release that is *installed*, so
-        # installing 0.7.1 and updating to 0.7.2 still runs 0.7.1's update path.
-        # `--plugin` below is the same prepare/restart/health path an update uses.
-        run: sudo -E ./install.sh --config .github/native-answers.env --yes --ref HEAD
+        # It installs the release under test (the tag this workflow was triggered
+        # by), then `--plugin` below runs the same prepare, restart and health
+        # path an update takes — from the deployment directory, which is where a
+        # real one is run.
+        run: sudo -E ./install.sh --config .github/native-answers.env --yes --ref "${{ steps.release.outputs.ref }}"
 
       - name: Both services are active
         run: |
