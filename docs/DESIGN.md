@@ -96,6 +96,15 @@ docker compose --project-directory design -f design/compose.yaml down
 - The access token is a credential: anyone with it can read and modify every
   design the account can reach. Keep `design/.env` at `0600`.
 
+## Why the bridge is built locally
+
+Upstream publishes `ghcr.io/zcube/penpot-mcp-server`, but that package is not
+publicly pullable (anonymous manifest requests are denied), so the stack builds
+it from a pinned commit with `design/mcp.Dockerfile`. The pin is
+`MCP_REF`, defaulting to a commit in the file; change it deliberately, never by
+moving to `latest`. CI builds the image and starts it on every change under
+`design/`.
+
 ## Why an MCP bridge
 
 The official Penpot MCP is driven by a browser plugin: a human keeps a Penpot

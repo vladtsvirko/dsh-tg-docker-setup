@@ -90,7 +90,14 @@ services:
   # Headless bridge: talks to Penpot over its HTTP API, so the agent needs no
   # browser tab. The runtime reaches it on loopback via host.docker.internal.
   design-mcp:
-    image: ghcr.io/zcube/penpot-mcp-server:latest
+    # Built from design/mcp.Dockerfile: the upstream ghcr package is not
+    # publicly pullable, so the stack pins a commit and builds it.
+    build:
+      context: .
+      dockerfile: mcp.Dockerfile
+      args:
+        MCP_REF: ${DESIGN_MCP_REF:-389545cfacffaca7465eedac90892f0db92e1f16}
+    image: dsh-design-mcp:local
     restart: unless-stopped
     depends_on: [design-frontend]
     environment:

@@ -369,7 +369,7 @@ design_apply() {
   set_env DSH_DESIGN_MCP_PORT "$DSH_DESIGN_MCP_PORT" "$env_file"
 
   log "starting Penpot (the first start pulls the images)"
-  run docker compose --project-directory "$dir" -f "$dir/compose.yaml" up -d
+  run docker compose --project-directory "$dir" -f "$dir/compose.yaml" up -d --build
 
   log "waiting for Penpot on http://$DSH_BIND_IP:$DSH_DESIGN_PORT/"
   local waited=0

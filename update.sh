@@ -598,7 +598,7 @@ component_apply() {
   case "$action" in
     enable|configure)
       log "starting $name on $bind:$port"
-      docker compose --project-directory "$compose_dir" -f "$compose_dir/$(basename "$(component_field "$name" compose)")" up -d || die "docker compose failed for $name"
+      docker compose --project-directory "$compose_dir" -f "$compose_dir/$(basename "$(component_field "$name" compose)")" up -d --build || die "docker compose failed for $name"
       set_env "$flag" 1 "$ENV_FILE"
       local mcp_url
       mcp_url="$(node -e '
