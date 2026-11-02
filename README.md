@@ -37,6 +37,23 @@ the `/data` volume expose; nothing else on the server is mounted.
 | `docs/DESIGN.md` | The design stack: install, token, the plugin and CLI, data, removal |
 | `docs/HOST.md` | Native (no-Docker) deployment: tiers, layout, updates, switching |
 
+## Before you start
+
+The installer cannot create these; have them ready or the first run ends with a
+working runtime and no bot.
+
+| You need | Why | Where |
+|---|---|---|
+| Docker + Compose (docker mode) or Node ≥ 22 + systemd (native) | the runtime | your distro |
+| A provider API key | the agent cannot answer without one | the installer now asks for it |
+| A bot token | the Telegram surface | [@BotFather](https://t.me/BotFather) → `/newbot` |
+| **Privacy mode off** for that bot | otherwise it never sees plain messages in topics, which is the whole input path | `/setprivacy` → Disable |
+| A group with **Topics enabled**, bot as admin with *Manage Topics* | groups are workspaces, topics are sessions | group settings |
+| Your numeric Telegram id | the allow-list is empty by default and the bot refuses everyone else | [@userinfobot](https://t.me/userinfobot) |
+
+The bot cannot create the group; `workspace new` prints a one-tap
+`?startgroup=` link, and you create it.
+
 ## Install
 
 One command, two modes — the same release, the same tag policy:
