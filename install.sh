@@ -336,6 +336,9 @@ if [ "$UNINSTALL" = 1 ]; then
     log "check only — nothing was changed"
     exit 0
   fi
+  if [ "$MODE" = native ] && [ "$(id -u)" != 0 ]; then
+    die "native mode removes systemd units — run with sudo"
+  fi
   if [ "$YES" != 1 ]; then
     if [ ! -t 0 ]; then
       die "refusing to uninstall without a terminal — add --yes to confirm"
