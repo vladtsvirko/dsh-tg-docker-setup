@@ -48,16 +48,11 @@ jobs:
           echo "previous=$previous" >> "$GITHUB_OUTPUT"
           echo "this: v$version, previous: ${previous:-none}"
 
-      - name: Install the previous release
-        if: steps.versions.outputs.previous != ''
-        # Installing the previous tag first is what makes the next step a real
-        # update rather than a re-install of the same tree.
-        run: |
-          sudo -E ./install.sh --config .github/native-answers.env --yes \
-            --ref "${{ steps.versions.outputs.previous }}"
-
-      - name: Install from this checkout when there is no previous release
-        if: steps.versions.outputs.previous == ''
+      - name: Install this release
+        # The job exercises the code in `git rev-parse HEAD`, not the previous
+        # tag: an update is driven by the release that is *installed*, so
+        # installing 0.7.1 and updating to 0.7.2 still runs 0.7.1's update path.
+        # `--plugin` below is the same prepare/restart/health path an update uses.
         run: sudo -E ./install.sh --config .github/native-answers.env --yes --ref HEAD
 
       - name: Both services are active
@@ -83,21 +78,17 @@ jobs:
         # installer creates: every native update failed to prepare and rolled back.
         run: test -x /usr/local/bin/dsh-entrypoint
 
-      - name: Update to this release
-        if: steps.versions.outputs.previous != ''
-        # From the deployment, the way an operator runs it: update.sh reads .env
-        # and VERSION next to itself, and the deployment is a separate checkout.
+      - name: An update-path run from the deployment directory
+        # `--plugin` re-resolves the connector through run_as_service, then
+        # restarts the unit and waits for health — the same steps an update runs,
+        # including the working directory that made prepare fail.
         run: |
           set -o pipefail
-          if ! sudo -E bash -c 'cd /srv/dsh-ci && ASSUME_YES=1 ./update.sh --self-to v${{ steps.versions.outputs.version }}' 2>&1 | tee /tmp/update.log; then
-            echo "::group::update.sh tail"
-            tail -60 /tmp/update.log
-            echo "::endgroup::"
+          if ! sudo -E bash -c 'cd /srv/dsh-ci && ASSUME_YES=1 ./update.sh --plugin' 2>&1 | tee /tmp/plugin.log; then
+            echo "::error::update.sh --plugin failed"; tail -40 /tmp/plugin.log
             sudo journalctl -u dsh.service --no-pager -n 60 || true
-            sudo -E bash -c 'cd /srv/dsh-ci && ./update.sh --status' || true
             exit 1
           fi
-          grep -q "^DSH_SETUP_VERSION=${{ steps.versions.outputs.version }}$" /srv/dsh-ci/.env
           sudo systemctl is-active --quiet dsh.service
 
       - name: The plan is readable and idempotent

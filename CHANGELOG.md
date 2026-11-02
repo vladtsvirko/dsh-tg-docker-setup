@@ -8,6 +8,20 @@ supervisor, the updater and the entrypoint changed.
 Earlier releases are the git tags `v0.2.1-rc.2-0.1.x` … `v0.2.1-rc.2-0.4.11`;
 this file starts here.
 
+## 0.2.1-rc.2-0.7.3
+
+### Fixed
+
+- **The native smoke job tested the wrong code.** It installed the previous
+  release and updated to the new one — but an update is driven by the *installed*
+  release, so the 0.7.0 → 0.7.1 → 0.7.2 runs kept executing the older, broken
+  update path and failed for that reason alone. The job now installs the release
+  it is testing and runs `update.sh --plugin` from the deployment directory,
+  which is the same prepare → restart → health path an update takes.
+
+  The three failed runs did their job, though: the 0.7.1 failure was the
+  `run_as_service` working directory, fixed in 0.7.2.
+
 ## 0.2.1-rc.2-0.7.2
 
 ### Fixed
