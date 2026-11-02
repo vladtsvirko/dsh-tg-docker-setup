@@ -34,6 +34,9 @@ fi
 ALLOWED_USER_IDS="${ALLOWED_USER_IDS:-}"
 BOT_TOKEN="${DSH_TELEGRAM_BOT_TOKEN:-}"
 TELEGRAM_ENABLED="${DSH_TELEGRAM_ENABLED:-auto}"
+PENPOT_ENABLED="${PENPOT_ENABLED:-0}"
+PENPOT_REF="${PENPOT_PLUGIN_REF:-}"
+PENPOT_PKG="dsh-penpot-plugin"
 
 # --- model route ----------------------------------------------------------
 # opencode-go is the default here because it is what this deployment uses; the
@@ -333,6 +336,74 @@ setup_git_credentials() {
   warn "git credentials failed — fix $manifest or see docs/GIT.md"
 }
 
+install_penpot() {
+  # Same shape as the Telegram adapter: install once per pinned ref, and only
+  # when the design component is enabled. The stamp makes a ref bump reinstall.
+  local stamp="$PROFILE_DIR/.penpot-plugin-ref"
+  [ -n "$PENPOT_REF" ] || { warn "PENPOT_PLUGIN_REF is empty — design tools stay off"; return 1; }
+  if [ -f "$PROFILE_DIR/node_modules/$PENPOT_PKG/package.json" ] &&
+     [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$PENPOT_REF" ]; then
+    return 0
+  fi
+  command -v pnpm >/dev/null 2>&1 ||
+    warn "pnpm is not on PATH — the plugin's build step will fail (see Dockerfile)"
+  log "installing the Penpot plugin (needs network)"
+  local out attempt key
+  for attempt in 1 2 3; do
+    if dsh plugin --profile web add "$PENPOT_REF" >/tmp/penpot-install.log 2>&1; then
+      log "Penpot plugin installed"
+      printf '%s\n' "$PENPOT_REF" > "$stamp"
+      return 0
+    fi
+    out="$(cat /tmp/penpot-install.log)"
+    # pnpm blocks the git package's prepare script; grant exactly that package
+    if grep -q 'ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED\|Failed to prepare git-hosted' <<<"$out"; then
+      key="$(grep -o "$PENPOT_PKG@https:[^ ]*: true" <<<"$out" | head -n1)"
+      local ws="$PROFILE_DIR/pnpm-workspace.yaml"
+      if [ -n "$key" ] && ! grep -qF "$key" "$ws" 2>/dev/null; then
+        log "allowing the plugin's build script"
+        if grep -q '^allowBuilds:' "$ws" 2>/dev/null; then
+          awk -v entry="  $key" '/^allowBuilds:/ { print; print entry; next } { print }' "$ws" > "$ws.new"
+          mv "$ws.new" "$ws"
+        else
+          printf '\nallowBuilds:\n  %s\n' "$key" >> "$ws"
+        fi
+        continue
+      fi
+    fi
+    break
+  done
+  warn "Penpot plugin install failed — see /tmp/penpot-install.log; the design tools stay off"
+  return 1
+}
+
+# Managed row for the plugin. Off keeps the package (a cheap re-enable) but
+# disables the row; when the package was never installed there is no row at all.
+set_penpot_patch() {
+  local mode="$1" block
+  block="$(mktemp)"
+  if [ "$mode" = on ]; then
+    cat > "$block" <<BLOCK
+# >>> dsh-penpot (managed by entrypoint.sh — edits here are overwritten)
+- id: dsh-penpot
+  config:
+    apiUrl: !!js process.env.PENPOT_API_URL ?? ''
+    token: !!js process.env.PENPOT_ACCESS_TOKEN ?? ''
+    backend: auto
+# <<< dsh-penpot
+BLOCK
+  elif [ "$mode" = off ]; then
+    cat > "$block" <<BLOCK
+# >>> dsh-penpot (managed by entrypoint.sh — edits here are overwritten)
+- id: dsh-penpot
+  disabled: true
+# <<< dsh-penpot
+BLOCK
+  fi
+  apply_managed_block dsh-penpot "$block"
+  rm -f "$block"
+}
+
 prepare() {
   prepare_dirs
   setup_git_credentials
@@ -365,6 +436,20 @@ prepare() {
       log "telegram: not configured — web UI only (set DSH_TELEGRAM_BOT_TOKEN to enable)"
       set_telegram_patch none
     fi
+  fi
+
+  if [ "$PENPOT_ENABLED" = 1 ]; then
+    if install_penpot; then
+      set_penpot_patch on
+      log "design: Penpot tools enabled"
+    else
+      set_penpot_patch off
+    fi
+  elif [ -f "$PROFILE_DIR/node_modules/$PENPOT_PKG/package.json" ]; then
+    set_penpot_patch off
+    log "design: Penpot tools disabled (package kept for a cheap re-enable)"
+  else
+    set_penpot_patch none
   fi
 }
 

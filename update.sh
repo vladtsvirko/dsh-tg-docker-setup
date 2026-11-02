@@ -602,6 +602,10 @@ component_apply() {
       set_env "$flag" 1 "$ENV_FILE"
       # The agent calls design/penpot.mjs from inside the runtime, so the
       # runtime environment needs the API root and the token.
+      set_env PENPOT_ENABLED 1 "$ENV_FILE"
+      local plugin_ref
+      plugin_ref="$(node -e 'process.stdout.write(require("./components.json").components.design.plugin.ref)' 2>/dev/null || true)"
+      if [ -n "$plugin_ref" ]; then set_env PENPOT_PLUGIN_REF "$plugin_ref" "$ENV_FILE"; fi
       set_env PENPOT_API_URL "http://$bind:$port" "$ENV_FILE"
       local token
       token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
@@ -613,6 +617,7 @@ component_apply() {
       log "stopping $name (data stays in $compose_dir/data)"
       docker compose --project-directory "$compose_dir" -f "$compose_dir/$(basename "$(component_field "$name" compose)")" down || warn "docker compose down failed"
       set_env "$flag" 0 "$ENV_FILE"
+      set_env PENPOT_ENABLED 0 "$ENV_FILE"
       set_env PENPOT_ACCESS_TOKEN "" "$ENV_FILE"
       log "restarting the runtime so the tools disappear"
       restart_runtime || warn "could not restart the runtime"

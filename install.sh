@@ -319,9 +319,16 @@ write_env() {
   if [ "$DESIGN" = docker ]; then
     set_env DSH_DESIGN_PORT "$DSH_DESIGN_PORT" "$file"
     set_env DSH_DESIGN_ENABLED 1 "$file"
+    set_env PENPOT_ENABLED 1 "$file"
+    local comp="$DIR/components.json"
+    [ -f "$comp" ] || comp="$SRC_DIR/components.json"
+    local plugin_ref=""
+    [ -f "$comp" ] && plugin_ref="$(node -e 'process.stdout.write(require(process.argv[1]).components.design.plugin.ref)' "$comp" 2>/dev/null || true)"
+    if [ -n "$plugin_ref" ]; then set_env PENPOT_PLUGIN_REF "$plugin_ref" "$file"; fi
     set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$file"
   else
     set_env DSH_DESIGN_ENABLED 0 "$file"
+    set_env PENPOT_ENABLED 0 "$file"
   fi
   set_env DSH_UPDATER_URL "$UPDATER_URL" "$file"
   chmod 600 "$file"
@@ -364,6 +371,12 @@ design_apply() {
   local token
   token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
   if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$DIR/.env"; fi
+  log "restarting the runtime so the Penpot plugin loads"
+  if [ "$MODE" = native ]; then
+    run systemctl restart dsh.service
+  else
+    run docker compose --project-directory "$DIR" -f "$DIR/compose.yaml" restart dsh
+  fi
 
   log "starting Penpot (the first start pulls the images)"
   run docker compose --project-directory "$dir" -f "$dir/compose.yaml" up -d --build

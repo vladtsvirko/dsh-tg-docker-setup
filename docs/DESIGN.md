@@ -45,6 +45,18 @@ The updater applies the change on the host, restarts the runtime and reports.
 Disable stops the stack and keeps `design/data/`. The runtime env keeps
 `PENPOT_API_URL` but the token is cleared, so the CLI fails closed.
 
+## The plugin
+
+Enabling the component also installs the DSH plugin
+[dsh-penpot-plugin](https://github.com/vladtsvirko/dsh-penpot-plugin) into the
+profile: the entrypoint runs `dsh plugin --profile web add <ref>` on the next
+boot, where `<ref>` is `PENPOT_PLUGIN_REF` (pinned in `components.json`,
+overridable in `.env`) and writes a managed `dsh-penpot` row. Disabling sets
+`PENPOT_ENABLED=0`, which leaves the package installed but disables the row.
+
+The plugin is versioned on its own: bumping it means bumping the ref in
+`components.json`, which is a setup release.
+
 ## The `penpot` CLI
 
 Shipped in the image at `/usr/local/bin/penpot` (native: symlinked from the

@@ -34,7 +34,7 @@ the `/data` volume expose; nothing else on the server is mounted.
 | `.github/workflows/ci.yml` | Supervisor tests and shell syntax checks |
 | `install.sh` | One-command installer for both modes: interactive, `--check` for a dry run |
 | `design/` | Optional Penpot stack + the `penpot` CLI for design work (`--design docker`) |
-| `docs/DESIGN.md` | The design stack: install, token, the `penpot` CLI, data, removal |
+| `docs/DESIGN.md` | The design stack: install, token, the plugin and CLI, data, removal |
 | `docs/HOST.md` | Native (no-Docker) deployment: tiers, layout, updates, switching |
 
 ## Install
@@ -189,7 +189,7 @@ container is disposable and disappears with the container.
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.2-0.4.2
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.2-0.4.3
          DSH part          product part
 ```
 

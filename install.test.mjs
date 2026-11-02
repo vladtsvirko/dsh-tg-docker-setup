@@ -327,6 +327,8 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     assert.match(designEnv, /DSH_BIND_IP=127\.0\.0\.1/)
     assert.doesNotMatch(designEnv, /PENPOT_SECRET_KEY=change-me/)
     assert.match(mainEnv, /DSH_DESIGN_ENABLED=1/)
+    assert.match(mainEnv, /PENPOT_ENABLED=1/)
+    assert.match(mainEnv, /PENPOT_PLUGIN_REF=github:vladtsvirko\/dsh-penpot-plugin#v\d+\.\d+\.\d+/)
     assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:80\d\d/)
     assert.match(log, /compose --project-directory design -f design\/compose\.yaml up -d/)
     assert.match(log, /compose restart dsh/)
@@ -335,6 +337,7 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     const after = await readFile(join(dir, '.env'), 'utf8')
     const log2 = await readFile(calls, 'utf8')
     assert.match(after, /DSH_DESIGN_ENABLED=0/)
+    assert.match(after, /PENPOT_ENABLED=0/)
     assert.match(log2, /compose --project-directory design -f design\/compose\.yaml down/)
   } finally {
     await rm(outer, { recursive: true, force: true })
