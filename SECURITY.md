@@ -24,9 +24,12 @@ run the runtime itself as root.
 - The runtime container is the sandbox: `read_only` rootfs, `cap_drop: ALL`,
   `no-new-privileges`, no Docker socket. Do not add the socket "temporarily".
 - The separate `updater` sidecar is the only component with the Docker socket.
-  That socket is host-root-equivalent. The updater has no published port and is
-  reachable only on the internal `ops` network with `DSH_UPDATER_TOKEN`; treat
-  that token as a root credential. Empty the token to disable apply.
+  That socket is host-root-equivalent. It publishes no port; its API answers only
+  on the internal `ops` network and needs `DSH_UPDATER_TOKEN` — treat that token
+  as a root credential, and empty it to disable apply. It also joins the compose
+  `default` network (to probe the runtime's web port) and the `design` network
+  (to probe the Penpot frontend), so it can reach those two services; it cannot
+  start anything by that route, only read their HTTP ports.
 - `.env` holds the bot token and model key. Keep it `chmod 600`, never commit it
   (the `data/` volume and `.env` are ignored).
 - `/data` is the only persistent path. Back it up; anyone with it has the session

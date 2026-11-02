@@ -86,7 +86,7 @@ async function waitFor(probe, { timeout = 10000, interval = 100, what = 'conditi
   }
 }
 
-async function harness({ trialSeconds = 60, bootGrace = 30, entryExit = 0 } = {}) {
+async function harness({ trialSeconds = 60, bootGrace = 30, entryExit = 0, entrySleep = 0 } = {}) {
   const root = await mkdtemp(join(tmpRoot, 'supervisor-'))
   const profile = join(root, 'profiles', 'web')
   const state = join(root, 'state')
@@ -100,7 +100,7 @@ async function harness({ trialSeconds = 60, bootGrace = 30, entryExit = 0 } = {}
   const entry = join(root, 'entrypoint.sh')
   await writeFile(
     entry,
-    `#!/bin/sh\necho entrypoint >> "$FAKE_ENTRY_LOG"\necho partial > "$FAKE_ENTRY_WRITE"\nexit ${entryExit}\n`,
+    `#!/bin/sh\necho entrypoint >> "$FAKE_ENTRY_LOG"\necho partial > "$FAKE_ENTRY_WRITE"\ncase "$1" in reset-plugin) [ -n "$FAKE_ENTRY_SLEEP" ] && sleep "$FAKE_ENTRY_SLEEP" ;; esac\nexit ${entryExit}\n`,
     { mode: 0o755 },
   )
   const entryLog = join(root, 'entry.log')
@@ -125,6 +125,7 @@ async function harness({ trialSeconds = 60, bootGrace = 30, entryExit = 0 } = {}
         DSH_ENTRYPOINT: entry,
         FAKE_ENTRY_LOG: entryLog,
         FAKE_ENTRY_WRITE: entryWrite,
+        ...(entrySleep > 0 ? { FAKE_ENTRY_SLEEP: String(entrySleep) } : {}),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -244,7 +245,8 @@ needsExec('rollback restores the committed state', async () => {
     await writeFile(join(test3.profile, 'c.txt'), 'oops')
 
     const rolled = await test3.call('/trial/rollback', { reason: 'test rollback' })
-    assert.equal(rolled.status, 200)
+    // 202: accepted and running. 200 used to mean "promised", including refusals.
+    assert.equal(rolled.status, 202)
     await waitFor(async () => {
       const status = await test3.status()
       return status.trial === null && status.lastEvent?.kind === 'rollback'
@@ -465,5 +467,48 @@ needsExec('requests without the token are refused', async () => {
     assert.equal(wrong.status, 401)
   } finally {
     await test8.stop()
+  }
+})
+
+needsExec('a rollback request while the supervisor is busy is refused, not promised', async () => {
+  // A slow reset-plugin holds `busy` long enough to ask deterministically.
+  const test = await harness({ entrySleep: 3 })
+  try {
+    const update = await test.call('/update', { trial: true })
+    assert.equal(update.status, 200, JSON.stringify(update.body))
+    await waitFor(async () => (await test.status()).busy === true, { what: 'the supervisor to report busy' })
+    const refused = await test.call('/trial/rollback', { reason: 'test' })
+    assert.equal(refused.status, 409)
+    assert.match(String(refused.body.error), /another operation is running/)
+    // It is still doing the work it was asked to do.
+    await waitFor(async () => (await test.status()).busy === false, { timeout: 15000, what: 'the update to finish' })
+    const after = await test.status()
+    assert.equal(after.child, 'running')
+  } finally {
+    await test.stop()
+  }
+})
+
+needsExec('a state write that fails does not kill the supervisor mid-rollback', async () => {
+  const test = await harness()
+  try {
+    await test.call('/restart', { trial: true })
+    await waitFor(async () => (await test.status()).trial !== null, { what: 'the trial to open' })
+    // Make saveState throw while restoreStable still works: the state file's
+    // path becomes a directory, so the write and the rename both fail.
+    const stateFile = join(test.state, 'state.json')
+    await rm(stateFile, { force: true })
+    await mkdir(stateFile)
+    const result = await test.call('/trial/rollback', { reason: 'test' })
+    assert.equal(result.status, 202)
+    // The child is already "running" when the request returns, so wait for the
+    // state change instead: a rollback closes the trial before it restarts.
+    await waitFor(async () => (await test.status()).trial === null, { timeout: 10000, what: 'the trial to close' })
+    await waitFor(async () => (await test.status()).child === 'running', { timeout: 10000, what: 'the runtime to come back' })
+    const after = await test.status()
+    assert.equal(after.lastEvent?.kind, 'rollback')
+    assert.equal(test.output.includes('cannot persist the rollback state'), true)
+  } finally {
+    await test.stop()
   }
 })

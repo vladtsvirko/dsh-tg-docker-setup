@@ -254,3 +254,85 @@ test('components: the endpoint runs the real update.sh and wires the runtime', a
     await rm(outer, { recursive: true, force: true })
   }
 })
+
+test('a job that runs past its deadline is killed and reported as failed', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'updater-timeout-'))
+  try {
+    // Ignores SIGTERM's default only in the sense that it never finishes on its
+    // own: the updater must kill it, not wait for it.
+    await writeFile(join(repo, 'update.sh'), '#!/usr/bin/env bash\necho building dsh\nsleep 30\n')
+    const app = createUpdater({
+      repo, token: 'secret', apply: true,
+      tags: async () => tags, current: async () => current,
+      exit: () => {}, jobTimeoutMs: 700,
+    })
+    const { server, base } = await start(app)
+    try {
+      const accepted = await fetch(`${base}/update`, {
+        method: 'POST', headers: { authorization: 'Bearer secret' }, body: '{"mode":"compatible"}',
+      })
+      assert.equal(accepted.status, 202)
+      let job
+      const deadline = Date.now() + 10000
+      while (Date.now() < deadline) {
+        const status = await fetch(`${base}/status`, { headers: { authorization: 'Bearer secret' } })
+        job = (await status.json()).job
+        if (['failed', 'done', 'rolled-back', 'cancelled'].includes(job.state)) break
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      assert.equal(job.state, 'failed')
+      assert.match(String(job.error), /timed out/)
+      const status = await fetch(`${base}/status`, { headers: { authorization: 'Bearer secret' } })
+      const payload = await status.json()
+      assert.equal(payload.cancellable, false)
+      assert.equal(payload.timeoutSeconds, 1)
+    } finally {
+      server.close()
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+  }
+})
+
+test('cancel stops a running job and says so', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'updater-cancel-'))
+  try {
+    await writeFile(join(repo, 'update.sh'), '#!/usr/bin/env bash\necho building dsh\nsleep 30\n')
+    const app = createUpdater({
+      repo, token: 'secret', apply: true,
+      tags: async () => tags, current: async () => current,
+      exit: () => {}, jobTimeoutMs: 60000,
+    })
+    const { server, base } = await start(app)
+    try {
+      const headers = { authorization: 'Bearer secret' }
+      assert.equal((await fetch(`${base}/update`, { method: 'POST', headers, body: '{"mode":"compatible"}' })).status, 202)
+      let running = false
+      const deadline = Date.now() + 5000
+      while (Date.now() < deadline) {
+        const status = await fetch(`${base}/status`, { headers })
+        running = (await status.json()).cancellable === true
+        if (running) break
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      assert.equal(running, true, 'the job must be running before it can be cancelled')
+      const cancelled = await fetch(`${base}/cancel`, { method: 'POST', headers, body: '{}' })
+      assert.equal(cancelled.status, 202)
+      let job
+      const end = Date.now() + 10000
+      while (Date.now() < end) {
+        const status = await fetch(`${base}/status`, { headers })
+        job = (await status.json()).job
+        if (['cancelled', 'failed', 'done', 'rolled-back'].includes(job.state)) break
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      assert.equal(job.state, 'cancelled')
+      // Nothing left to cancel.
+      assert.equal((await fetch(`${base}/cancel`, { method: 'POST', headers, body: '{}' })).status, 409)
+    } finally {
+      server.close()
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+  }
+})

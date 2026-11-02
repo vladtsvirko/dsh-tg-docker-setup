@@ -8,7 +8,50 @@ supervisor, the updater and the entrypoint changed.
 Earlier releases are the git tags `v0.2.1-rc.2-0.1.x` … `v0.2.1-rc.2-0.4.11`;
 this file starts here.
 
-## Unreleased
+## 0.2.1-rc.2-0.6.0
+
+### Fixed
+
+- **A host-only deployment can update.** The updater probed the runtime at
+  `DSH_BIND_IP:DSH_PORT` from *inside its own container*, where `127.0.0.1` is
+  the updater: the probe answered `000`, the health gate failed and a healthy
+  update was rolled back. Docker mode now probes the compose service (`dsh`),
+  native mode the bound address, and `DSH_PUBLIC_URL` wins when set.
+- **A rollback request can no longer lie.** `/trial/rollback` answered
+  `200 {ok:true}` while the supervisor was busy and did nothing, and the
+  connector retired the card on that answer. It answers `409`, or `202` when it
+  accepts the job, and `/status` reports `busy`.
+- **A full `/data` no longer kills the supervisor mid-rollback.** A failing
+  state write inside `rollback()` was an unhandled rejection that exited the
+  process. It is logged, the runtime still comes back, and the event stays in
+  memory and in the log.
+- **A hung update job cannot hold the only slot for ever.** `update.sh` and
+  component jobs get a deadline (`DSH_UPDATE_TIMEOUT_SECONDS`, default 30
+  minutes) and `POST /cancel`. Both signal the whole process group: `SIGTERM`
+  to the shell alone left the real work (and its output pipes) alive, so the job
+  stayed "building" after a cancel.
+- **A native checkout sees new releases.** Its `origin` was the installer's
+  directory, so once that clone was gone no new tag was ever fetched. It now
+  points at the public remote, falls back to the local path when the fetch
+  fails, and says which one it used.
+- **`./update.sh --plugin` works in native mode.** A stray `local` outside a
+  function made the branch fail under `set -e`.
+
+### Added
+
+- **`update.test.mjs`**: `update.sh` can be sourced and its helpers tested —
+  the probe URL for every bind/mode combination, launcher resolution, the tag
+  split, and a full docker `--self-to` with Docker stubbed, asserting the
+  deployed version is rewritten, the runtime recreated, and both restored when
+  the health gate fails.
+
+### Changed
+
+- `docs/LIMITS.md` and `SECURITY.md` describe what the updater can actually
+  reach (it joins `default` and `design` to probe those services by name) and
+  the new timeout/cancel behaviour instead of "no timeout and no cancel".
+
+## 0.2.1-rc.2-0.5.0
 
 ### Fixed
 

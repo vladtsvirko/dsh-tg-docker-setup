@@ -77,9 +77,11 @@ See [HOST.md](HOST.md) for the layout, tiers and switching.
 - `/system update all` drains **all** agents, including sessions owned by a web
   UI tab. A web turn can still start in the instant before the updater stops the
   container; that race is best-effort and accepted.
-- After the updater accepts the job there is **no timeout and no cancel**. A stuck
-  session blocks the update until it finishes or is cancelled at the session
-  level. The Cancel button exists only before acceptance.
+- The updater stops a job that runs longer than `DSH_UPDATE_TIMEOUT_SECONDS`
+  (default 30 minutes) and `/system cancel` cancels a running one: the job gets
+  `SIGTERM`, then `SIGKILL` after ten seconds. A cancelled or timed-out update is
+  reported in the chat; the runtime may need `/system restart` afterwards.
+- The Cancel button before acceptance still only clears the pending request.
 - New prompts are blocked while the update is pending. Messages sent while dsh is
   down are answered once after boot with "update finished — send it again" and
   are **not** executed.

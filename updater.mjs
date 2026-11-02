@@ -126,8 +126,44 @@ const readBody = (request) => new Promise((resolve, reject) => {
  * Build the request handler. The git readers are injectable so tests do not
  * need a repository; `apply` is intentionally absent in slice 1.
  */
-export function createUpdater({ repo, dataDir, botToken = '', token = '', apply = false, refreshTags = async () => {}, tags = () => listTags(repo), current = () => currentTag(repo), now = Date.now, exit = (code) => process.exit(code) }) {
-  const state = { job: null }
+export function createUpdater({ repo, dataDir, botToken = '', token = '', apply = false, refreshTags = async () => {}, tags = () => listTags(repo), current = () => currentTag(repo), now = Date.now, exit = (code) => process.exit(code), jobTimeoutMs = Math.max(60, Number(process.env.DSH_UPDATE_TIMEOUT_SECONDS ?? 1800)) * 1000 }) {
+  const state = { job: null, child: null, timer: null }
+
+  /**
+   * Stop the running job. A build that hangs holds the only job slot forever,
+   * so it gets a deadline and a way out: SIGTERM first, SIGKILL after a grace.
+   */
+  const killJob = (why) => {
+    const child = state.child
+    if (child === null || child === undefined) return false
+    const signal = (name) => {
+      // Negative pid: the whole process group, so a grandchild cannot outlive
+      // the job and keep its output pipes open.
+      try {
+        if (child.pid !== undefined) process.kill(-child.pid, name)
+        else child.kill(name)
+      } catch {
+        try {
+          child.kill(name)
+        } catch {
+          // already gone
+        }
+      }
+    }
+    signal('SIGTERM')
+    const hard = setTimeout(() => signal('SIGKILL'), 10_000)
+    hard.unref?.()
+    console.log(`updater: stopping the job (${why})`)
+    return true
+  }
+
+  const elapsedSeconds = () => {
+    const job = state.job
+    if (job === null) return undefined
+    const started = Date.parse(job.startedAt ?? job.acceptedAt ?? '')
+    if (!Number.isFinite(started)) return undefined
+    return Math.max(0, Math.round((now() - started) / 1000))
+  }
 
   const report = async (text) => {
     if (botToken.length === 0 || dataDir === undefined) return false
@@ -189,6 +225,7 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
         cwd: repo,
         env: { ...process.env, PWD: repo, ASSUME_YES: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true,
       })
     } catch (error) {
       job.state = 'failed'
@@ -212,21 +249,43 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
     }
     child.stdout.on('data', capture)
     child.stderr.on('data', capture)
+    state.child = child
+    state.timer = setTimeout(() => {
+      job.timedOut = true
+      void report(`system update is taking longer than ${String(Math.round(jobTimeoutMs / 60000))} minutes — stopping it.`)
+      killJob('timed out')
+    }, jobTimeoutMs)
+    state.timer.unref?.()
     const code = await new Promise((resolve) => {
       child.on('error', () => resolve(-1))
       child.on('close', (value) => resolve(value ?? -1))
     })
+    state.child = null
+    if (state.timer !== null) {
+      clearTimeout(state.timer)
+      state.timer = null
+    }
     const stripped = stripAnsi(output)
     const safeOutput = botToken.length > 0 ? stripped.replaceAll(botToken, '<redacted>') : stripped
     const tail = safeOutput.split('\n').filter((line) => line.trim().length > 0).slice(-20).join('\n')
     job.exitCode = code
     job.logTail = tail
-    job.state = code === 0 ? 'done' : /rolled back/i.test(output) ? 'rolled-back' : 'failed'
+    job.state = job.cancelled === true
+      ? 'cancelled'
+      : job.timedOut === true
+        ? 'failed'
+        : code === 0 ? 'done' : /rolled back/i.test(output) ? 'rolled-back' : 'failed'
+    if (job.timedOut === true) job.error = `timed out after ${String(Math.round(jobTimeoutMs / 60000))} minutes`
+    if (job.cancelled === true) job.error = 'cancelled'
     await persist()
     job.reporting = true
     await persist()
     let delivered = false
-    if (job.state === 'done') {
+    if (job.state === 'cancelled') {
+      delivered = await report(`system update cancelled after ${String(elapsedSeconds() ?? 0)}s. Check the updater log; the previous setup is usually still running.`)
+    } else if (job.timedOut === true) {
+      delivered = await report(`system update timed out after ${String(Math.round(jobTimeoutMs / 60000))} minutes and was stopped. Check the updater log; the previous state may still be running.`)
+    } else if (job.state === 'done') {
       const dsh = parseTag(job.target)?.dsh ?? 'unknown'
       delivered = await report(`system update finished: ${job.from} → ${job.target} (DSH ${dsh}).`)
     } else if (job.state === 'rolled-back') {
@@ -275,7 +334,7 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
     let output = ''
     let child
     try {
-      child = spawn('bash', args, { cwd: repo, env: { ...process.env, PWD: repo, ASSUME_YES: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
+      child = spawn('bash', args, { cwd: repo, env: { ...process.env, PWD: repo, ASSUME_YES: '1' }, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
     } catch (error) {
       job.state = 'failed'
       job.error = error instanceof Error ? error.message : String(error)
@@ -285,20 +344,35 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
     const capture = (chunk) => { output = (output + chunk.toString()).slice(-8000) }
     child.stdout.on('data', capture)
     child.stderr.on('data', capture)
+    state.child = child
+    state.timer = setTimeout(() => {
+      job.timedOut = true
+      void report(`component ${job.component}: ${job.action} is taking longer than ${String(Math.round(jobTimeoutMs / 60000))} minutes — stopping it.`)
+      killJob('timed out')
+    }, jobTimeoutMs)
+    state.timer.unref?.()
     const code = await new Promise((resolve) => {
       child.on('error', () => resolve(-1))
       child.on('close', (value) => resolve(value ?? -1))
     })
+    state.child = null
+    if (state.timer !== null) {
+      clearTimeout(state.timer)
+      state.timer = null
+    }
     const stripped = stripAnsi(output)
     const safe = botToken.length > 0 ? stripped.replaceAll(botToken, '<redacted>') : stripped
     const tail = safe.split('\n').filter((line) => line.trim().length > 0).slice(-12).join('\n')
     job.exitCode = code
     job.logTail = tail
-    job.state = code === 0 ? 'done' : 'failed'
+    job.state = job.cancelled === true ? 'cancelled' : code === 0 ? 'done' : 'failed'
+    if (job.cancelled === true) job.error = 'cancelled'
     const label = job.port === undefined ? job.action : `${job.action} (port ${job.port})`
-    const ok = await report(job.state === 'done'
-      ? `component ${job.component}: ${label} — done.`
-      : `component ${job.component}: ${label} failed (exit ${code}).\n\n${tail}`)
+    const ok = await report(job.state === 'cancelled'
+      ? `component ${job.component}: ${label} cancelled.`
+      : job.state === 'done'
+        ? `component ${job.component}: ${label} — done.`
+        : `component ${job.component}: ${label} failed (exit ${code}).\n\n${tail}`)
     job.reported = ok
   }
 
@@ -422,10 +496,28 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
         if (apply) setTimeout(() => void runComponent(job), 100)
         return undefined
       }
+      if (path === '/cancel' && request.method === 'POST') {
+        if (token.length === 0) return json(response, 503, { error: 'updater is disabled' })
+        if (!authorized(request.headers.authorization, token)) return json(response, 401, { error: 'unauthorized' })
+        const job = state.job
+        const terminal = job === null || ['done', 'failed', 'rolled-back', 'cancelled'].includes(job.state)
+        if (terminal) return json(response, 409, { error: 'no update is running' })
+        if (state.child === null) return json(response, 409, { error: 'the job has not started yet; try again in a moment' })
+        job.cancelled = true
+        const stopped = killJob('cancelled from Telegram')
+        return json(response, stopped ? 202 : 409, stopped
+          ? { ok: true, cancelling: job.id }
+          : { error: 'the job already finished' })
+      }
       if (path === '/status' && request.method === 'GET') {
         if (token.length === 0) return json(response, 503, { error: 'updater is disabled' })
         if (!authorized(request.headers.authorization, token)) return json(response, 401, { error: 'unauthorized' })
-        return json(response, 200, { job: state.job })
+        return json(response, 200, {
+          job: state.job,
+          elapsedSeconds: elapsedSeconds(),
+          timeoutSeconds: Math.round(jobTimeoutMs / 1000),
+          cancellable: state.child !== null && state.job !== null && !['done', 'failed', 'rolled-back', 'cancelled'].includes(state.job.state),
+        })
       }
       return json(response, 404, { error: 'not found' })
     } catch (error) {

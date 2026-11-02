@@ -220,29 +220,49 @@ async function onExit(code, signal) {
   }, restartDelay)
 }
 
+/**
+ * Restore the committed profile and bring the runtime back.
+ *
+ * Returns whether the rollback was attempted: `false` means another operation
+ * holds the supervisor, and the caller must say so instead of reporting
+ * success. It never rejects — a full /data used to turn a failing state write
+ * into an unhandled rejection that killed the supervisor mid-rollback.
+ */
 async function rollback(reason) {
-  if (busy) return
+  if (busy) {
+    log(`rollback refused, another operation is running: ${reason}`)
+    return false
+  }
   busy = true
   try {
     clearTimeout(bootTimer)
     log(`rolling back: ${reason}`)
     await stopChild()
+    let restored = true
     try {
       await restoreStable()
     } catch (error) {
+      restored = false
       log(`rollback failed: ${String(error)}`)
       state.lastEvent = { kind: 'rollback-failed', at: now(), detail: `${reason}: ${String(error)}` }
-      state.trial = null
-      await saveState()
-      startChild()
-      await notify(`Rollback failed (${String(error)}). The runtime is starting with the current files; check the container logs.`)
-      return
     }
     state.trial = null
-    state.lastEvent = { kind: 'rollback', at: now(), detail: reason }
-    await saveState()
+    if (restored) state.lastEvent = { kind: 'rollback', at: now(), detail: reason }
+    try {
+      await saveState()
+    } catch (error) {
+      // The runtime still has to come back; the event is in memory and in the log.
+      log(`cannot persist the rollback state: ${String(error)}`)
+    }
     startChild()
-    await notify(`Rolled back to the last committed state: ${reason}. The runtime is starting again.`)
+    await notify(restored
+      ? `Rolled back to the last committed state: ${reason}. The runtime is starting again.`
+      : `Rollback failed (${reason}). The runtime is starting with the current files; check the container logs.`)
+    return true
+  } catch (error) {
+    log(`rollback crashed: ${String(error)}`)
+    if (child === undefined) startChild()
+    return false
   } finally {
     busy = false
   }
@@ -469,6 +489,8 @@ async function notify(text) {
 async function statusPayload() {
   return {
     child: child !== undefined && child.exitCode === null ? 'running' : 'stopped',
+    // A caller that is about to promise a restart needs to know it is refused.
+    busy,
     profile: profileDir,
     stable: await exists(stableDir),
     stableAt: state.stableAt,
@@ -551,11 +573,15 @@ const server = createServer((request, response) => {
     }
     if (path === '/trial/rollback') {
       if (state.trial === null) return send(response, 409, { error: 'no trial is running' })
+      // Answering 200 and doing nothing is how the rollback became unreachable:
+      // the connector retires its card on success, so a busy supervisor left the
+      // user with no way back. Say it instead.
+      if (busy) return send(response, 409, { error: 'another operation is running; try again when it finishes' })
       const reason = typeof body.reason === 'string' && body.reason.length > 0
         ? body.reason
         : 'rollback requested from Telegram'
       void rollback(reason)
-      return send(response, 200, { ok: true })
+      return send(response, 202, { ok: true, started: true })
     }
     if (path === '/restart') {
       const result = body.trial === true ? await beginTrial() : await plainRestart()

@@ -719,7 +719,7 @@ link_bins() {
 
 native_apply() {
   command -v node >/dev/null 2>&1 || die "node not found — install Node >= 22.19 first"
-  local node_major
+  local node_major native_origin
   node_major="$(node -p 'process.versions.node.split(".")[0]')"
   [ "$node_major" -ge 22 ] || die "Node >= 22.19 is required (found $(node --version))"
 
@@ -732,11 +732,20 @@ native_apply() {
   if [ ! -d "$DIR/.git" ]; then
     log "initialising the setup checkout in $DIR"
     # In place: the directory already holds data/, and a clone would refuse a
-    # non-empty destination. The local origin keeps the tags update.sh needs.
+    # non-empty destination.
     run mkdir -p "$DIR"
     run git -C "$DIR" init --quiet
-    run git -C "$DIR" remote add origin "$SRC_DIR"
-    run git -C "$DIR" fetch --quiet --tags origin
+    # Prefer the remote this checkout was cloned from: a native deployment whose
+    # origin is the installer's directory can never see a new release once that
+    # checkout is gone. Fall back to the local path when there is no remote.
+    native_origin="$(git -C "$SRC_DIR" remote get-url origin 2>/dev/null || true)"
+    [ -n "$native_origin" ] || native_origin="$SRC_DIR"
+    run git -C "$DIR" remote add origin "$native_origin"
+    if ! run git -C "$DIR" fetch --quiet --tags origin; then
+      warn "could not fetch tags from $native_origin; using the local checkout"
+      run git -C "$DIR" remote set-url origin "$SRC_DIR"
+      run git -C "$DIR" fetch --quiet --tags origin
+    fi
   fi
   run git -C "$DIR" checkout --quiet --detach "$REF" || \
     warn "could not check out $REF in $DIR; staying on the current HEAD"

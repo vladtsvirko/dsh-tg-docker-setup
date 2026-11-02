@@ -12,8 +12,14 @@
 #
 # Run it from this directory (next to compose.yaml and .env).
 #
-set -euo pipefail
-cd "$(dirname "$0")"
+# Sourced by update.test.mjs to exercise the helpers below without running the
+# CLI. Executed normally, nothing changes.
+UPDATE_SOURCED=0
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then UPDATE_SOURCED=1; fi
+if [ "$UPDATE_SOURCED" = 0 ]; then
+  set -euo pipefail
+  cd "$(dirname "$0")"
+fi
 
 ENV_FILE=.env
 COMPOSE=(docker compose)
@@ -22,9 +28,16 @@ HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-180}
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
-die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
+die()  {
+  printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2
+  # A sourced caller must survive: the test asserts on the message, not on exit.
+  if [ "${UPDATE_SOURCED:-0}" = 1 ]; then return 1; fi
+  exit 1
+}
 
-[ -f "$ENV_FILE" ] || die "no $ENV_FILE here — run from the compose directory"
+if [ "$UPDATE_SOURCED" = 0 ]; then
+  [ -f "$ENV_FILE" ] || die "no $ENV_FILE here — run from the compose directory"
+fi
 
 env_get() { sed -n "s/^$1=//p" "$ENV_FILE" | head -1; }
 setup_version() { tr -d '\n' < VERSION; }
@@ -218,13 +231,38 @@ container_health() {
   echo "${state:-missing}"
 }
 
-web_code() {
-  local ip port code
-  ip="$(env_get DSH_BIND_IP)"; port="$(env_get DSH_PORT)"
-  [ -n "$ip" ] || ip=127.0.0.1
+# The URL this process can reach the runtime at.
+#
+# In docker mode the updater runs in its own container, so the host's
+# 127.0.0.1 is the updater itself: a host-only deployment (`DSH_BIND_IP=127.0.0.1`,
+# the documented private setup) used to probe nothing and fail the health gate,
+# rolling a perfectly good update back. Probe the compose service instead, and
+# use the published address only when it is a real one.
+web_probe_url() {
+  local ip port public
+  ip="$(env_get DSH_BIND_IP)"; port="$(env_get DSH_PORT)"; public="$(env_get DSH_PUBLIC_URL)"
   [ -n "$port" ] || port=4310
+  if [ -n "$public" ]; then
+    printf '%s' "$public"
+    return 0
+  fi
+  if [ "${MODE:-docker}" = native ]; then
+    [ -n "$ip" ] || ip=127.0.0.1
+    printf 'http://%s:%s/' "$ip" "$port"
+    return 0
+  fi
+  if [ -n "$ip" ] && [ "$ip" != 127.0.0.1 ] && [ "$ip" != localhost ]; then
+    printf 'http://%s:%s/' "$ip" "$port"
+    return 0
+  fi
+  printf 'http://%s:%s/' "${DSH_WEB_SERVICE:-dsh}" "$port"
+}
+
+web_code() {
+  local url code
+  url="$(web_probe_url)"
   # a bare origin answers 401 on purpose: the runtime wants the ?token= URL
-  code="$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://${ip}:${port}/" 2>/dev/null || true)"
+  code="$(curl -s -o /dev/null -m 5 -w '%{http_code}' "$url" 2>/dev/null || true)"
   echo "${code:-000}"
 }
 
@@ -707,6 +745,8 @@ component_apply() {
   fi
 }
 
+if [ "$UPDATE_SOURCED" = 1 ]; then return 0; fi
+
 case "${1:---status}" in
   --status)   status ;;
   --component)
@@ -725,7 +765,6 @@ case "${1:---status}" in
   --plugin)
     log "re-resolving the Telegram adapter"
     if [ "$MODE" = native ]; then
-      local entry
       entry="$(entrypoint_bin)" || die "no entrypoint launcher found — reinstall with ./install.sh"
       run_as_service "$entry" reset-plugin
       systemctl restart dsh.service
