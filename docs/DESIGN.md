@@ -24,6 +24,9 @@ Interactive installs ask once. Re-running `install.sh` later is how you **add it
 afterwards** — the answers already in `.env` are preserved, so it is a repair,
 not a reinstall.
 
+The first start builds the MCP bridge before anything else comes up, which
+takes a couple of minutes.
+
 Once installed, the stack is managed from the control chat: `/system manage` posts
 a card with Enable / Disable / Port for every component in `components.json`. The
 updater applies the change and restarts the runtime so the tools follow.
