@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { test } from 'node:test'
-import { createUpdater, crossesCompat, parseTag, resolveTarget, UpdateError } from './updater.mjs'
+import { createUpdater, crossesCompat, firewallPorts, networkOf, parseTag, resolveTarget, UpdateError } from './updater.mjs'
 
 const exec = promisify(execFile)
 
@@ -361,4 +361,46 @@ test('a cross-line target needs the explicit flag', async () => {
   } finally {
     server.close()
   }
+})
+
+// --- firewall advice ------------------------------------------------------
+// The updater answers for a native host only: a published Docker port is DNATed
+// before ufw's INPUT chain sees it, so a rule there changes nothing.
+
+test('networkOf prints the network, not the host address', () => {
+  assert.equal(networkOf('192.168.2.98/24'), '192.168.2.0/24')
+  assert.equal(networkOf('172.22.0.2/16'), '172.22.0.0/16')
+  assert.equal(networkOf('10.0.0.1/32'), '10.0.0.1/32')
+  assert.equal(networkOf('not-an-ip'), 'not-an-ip')
+})
+
+const active = ['Status: active', 'To                         Action      From',
+  '--                         ------      ----', '22/tcp                     ALLOW       192.168.2.0/24'].join('\n')
+
+test('docker mode is not applicable: ufw never sees a published port', () => {
+  const report = firewallPorts({ mode: 'docker', ports: [{ port: 4310, bind: '192.168.2.98' }], status: active })
+  assert.equal(report.applicable, false)
+  assert.match(report.reason, /published port/)
+})
+
+test('a blocked native port is reported with the derived network', () => {
+  const report = firewallPorts({ mode: 'native', ports: [{ port: 4310, bind: '192.168.2.98/24' }], status: active })
+  assert.equal(report.applicable, true)
+  assert.deepEqual(report.ports, [{ port: 4310, bind: '192.168.2.98/24', network: '192.168.2.0/24', allowed: false }])
+})
+
+test('an allowed port is reported as allowed, and loopback binds are skipped', () => {
+  const allowed = firewallPorts({
+    mode: 'native',
+    ports: [{ port: 4310, bind: '192.168.2.98/24' }],
+    status: `${active}\n4310/tcp                   ALLOW       192.168.2.0/24`,
+  })
+  assert.equal(allowed.ports[0].allowed, true)
+  const loopback = firewallPorts({ mode: 'native', ports: [{ port: 4310, bind: '127.0.0.1' }], status: active })
+  assert.equal(loopback.applicable, false)
+})
+
+test('inactive ufw and a missing status are not applicable', () => {
+  assert.match(firewallPorts({ mode: 'native', ports: [{ port: 4310, bind: '192.168.2.98' }], status: 'Status: inactive' }).reason, /not active/)
+  assert.match(firewallPorts({ mode: 'native', ports: [{ port: 4310, bind: '192.168.2.98' }] }).reason, /not installed/)
 })

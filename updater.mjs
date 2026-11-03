@@ -58,6 +58,51 @@ export async function listTags(repo) {
 }
 
 /**
+ * The network ufw wants ("allow from 10.0.0.0/8"), from `addr/prefix`.
+ *
+ * The hint has to be copy-pasteable: `192.168.2.98/24` is a host address and
+ * ufw would either reject it or accept something nobody meant, so the network
+ * is computed here.
+ */
+export function networkOf(cidr) {
+  const [ip, rawPrefix] = String(cidr).split('/')
+  const parts = ip.split('.').map(Number)
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return cidr
+  let prefix = Number(rawPrefix)
+  if (!Number.isInteger(prefix) || prefix < 8 || prefix > 32) prefix = 24
+  const value = ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0
+  const mask = prefix === 32 ? 0xffffffff : ((0xffffffff << (32 - prefix)) >>> 0)
+  const net = (value & mask) >>> 0
+  return `${(net >>> 24) & 255}.${(net >>> 16) & 255}.${(net >>> 8) & 255}.${net & 255}/${prefix}`
+}
+
+/**
+ * What a native deployment's firewall looks like, from values the caller read:
+ * no I/O here, so the shape is testable without a host that has ufw.
+ *
+ * Docker mode reports `applicable: false`: a published port is DNATed in
+ * nat/FORWARD before ufw's INPUT chain sees it, so a rule there changes nothing.
+ */
+export function firewallPorts({ mode, ports = [], status = '' } = {}) {
+  if (mode !== 'native') return { applicable: false, reason: 'docker mode: ufw does not gate a published port' }
+  const served = ports.filter((entry) => Number.isInteger(entry.port) && typeof entry.bind === 'string'
+    && !/^(127\.|localhost$|::1$)/.test(entry.bind))
+  if (served.length === 0) return { applicable: false, reason: 'no LAN-facing ports' }
+  if (status === '') return { applicable: false, reason: 'ufw is not installed' }
+  if (!/^Status: active/m.test(status)) return { applicable: false, reason: 'ufw is not active' }
+  const allowed = new Set([...status.matchAll(/^(\d+)(?:\/tcp)?\s+ALLOW/gm)].map((match) => Number(match[1])))
+  return {
+    applicable: true,
+    ports: served.map(({ port, bind }) => ({
+      port,
+      bind,
+      network: networkOf(bind.includes('/') ? bind : `${bind}/24`),
+      allowed: allowed.has(port),
+    })),
+  }
+}
+
+/**
  * Pure target resolution. `tags` must be oldest-first (git's version sort).
  * Modes:
  *   compatible: latest tag with the same DSH part and product major
@@ -295,7 +340,7 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
       delivered = await report(`system update timed out after ${String(Math.round(jobTimeoutMs / 60000))} minutes and was stopped. Check the updater log; the previous state may still be running.`)
     } else if (job.state === 'done') {
       const dsh = parseTag(job.target)?.dsh ?? 'unknown'
-      delivered = await report(`system update finished: ${job.from} → ${job.target} (DSH ${dsh}).`)
+      delivered = await report(`system update finished: ${job.from} → ${job.target} (DSH ${dsh}).${await firewallNote()}`)
     } else if (job.state === 'rolled-back') {
       delivered = await report(`system update failed and rolled back to ${job.from}.\n\n${tail}`)
     } else {
@@ -382,6 +427,52 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
         ? `component ${job.component}: ${label} — done.`
         : `component ${job.component}: ${label} failed (exit ${code}).\n\n${tail}`)
     job.reported = ok
+  }
+
+  // --- firewall (native only) ---------------------------------------------
+  // Read-only unless asked to allow one port, and then only a port this
+  // deployment already serves (from .env) with a network derived from the bind
+  // address: the endpoint never takes a command line.
+
+  const ufwStatus = async () => {
+    try {
+      const { stdout } = await exec('ufw', ['status'])
+      return stdout
+    } catch {
+      // "not installed", "not root", "not permitted" — nothing to offer here.
+      return ''
+    }
+  }
+
+  const servedPorts = async () => {
+    const port = Number(await readFlag('DSH_PORT') ?? 4310)
+    const bind = (await readFlag('DSH_BIND_IP') ?? '').trim()
+    if (!Number.isInteger(port) || port < 1 || port > 65535 || bind === '') return []
+    try {
+      const { stdout } = await exec('ip', ['-o', '-4', 'addr', 'show', 'scope', 'global'])
+      const line = stdout.split('\n').find((entry) => entry.includes(` ${bind}/`))
+      const cidr = line?.trim().split(/\s+/)[3]
+      if (cidr !== undefined && cidr.startsWith(`${bind}/`)) return [{ port, bind: cidr }]
+    } catch {
+      // no iproute2: fall back to /24, which networkOf still turns into a network
+    }
+    return [{ port, bind }]
+  }
+
+  const firewall = async () => firewallPorts({
+    mode: (await readFlag('MODE') ?? '').trim(),
+    ports: await servedPorts(),
+    status: await ufwStatus(),
+  })
+
+  /** The advisory appended to an update report, so a fix does not need SSH. */
+  const firewallNote = async () => {
+    const report = await firewall().catch(() => ({ applicable: false }))
+    if (report.applicable !== true) return ''
+    const blocked = report.ports.filter((entry) => entry.allowed === false)
+    if (blocked.length === 0) return ''
+    const lines = blocked.map((entry) => `• ${entry.port} from ${entry.network}: /firewall allow ${entry.port}`)
+    return `\n\n⚠️ ufw blocks a port this deployment serves:\n${lines.join('\n')}`
   }
 
   const handler = async (request, response) => {
@@ -528,6 +619,38 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
         return json(response, stopped ? 202 : 409, stopped
           ? { ok: true, cancelling: job.id }
           : { error: 'the job already finished' })
+      }
+      if (path === '/firewall' && request.method === 'GET') {
+        if (token.length === 0) return json(response, 503, { error: 'updater is disabled' })
+        if (!authorized(request.headers.authorization, token)) return json(response, 401, { error: 'unauthorized' })
+        return json(response, 200, await firewall())
+      }
+      if (path === '/firewall' && request.method === 'POST') {
+        if (token.length === 0) return json(response, 503, { error: 'updater is disabled' })
+        if (!authorized(request.headers.authorization, token)) return json(response, 401, { error: 'unauthorized' })
+        if (!apply) return json(response, 409, { error: 'this updater may not change the host' })
+        const raw = await readBody(request)
+        let body
+        try {
+          body = raw.length === 0 ? {} : JSON.parse(raw)
+        } catch {
+          throw new UpdateError(400, 'body must be JSON')
+        }
+        const port = Number(body.port)
+        const report = await firewall()
+        if (report.applicable !== true) throw new UpdateError(422, report.reason)
+        const target = report.ports.find((entry) => entry.port === port)
+        // Only a port this deployment already serves; nothing is taken from the
+        // caller but the number, and that must match .env.
+        if (target === undefined) throw new UpdateError(422, `port ${port} is not one this deployment serves`)
+        if (target.allowed === true) return json(response, 200, { ok: true, port, network: target.network, already: true })
+        try {
+          await exec('ufw', ['allow', 'from', target.network, 'to', 'any', 'port', String(port), 'proto', 'tcp'])
+        } catch (error) {
+          throw new UpdateError(500, `ufw refused the rule: ${error instanceof Error ? error.message : String(error)}`)
+        }
+        console.log(`updater: allowed ${port}/tcp from ${target.network} (requested from Telegram)`)
+        return json(response, 200, { ok: true, port, network: target.network, already: false })
       }
       if (path === '/status' && request.method === 'GET') {
         if (token.length === 0) return json(response, 503, { error: 'updater is disabled' })

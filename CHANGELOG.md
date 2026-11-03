@@ -7,6 +7,24 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.4.0
+
+### Added
+
+- **The firewall advisory is actionable from Telegram, not only from a shell.**
+  0.3.0 printed the rule at install and update time; a blocked port still needed
+  SSH to fix. The updater now answers `/firewall` (GET: the ports this
+  deployment serves, their networks and whether ufw allows them) and
+  `/firewall allow <port>` (POST: run the fixed rule). The connector renders
+  both, and the finished-update report appends the advisory, so the blocked
+  state arrives without a `--status` command.
+
+  The privileged call stays bounded: the port must be one the deployment
+  already serves from its `.env`, the network is derived from `DSH_BIND_IP`, and
+  the only command the updater runs is `ufw allow from <network> to any port
+  <port> proto tcp`. Native mode only — docker deployments report
+  "nothing to do", because a published port never reaches `INPUT`.
+
 ## 0.2.1-rc.5-0.3.0
 
 ### Added
