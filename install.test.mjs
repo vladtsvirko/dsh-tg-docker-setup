@@ -564,11 +564,15 @@ test('the bootstrap help names the one-liner and its options', async () => {
   }
 })
 
-test('the root check runs before any question, not after it', async () => {
-  // The 0.1.0 flow asked the mode, re-ran itself under sudo, asked again — and
-  // looped, because the answer was not carried across the exec. The check now
-  // happens before the mode question, so nothing is asked twice.
-  const result = await install([], { env: { YES: undefined, MODE: undefined } })
+test('the root check runs before any question, not after it', async (t) => {
+  // Only meaningful where docker is not usable for this user: on a runner with
+  // docker and the docker group, the installer needs no root at all.
+  const dockerUsable = await exec('docker', ['info']).then(() => true).catch(() => false)
+  if (dockerUsable) {
+    t.skip('docker is usable here, so this install needs no root')
+    return
+  }
+  const result = await install([])
   assert.notEqual(result.code, 0)
   assert.match(result.out, /needs root/)
   assert.doesNotMatch(result.out, /Which deployment do you want/)

@@ -7,6 +7,15 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.1.2
+
+### Fixed
+
+- The test that guards the root-before-questions order assumed a host without a
+  usable Docker, so it failed on CI runners (which have one) while passing
+  everywhere else. It now skips when Docker is usable, and the release exists so
+  the tag's CI is green.
+
 ## 0.2.1-rc.5-0.1.1
 
 ### Fixed
