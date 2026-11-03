@@ -7,6 +7,30 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.2.0
+
+### Added
+
+- **The installer asks for publisher bots.** `DSH_TELEGRAM_PUBLISHER_TOKENS`
+  existed only in `.env.example`, so a native install — which starts from an
+  empty `.env` — never had the line and a new user had no way to discover it.
+  It is now asked with the bot token, written to `.env`, accepted in
+  `install.example.env`, and the plan reports `bots: main + N publisher(s)`.
+  One bot has one budget (~20 messages/minute per group, shared by every topic);
+  extra senders multiply it, and each must be a member of the group.
+- **The installer says which directory is the deployment.** `curl … | bash`
+  leaves the fetched release behind (`~/dsh-setup` by default), and native mode
+  installs elsewhere (`/srv/dsh`), so the download looked like the deployment.
+  The summary now names it, offers to remove it (default: keep), and
+  `--clean-source` removes it without asking. It refuses to remove a checkout
+  the deployment updates *from* (a local `git remote`), because that would cut
+  `/system update all` off from new releases.
+
+### Notes
+
+- `install.example.env` also documents `DSH_ADMIN_USER_ID`, which was asked for
+  but absent from the answers file.
+
 ## 0.2.1-rc.5-0.1.2
 
 ### Fixed

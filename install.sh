@@ -184,7 +184,7 @@ bootstrap() {
 
   log "installing from $dir"
   cd "$dir"
-  exec bash "$dir/install.sh" "${args[@]}"
+  exec env DSH_BOOTSTRAP_SOURCE="$dir" bash "$dir/install.sh" "${args[@]}"
 }
 
 if in_bootstrap; then
@@ -196,7 +196,7 @@ cd "$SRC_DIR"
 SETUP_VERSION="$(tr -d '\n' < "$SRC_DIR/VERSION")"
 DSH_VERSION="$(printf '%s' "$SETUP_VERSION" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+$//')"
 
-MODE="" TIER="" DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0 DEPS=1
+MODE="" TIER="" DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0 DEPS=1 CLEAN_SOURCE=0
 SERVICE_USER="${SERVICE_USER:-dsh}"
 DSH_PORT="${DSH_PORT:-}"
 DSH_BIND_IP="${DSH_BIND_IP:-}"
@@ -238,6 +238,7 @@ Options:
   --ref REF              git ref for the native checkout (default: v<VERSION>)
   --config FILE          read answers from FILE (KEY=VALUE, no shell)
   --no-deps              do not install Docker or Node; they must already exist
+  --clean-source         remove the downloaded checkout once installed (native)
   --yes, -y              accept defaults, never prompt
   --check                print the plan and change nothing
   --uninstall            stop and remove the deployment (keeps data/)
@@ -249,7 +250,8 @@ EOF
 # --- answers from a file ---------------------------------------------------
 # Strict KEY=VALUE parsing: no sourcing, so a config file cannot execute code.
 CONFIG_KEYS="MODE TIER DIR SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL
-DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT PROVIDER_KEY"
+DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT PROVIDER_KEY
+DSH_TELEGRAM_PUBLISHER_TOKENS"
 load_config() {
   local file="$1" line key value
   [ -f "$file" ] || die "no config file: $file"
@@ -295,6 +297,7 @@ while [ $# -gt 0 ]; do
     --yes|-y) YES=1; shift ;;
     --check)  CHECK=1; shift ;;
     --no-deps) DEPS=0; shift ;;
+    --clean-source) CLEAN_SOURCE=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --purge)  PURGE=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -376,7 +379,8 @@ read_existing_env() {
   local key value
   [ -f "$DIR/.env" ] || return 0
   for key in DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL DSH_TELEGRAM_BOT_TOKEN \
-             ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT; do
+             ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT \
+             DSH_TELEGRAM_PUBLISHER_TOKENS; do
     value="$(sed -n "s/^${key}=//p" "$DIR/.env" | head -1)"
     if [ -n "${!key:-}" ]; then
       # An exported variable silently winning over the deployed value is how a
@@ -500,7 +504,9 @@ rerun_as_root() {
       DSH_*=*|PROVIDER_KEY=*|ALLOWED_USER_IDS=*|SERVICE_USER=*) keep+=("$pair") ;;
     esac
   done < <(env 2>/dev/null || true)
-  exec sudo env "${keep[@]}" bash "$SRC_DIR/install.sh" "$@" </dev/tty
+  # Remember where the download lives, so the installer can say it is not the
+  # deployment once it has one of its own.
+  exec sudo env "${keep[@]}" DSH_BOOTSTRAP_SOURCE="$SRC_DIR" bash "$SRC_DIR/install.sh" "$@" </dev/tty
 }
 
 if [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$(id -u)" != 0 ]; then
@@ -613,6 +619,10 @@ if [ "$CHECK" != 1 ]; then
     # the agent, one account may update or roll back the deployment.
     first_allowed="$(printf %s "${ALLOWED_USER_IDS%%,*}" | tr -d " ")"
     ask DSH_ADMIN_USER_ID "Admin user id (may update/restart/roll back)" "$first_allowed"
+    # One bot has one budget: ~20 messages/minute per group, shared by every
+    # topic. Extra bots multiply it, and each must be a member of the group.
+    ask DSH_TELEGRAM_PUBLISHER_TOKENS \
+      "Extra publisher bot tokens to raise the rate limit (comma separated, blank = main bot only)" ""
   fi
   ask DESIGN "Install the Penpot design stack? (docker/none)" none
   if [ "$DESIGN" = docker ]; then
@@ -660,6 +670,9 @@ printf '    version:   %s (DSH %s)\n' "$SETUP_VERSION" "$DSH_VERSION"
 printf '    web:       http://%s:%s/\n' "$DSH_BIND_IP" "$DSH_PORT"
 printf '    provider:  %s / %s\n' "$DSH_PROVIDER" "$DSH_MODEL"
 printf '    telegram:  %s\n' "$([ -n "$DSH_TELEGRAM_BOT_TOKEN" ] && echo configured || echo disabled)"
+if [ -n "$DSH_TELEGRAM_BOT_TOKEN" ]; then
+  printf '    bots:      main%s\n' "$(printf '%s' "$DSH_TELEGRAM_PUBLISHER_TOKENS" | tr ',' '\n' | grep -c . | awk '$1 > 0 { printf " + %d publisher(s)", $1 }')"
+fi
 if [ -n "$DSH_ADMIN_USER_ID" ]; then
   printf '    admin:     %s (may update, restart and roll back)\n' "$DSH_ADMIN_USER_ID"
 fi
@@ -817,6 +830,7 @@ write_env() {
   set_env DSH_TELEGRAM_BOT_TOKEN "$DSH_TELEGRAM_BOT_TOKEN" "$file"
   set_env ALLOWED_USER_IDS "$ALLOWED_USER_IDS" "$file"
   set_env DSH_ADMIN_USER_ID "$DSH_ADMIN_USER_ID" "$file"
+  set_env DSH_TELEGRAM_PUBLISHER_TOKENS "$DSH_TELEGRAM_PUBLISHER_TOKENS" "$file"
   set_env DSH_UPDATER_TOKEN "$DSH_UPDATER_TOKEN" "$file"
   set_env DSH_SETUP_VERSION "$SETUP_VERSION" "$file"
   set_env DESIGN "$DESIGN" "$file"
@@ -1181,3 +1195,38 @@ fi
 printf '    update:  /system update all (Telegram) or ./update.sh --self (host)\n'
 printf '    switch:  ./install.sh --mode %s (stops the other mode; data is not moved, see docs/HOST.md)\n' \
   "$([ "$MODE" = docker ] && echo native || echo docker)"
+
+# --- the download is not the deployment ------------------------------------
+# `curl … | bash` leaves the fetched release somewhere (default ~/dsh-setup).
+# Native mode copies what it needs into "$DIR" and gives it a checkout with a
+# remote, so the download is scaffolding — say so instead of leaving the user
+# with two directories and no way to tell which one matters.
+if [ -n "${DSH_BOOTSTRAP_SOURCE:-}" ] && [ -d "$DSH_BOOTSTRAP_SOURCE" ]; then
+  source_abs="$(cd "$DSH_BOOTSTRAP_SOURCE" && pwd -P)"
+  dir_abs="$(cd "$DIR" && pwd -P)"
+  if [ "$source_abs" != "$dir_abs" ]; then
+    origin="$(git -C "$DIR" remote get-url origin 2>/dev/null || true)"
+    case "$origin" in
+      "$source_abs"|"$source_abs"/*)
+        # The deployment updates from the download: removing it would cut
+        # /system update all off from new releases.
+        printf '    note:    %s is the source this deployment updates from — keep it\n' "$source_abs"
+        ;;
+      *)
+        printf '    note:    %s is the download, not the deployment (%s)\n' "$source_abs" "$dir_abs"
+        if [ "${CLEAN_SOURCE:-0}" = 1 ]; then
+          rm -rf "$source_abs" && printf '    removed: the download at %s\n' "$source_abs"
+        elif can_ask; then
+          printf 'Remove the download at %s? [y/N] ' "$source_abs" >&2
+          source_answer="$(read_from_terminal)"
+          case "$source_answer" in
+            y|Y|yes|Yes) rm -rf "$source_abs" && printf '    removed: %s\n' "$source_abs" ;;
+            *) printf '    keep:    rm -rf %s whenever you like\n' "$source_abs" ;;
+          esac
+        else
+          printf '    remove:  rm -rf %s (not needed; it is not the deployment)\n' "$source_abs"
+        fi
+        ;;
+    esac
+  fi
+fi

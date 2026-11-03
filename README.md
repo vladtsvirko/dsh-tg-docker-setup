@@ -90,7 +90,7 @@ curl -fsSL …/install.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.1.2`, and put the checkout elsewhere with `--dir`. If Docker or
+v0.2.1-rc.5-0.2.0`, and put the checkout elsewhere with `--dir`. If Docker or
 Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -267,7 +267,7 @@ container is disposable and disappears with the container.
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.1.2
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.2.0
          DSH part          product part
 ```
 

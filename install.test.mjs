@@ -577,3 +577,22 @@ test('the root check runs before any question, not after it', async (t) => {
   assert.match(result.out, /needs root/)
   assert.doesNotMatch(result.out, /Which deployment do you want/)
 })
+
+test('publisher bots can be given at install time and are written to .env', async () => {
+  // One bot has one budget; the extra senders existed only in .env.example, so a
+  // native install (which starts from an empty .env) never learned about them.
+  const plan = await install(['--check', '--yes'], {
+    env: { DSH_TELEGRAM_BOT_TOKEN: '1:a', DSH_TELEGRAM_PUBLISHER_TOKENS: '2:b,3:c' },
+  })
+  assert.equal(plan.code, 0, plan.out)
+  assert.match(plan.out, /bots:\s+main \+ 2 publisher\(s\)/)
+})
+
+test('the downloaded checkout is described as separate from the deployment', async () => {
+  // `curl | bash` leaves a checkout behind; native mode installs elsewhere.
+  const source = await readFile(join(here, 'install.sh'), 'utf8')
+  assert.match(source, /is the download, not the deployment/)
+  assert.match(source, /--clean-source/)
+  // and never deletes a checkout the deployment updates from
+  assert.match(source, /is the source this deployment updates from/)
+})
