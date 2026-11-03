@@ -1,6 +1,6 @@
 # Acceptance run: Docker host and native VM
 
-These steps were written for `v0.2.1-rc.5-0.0.0`; if you are accepting a later
+These steps were written for `v0.2.1-rc.5-0.1.0`; if you are accepting a later
 tag, substitute it everywhere below.
 
 Two runs, one per mode. Each takes ~20 minutes. The point is not to see it work
@@ -24,20 +24,28 @@ Write down the step number with anything unexpected, and keep the output of
 
 ### A1. Install a second deployment from the new tag
 
-Do not touch the running one. Use another directory and port:
+Do not touch the running one. Use another directory and port, and install the
+way a stranger would — one downloaded file:
 
 ```sh
-git clone https://github.com/vladtsvirko/dsh-tg-docker-setup /tmp/uat-docker
-cd /tmp/uat-docker && git checkout v0.2.1-rc.5-0.0.0
-./install.sh --dir /tmp/uat-docker --check      # read the plan first
-./install.sh --dir /tmp/uat-docker
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.1.0/install.sh | bash -s -- --check --dir /tmp/uat-docker
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.1.0/install.sh | bash -s -- --dir /tmp/uat-docker
 ```
+
+- [ ] the first line prints what it will fetch, then the full plan, and changes
+      nothing
+- [ ] the second asks the questions, shows the plan again and asks
+      `Proceed? [Y/n]`
+- [ ] it says either `docker present` or that it is installing
+      `docker.io + docker-compose-v2`
+- [ ] on a host without Docker, it installs it before the build (this is the
+      point of the run)
 
 Answers to have ready: a **new** bot token (a second bot, so the two deployments
 never poll the same token), its group with Topics + the bot as admin, your user
 id, your provider key, a free port (e.g. 4320).
 
-- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.0.0 (docker mode)`
+- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.1.0 (docker mode)`
 - [ ] the summary prints `web: http://<ip>:<port>/ (send /web …)` and the key line
       says either `set` or how to add it
 - [ ] it warns about web UI exposure when binding a LAN address
@@ -118,22 +126,20 @@ Use a fresh Debian/Ubuntu VM (2 CPU, 4 GB). Root access, network, nothing else.
 
 ### B0. Prerequisites
 
-- [ ] Node ≥ 22 present **or** documented as the one thing to install
-      (`node -v`; the installer needs it before it starts)
+- [ ] Node **not** installed: the installer must install 22 from NodeSource
+      itself and say so in the plan (`deps: installs Node 22 …`)
 - [ ] a third bot token, and its group with Topics + the bot as admin
 
 ### B1. Install
 
 ```sh
-git clone https://github.com/vladtsvirko/dsh-tg-docker-setup /srv/uat-setup
-cd /srv/uat-setup && git checkout v0.2.1-rc.5-0.0.0
-sudo ./install.sh --mode native --dir /srv/dsh --check
-sudo ./install.sh --mode native --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.1.0/install.sh | sudo bash -s -- --check --mode native --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.1.0/install.sh | sudo bash -s -- --mode native --dir /srv/dsh
 ```
 
 - [ ] `--check` shows `tier: sandbox`, `user: dsh`, `data: /srv/dsh/data`
 - [ ] the installer installs `dsh` **and** `pnpm` (it says so)
-- [ ] it ends with `==> installed: 0.2.1-rc.5-0.0.0 (native mode)`
+- [ ] it ends with `==> installed: 0.2.1-rc.5-0.1.0 (native mode)`
 - [ ] `systemctl status dsh.service` is `active (running)`
 - [ ] `journalctl -u dsh.service -n 30` shows the runtime listening and the
       connector connected

@@ -13,7 +13,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -511,5 +511,49 @@ test('an .env from an older release is repaired, not rejected', async () => {
     assert.equal(await readFile(join(dir, '.env'), 'utf8'), before, '--check must not rewrite .env')
   } finally {
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('a lone install.sh fetches a release and shows the full plan', async () => {
+  // The wget case: one file, no checkout. It clones into a throwaway directory,
+  // runs the real installer's --check against the requested target, and leaves
+  // the target untouched.
+  const lone = await mkdtemp(join(tmpdir(), 'lone-'))
+  const target = join(await mkdtemp(join(tmpdir(), 'lone-target-')), 'deployment')
+  try {
+    await copyFile(join(here, 'install.sh'), join(lone, 'install.sh'))
+    // A tag that exists: VERSION moves before the tag is cut, and the bootstrap
+    // can only clone what the repository already has.
+    const { stdout: tagList } = await exec('git', ['tag', '--sort=-v:refname'], { cwd: here })
+    const tag = tagList.split('\n').map((line) => line.trim()).filter(Boolean)[0]
+    const version = tag.replace(/^v/, '')
+    const { stdout } = await exec('bash', ['install.sh', '--check', '--ref', tag, '--dir', target], {
+      cwd: lone,
+      env: { ...process.env, DSH_SETUP_REPO: here },
+      timeout: 120000,
+    })
+    assert.match(stdout, /the setup is not here — fetching a release first/)
+    assert.match(stdout, /fetching v[^ ]+ to preview the plan/)
+    assert.match(stdout, new RegExp(`version:\\s+${version.replace(/\./g, '\\.')}`))
+    assert.match(stdout, /check only — nothing was changed/)
+    // The preview runs in a temporary checkout: the target is not created.
+    await assert.rejects(stat(target), 'the target directory must not exist')
+  } finally {
+    await rm(lone, { recursive: true, force: true })
+    await rm(target, { recursive: true, force: true })
+  }
+})
+
+test('the bootstrap help names the one-liner and its options', async () => {
+  const lone = await mkdtemp(join(tmpdir(), 'lone-help-'))
+  try {
+    await copyFile(join(here, 'install.sh'), join(lone, 'install.sh'))
+    const { stdout } = await exec('bash', ['install.sh', '--help'], { cwd: lone, timeout: 30000 })
+    assert.match(stdout, /wget -qO-/)
+    assert.match(stdout, /--ref REF/)
+    assert.match(stdout, /--no-deps/)
+    assert.match(stdout, /--check/)
+  } finally {
+    await rm(lone, { recursive: true, force: true })
   }
 })

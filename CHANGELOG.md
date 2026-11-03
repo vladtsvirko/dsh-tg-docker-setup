@@ -7,6 +7,49 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.1.0
+
+### Added
+
+- **One file installs everything.** `wget -qO- …/install.sh | bash` (or `curl`)
+  fetches the newest release into a checkout, then installs it — no `git clone`,
+  no manual prerequisites:
+
+  ```sh
+  wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash
+  ```
+
+  The checkout matters: it is what `/system update all` moves between releases
+  later. `--ref` pins the tag, `--dir` chooses where it lands
+  (`/opt/dsh-setup` as root, `~/dsh-setup` otherwise).
+- **Docker is installed when it is missing.** Docker mode installs
+  `docker.io` + `docker-compose-v2` from the distro, starts the daemon, and adds
+  the invoking user to the `docker` group; if the distro has no usable packages
+  (Debian 12, Ubuntu with `universe` off) it falls back to Docker's own apt
+  repository. Native mode installs Node 22 from NodeSource instead. The plan
+  says which of the two will happen, and `--no-deps` keeps the installer away
+  from apt entirely.
+- **The questions are asked once.** An install that needs root re-executes itself
+  under `sudo` before the first question, for both modes, instead of asking
+  everything and then failing on the socket or the systemd unit.
+- **`--check` from a lone file shows the whole plan**, not just the bootstrap:
+  it fetches a temporary checkout, prints the real plan against the directory
+  you asked for, and leaves nothing behind.
+- **One confirmation before anything changes**: `Proceed? [Y/n]` after the plan.
+
+### Fixed
+
+- **Prompts work when the script arrives through a pipe.** `read` used to take
+  the next line of the script itself, so every question silently took its
+  default; prompts now read `/dev/tty` when stdin is not a terminal, and are
+  skipped (with the documented defaults) when there is no terminal at all.
+- **`[ -r /dev/tty ]` is not a terminal test.** Existence is not use: opening it
+  is, which is what CI and cron need to avoid hanging.
+
+### Notes
+
+- `docs/UAT.md` installs with the one-liner in both modes, because that is the
+  path a stranger takes.
 ## 0.2.1-rc.5-0.0.0
 
 Alignment release against DSH `0.2.1-rc.5` (from `0.2.1-rc.2`). The product

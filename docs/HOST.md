@@ -68,9 +68,22 @@ files behind.
 ./install.sh --ref <git ref>        # install a specific ref (default: the release tag)
 ```
 
+Or with nothing but a URL, on a fresh host:
+
+```sh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh \
+  | sudo bash -s -- --mode native
+```
+
+That fetches the newest release into `/opt/dsh-setup` (as root), installs Node 22
+from NodeSource when the host has none, and then continues with the questions
+below. `--no-deps` keeps the installer away from apt when Node is managed
+elsewhere; `--check` shows the whole plan, including what it would install.
+
 The installer is idempotent: re-running repairs the units, the symlinks and the
 `.env`. It refuses to clobber the other mode silently — switching is explicit
-(see below).
+(see below). A native install run as a normal user re-executes itself under
+`sudo` before asking anything, so the questions are asked once.
 
 ## Updates
 

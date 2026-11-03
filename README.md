@@ -45,7 +45,8 @@ working runtime and no bot.
 
 | You need | Why | Where |
 |---|---|---|
-| Docker + Compose (docker mode) or Node ≥ 22 + systemd (native) | the runtime | your distro |
+| A fresh Ubuntu 24.04 / Debian 12 host (or any distro with the packages below) | the installer targets these | your VPS or machine |
+| Docker + Compose (docker mode) or Node ≥ 22 + systemd (native) | the runtime | **the installer installs them** — Docker via apt, Node via NodeSource — unless you pass `--no-deps` |
 | A provider API key | the agent cannot answer without one | the installer now asks for it |
 | A bot token | the Telegram surface | [@BotFather](https://t.me/BotFather) → `/newbot` |
 | **Privacy mode off** for that bot | otherwise it never sees plain messages in topics, which is the whole input path | `/setprivacy` → Disable |
@@ -56,6 +57,52 @@ The bot cannot create the group; `workspace new` prints a one-tap
 `?startgroup=` link, and you create it.
 
 ## Install
+
+### From the internet, on a fresh machine
+
+One file, no checkout, and it installs what the chosen mode needs — Docker and
+the compose plugin for docker mode, Node 22 for native mode:
+
+```sh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash
+```
+
+Run it as a normal user with `sudo` available, or as root. It:
+
+1. says what it is going to fetch (the newest release tag) and where
+   (`/opt/dsh-setup` as root, `~/dsh-setup` otherwise),
+2. downloads that release into a git checkout — which is what makes
+   `/system update all` work later,
+3. asks the same questions as a local install, then shows the plan and asks
+   before changing anything: `Proceed? [Y/n]`,
+4. installs Docker (or Node), then the runtime, then waits for the health check.
+
+`--check` shows the whole plan first, including what would be installed:
+
+```sh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash -s -- --check
+```
+
+Unattended, with every answer in a file (see `install.example.env`):
+
+```sh
+curl -fsSL …/install.sh | bash -s -- --yes --config answers.env
+```
+
+The release the one-liner fetches is the newest tag; pin it with `--ref
+v0.2.1-rc.5-0.1.0`, and put the checkout elsewhere with `--dir`. If Docker or
+Node is already installed and you would rather manage it yourself, pass
+`--no-deps`: the installer then fails with the exact command to run instead of
+touching apt.
+
+### From a checkout
+
+```sh
+git clone https://github.com/vladtsvirko/dsh-tg-docker-setup
+cd dsh-tg-docker-setup
+./install.sh --check        # the full plan, nothing changed
+./install.sh                # interactive: mode, port, key, bot token, admin
+```
 
 One command, two modes — the same release, the same tag policy:
 
@@ -220,7 +267,7 @@ container is disposable and disappears with the container.
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.0.0
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.1.0
          DSH part          product part
 ```
 

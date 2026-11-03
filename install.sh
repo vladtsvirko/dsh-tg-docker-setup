@@ -20,12 +20,181 @@
 # plan is all that happens, which is what the test suite exercises.
 set -euo pipefail
 
-cd "$(dirname "$0")"
-SRC_DIR="$(pwd -P)"
+log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
+
+# Where this file is, without assuming it is a file at all: `wget -qO- … | bash`
+# has no path, and that is exactly the case the bootstrap below handles.
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+  SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+else
+  SRC_DIR="$(pwd -P)"
+fi
+
+# ===========================================================================
+# Bootstrap: one downloaded file is enough.
+#
+#   wget -qO- https://raw.githubusercontent.com/…/install.sh | bash -s -- --yes
+#
+# The installer needs VERSION, compose.yaml, the Dockerfile and the entrypoint
+# beside it, so a lone copy fetches a release checkout and re-runs the copy
+# inside it. Everything here is about getting that checkout; the installer
+# proper starts below.
+# ===========================================================================
+SETUP_REPO="${DSH_SETUP_REPO:-https://github.com/vladtsvirko/dsh-tg-docker-setup.git}"
+
+bootstrap_usage() {
+  cat <<'EOF'
+Get the setup from the internet and install it.
+
+  wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash -s -- --yes
+
+Options (bootstrap):
+  --ref REF              release tag to fetch (default: the newest on the remote)
+  --dir PATH             where to put the checkout (default: /opt/dsh-setup as
+                         root, ~/dsh-setup otherwise)
+  --check                show what would be fetched and installed, change nothing
+  --no-deps              do not install Docker or Node (they must already exist)
+  -h, --help             this text
+
+Everything else is passed to the installer inside the checkout: --mode, --yes,
+--config, --design, --tier, --uninstall. Run --help after the checkout for the
+full list.
+EOF
+}
+
+in_bootstrap() {
+  [ -f "$SRC_DIR/VERSION" ] && [ -f "$SRC_DIR/compose.yaml" ] && return 1
+  return 0
+}
+
+# The newest release tag, without the GitHub API and without jq.
+bootstrap_latest() {
+  local tags
+  tags="$(git ls-remote --tags --sort=-v:refname "$SETUP_REPO" 'v*' 2>/dev/null \
+    | sed -e 's#.*refs/tags/##' -e 's#\^{}$##' | sort -u -r -V | head -1)" || true
+  printf '%s' "$tags"
+}
+
+# apt, but only when it is there and only for packages that are missing.
+bootstrap_apt() {
+  local -a missing=("$@")
+  [ "${#missing[@]}" -gt 0 ] || return 0
+  if ! command -v apt-get >/dev/null 2>&1; then
+    die "missing ${missing[*]} — install them with your package manager and run this again"
+  fi
+  local -a as=()
+  if [ "$(id -u)" != 0 ]; then
+    command -v sudo >/dev/null 2>&1 \
+      || die "installing ${missing[*]} needs root — run with sudo, or install them yourself"
+    as=(sudo)
+  fi
+  log "installing ${missing[*]}"
+  ${as[@]:-} env DEBIAN_FRONTEND=noninteractive apt-get update -qq || warn "apt-get update failed; trying the install anyway"
+  ${as[@]:-} env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${missing[@]}"
+}
+
+bootstrap() {
+  local -a args=("$@")
+  local ref="" dir="" check=0 no_deps=0 i=0 arg
+  while [ "$i" -lt "${#args[@]}" ]; do
+    arg="${args[$i]}"
+    case "$arg" in
+      -h|--help) bootstrap_usage; exit 0 ;;
+      --ref)   ref="${args[$((i + 1))]:-}"; i=$((i + 2)); continue ;;
+      --ref=*) ref="${arg#*=}" ;;
+      --dir)   dir="${args[$((i + 1))]:-}"; i=$((i + 2)); continue ;;
+      --dir=*) dir="${arg#*=}" ;;
+      --check) check=1 ;;
+      --no-deps) no_deps=1 ;;
+    esac
+    i=$((i + 1))
+  done
+
+  echo
+  log "the setup is not here — fetching a release first"
+  [ -n "$ref" ] || ref="${DSH_SETUP_REF:-}"
+  [ -n "$dir" ] || dir="${DSH_SETUP_DIR:-}"
+  if [ -z "$dir" ]; then
+    if [ "$(id -u)" = 0 ]; then dir=/opt/dsh-setup; else dir="$HOME/dsh-setup"; fi
+  fi
+
+  printf '    repository: %s\n' "$SETUP_REPO"
+  printf '    release:    %s\n' "${ref:-the newest tag on the remote}"
+  printf '    directory:  %s\n' "$dir"
+  printf '    needs:      git, curl (installed if missing); Docker or Node are handled\n'
+  printf '                by the installer, once the mode is known\n'
+  echo
+
+  if [ "$check" = 1 ]; then
+    if ! command -v git >/dev/null 2>&1; then
+      log "check only — install git to preview the full plan"
+      exit 0
+    fi
+    # A plan is worth reading before anything is installed, so fetch a throwaway
+    # checkout and let the real installer print its plan against the deployment
+    # directory the user asked for.
+    log "fetching ${ref:-the newest tag} to preview the plan (temporary checkout)"
+    [ -n "$ref" ] || ref="$(bootstrap_latest)"
+    [ -n "$ref" ] || die "cannot read release tags from $SETUP_REPO — pass --ref v<version>"
+    local preview code
+    preview="$(mktemp -d)"
+    if ! git -c advice.detachedHead=false clone --quiet --branch "$ref" "$SETUP_REPO" "$preview"; then
+      rm -rf "$preview"
+      die "cannot clone $SETUP_REPO at $ref"
+    fi
+    ( cd "$preview" && bash "$preview/install.sh" --check "${args[@]}" --dir "$dir" )
+    code=$?
+    rm -rf "$preview"
+    exit $code
+  fi
+
+  # git and curl to fetch, and nothing else here: the mode decides whether
+  # Docker or Node is needed, and that question is asked after the checkout.
+  local -a want=()
+  command -v git >/dev/null 2>&1 || want+=(git)
+  command -v curl >/dev/null 2>&1 && command -v wget >/dev/null 2>&1 || want+=(curl)
+  bootstrap_apt "${want[@]:-}"
+
+  command -v git >/dev/null 2>&1 || die "git is required to fetch the setup"
+  [ -n "$ref" ] || ref="$(bootstrap_latest)"
+  if [ -z "$ref" ]; then
+    die "cannot read release tags from $SETUP_REPO — pass --ref v<version>"
+  fi
+
+  if [ -d "$dir/.git" ]; then
+    log "updating the checkout in $dir"
+    git -C "$dir" fetch --quiet --tags origin || warn "cannot fetch tags; using what is there"
+    git -C "$dir" checkout --quiet "$ref" || die "cannot check out $ref in $dir"
+  else
+    log "fetching $ref into $dir"
+    mkdir -p "$(dirname "$dir")"
+    git -c advice.detachedHead=false clone --quiet --branch "$ref" "$SETUP_REPO" "$dir" \
+      || die "cannot clone $SETUP_REPO at $ref"
+  fi
+  # A root install with sudo must not leave the tree owned by root: the data
+  # directory lives inside it.
+  if [ "$(id -u)" = 0 ] && [ -n "${SUDO_UID:-}" ]; then
+    chown -R "${SUDO_UID}:${SUDO_GID:-$SUDO_UID}" "$dir" 2>/dev/null || true
+  fi
+
+  log "installing from $dir"
+  cd "$dir"
+  exec bash "$dir/install.sh" "${args[@]}"
+}
+
+if in_bootstrap; then
+  bootstrap "$@"
+  exit 0
+fi
+
+cd "$SRC_DIR"
 SETUP_VERSION="$(tr -d '\n' < "$SRC_DIR/VERSION")"
 DSH_VERSION="$(printf '%s' "$SETUP_VERSION" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+$//')"
 
-MODE="" TIER="" DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0
+MODE="" TIER="" DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0 DEPS=1
 SERVICE_USER="${SERVICE_USER:-dsh}"
 DSH_PORT="${DSH_PORT:-}"
 DSH_BIND_IP="${DSH_BIND_IP:-}"
@@ -52,6 +221,12 @@ Install the DSH setup in one command.
   ./install.sh --mode native --yes    unattended, native (no Docker)
   ./install.sh --config answers.env   answers from a file
 
+Without a checkout — one small file fetches the release, then installs
+everything the chosen mode needs, Docker included:
+
+  wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash -s -- --yes
+
 Options:
   --mode docker|native   deployment mode (default: ask, else docker)
   --tier sandbox|privileged
@@ -60,6 +235,7 @@ Options:
   --design none|docker   optional Penpot design stack (default: ask, else none)
   --ref REF              git ref for the native checkout (default: v<VERSION>)
   --config FILE          read answers from FILE (KEY=VALUE, no shell)
+  --no-deps              do not install Docker or Node; they must already exist
   --yes, -y              accept defaults, never prompt
   --check                print the plan and change nothing
   --uninstall            stop and remove the deployment (keeps data/)
@@ -116,6 +292,7 @@ while [ $# -gt 0 ]; do
     --config=*) shift ;;
     --yes|-y) YES=1; shift ;;
     --check)  CHECK=1; shift ;;
+    --no-deps) DEPS=0; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --purge)  PURGE=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -129,28 +306,45 @@ if [ "$PURGE" = 1 ] && [ "$UNINSTALL" != 1 ]; then
 fi
 
 # --- prompts ---------------------------------------------------------------
+# `wget … | bash` leaves stdin as the script itself, so a prompt has to read the
+# terminal directly or the install silently takes every default.
+can_ask() {
+  [ "$YES" = 1 ] && return 1
+  [ "$CHECK" = 1 ] && return 1
+  [ -t 0 ] && return 0
+  # A readable /dev/tty is not the same as a usable one: opening it fails with
+  # "no such device" when the process has no controlling terminal (CI, cron).
+  ( : </dev/tty ) 2>/dev/null
+}
+
+read_from_terminal() {
+  local answer=""
+  if [ -t 0 ]; then read -r answer || answer=""; else read -r answer </dev/tty || answer=""; fi
+  printf '%s' "$answer"
+}
+
 ask() {
   local var="$1" prompt="$2" def="${3:-}" current answer
   current="${!var:-}"
   [ -n "$current" ] && def="$current"
-  if [ "$YES" = 1 ] || [ "$CHECK" = 1 ] || [ ! -t 0 ]; then
+  if ! can_ask; then
     printf -v "$var" '%s' "$def"
     return 0
   fi
   printf '%s [%s]: ' "$prompt" "$def"
-  read -r answer || answer=""
+  answer="$(read_from_terminal)"
   printf -v "$var" '%s' "${answer:-$def}"
 }
 
 ask_secret() {
   local var="$1" prompt="$2" current answer
   current="${!var:-}"
-  if [ -n "$current" ] || [ "$YES" = 1 ] || [ "$CHECK" = 1 ] || [ ! -t 0 ]; then
+  if [ -n "$current" ] || ! can_ask; then
     [ -n "$current" ] || printf -v "$var" '%s' ''
     return 0
   fi
   printf '%s (blank = disabled): ' "$prompt"
-  read -r -s answer || answer=""
+  if [ -t 0 ]; then read -r -s answer || answer=""; else read -r -s answer </dev/tty || answer=""; fi
   printf '\n'
   printf -v "$var" '%s' "$answer"
 }
@@ -276,13 +470,13 @@ uninstall_run() {
 }
 
 # --- decide ----------------------------------------------------------------
-if [ "$YES" != 1 ] && [ "$CHECK" != 1 ] && [ -t 0 ] && [ -z "$MODE" ]; then
+if [ -z "$MODE" ] && can_ask; then
   echo
   echo "Which deployment do you want?"
   echo "  1) docker  — container boundary, no host access for the agent (recommended)"
   echo "  2) native  — systemd on this host, no Docker; the agent can read the host"
   printf 'Mode [1]: '
-  read -r mode_answer || mode_answer=""
+  mode_answer="$(read_from_terminal)"
   case "${mode_answer:-1}" in
     1|docker|Docker) MODE=docker ;;
     2|native|Native) MODE=native ;;
@@ -291,6 +485,37 @@ if [ "$YES" != 1 ] && [ "$CHECK" != 1 ] && [ -t 0 ] && [ -z "$MODE" ]; then
 fi
 [ -n "$MODE" ] || MODE=docker
 case "$MODE" in docker|native) ;; *) die "--mode must be docker or native" ;; esac
+
+docker_ready() {
+  command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1
+}
+
+# `docker compose version` only reads the plugin; building and starting need the
+# daemon, and therefore either root or the docker group.
+docker_usable() {
+  docker_ready && docker info >/dev/null 2>&1
+}
+
+node_ready() {
+  command -v node >/dev/null 2>&1 && [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 22 ]
+}
+
+# Both modes need root for what comes next: Docker's daemon, or the systemd
+# units. Re-run under sudo here, before a single question is asked, so nobody
+# answers everything twice.
+if [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$(id -u)" != 0 ] && \
+   { [ "$MODE" = native ] || ! docker_usable; }; then
+  if command -v sudo >/dev/null 2>&1; then
+    log "this install needs root — re-running with sudo"
+    # -E keeps the answers given as environment variables; some sudoers policies
+    # refuse it, and plain sudo is better than stopping.
+    if sudo -E true >/dev/null 2>&1; then
+      exec sudo -E bash "$SRC_DIR/install.sh" "$@"
+    fi
+    exec sudo bash "$SRC_DIR/install.sh" "$@"
+  fi
+  die "run this with sudo: it $([ "$MODE" = native ] && echo "installs a systemd service" || echo "installs or uses Docker")"
+fi
 
 case "${DESIGN:-}" in
   ""|none|docker) ;;
@@ -341,11 +566,9 @@ if [ "$UNINSTALL" = 1 ]; then
     die "native mode removes systemd units — run with sudo"
   fi
   if [ "$YES" != 1 ]; then
-    if [ ! -t 0 ]; then
-      die "refusing to uninstall without a terminal — add --yes to confirm"
-    fi
+    can_ask || die "refusing to uninstall without a terminal — add --yes to confirm"
     printf 'Type "yes" to continue: '
-    read -r answer || answer=""
+    answer="$(read_from_terminal)"
     [ "$answer" = yes ] || die "cancelled"
   fi
   uninstall_run
@@ -394,8 +617,18 @@ UPDATER_URL="$UPDATER_URL_NATIVE"
 [ "$MODE" = docker ] && UPDATER_URL="$UPDATER_URL_DOCKER"
 
 [ -n "$REF" ] || REF="v$SETUP_VERSION"
+# Reaching here as a non-root native install means --check, or a sudo that was
+# refused: the re-exec above normally handles it.
 [ "$MODE" = native ] && [ "$CHECK" != 1 ] && [ "$(id -u)" != 0 ] \
   && die "native mode installs a systemd service — run with sudo"
+
+if [ "$DEPS" = 0 ]; then
+  DEPS_PLAN="skipped (--no-deps)"
+elif [ "$MODE" = docker ]; then
+  if docker_ready; then DEPS_PLAN="docker present"; else DEPS_PLAN="installs docker.io + docker-compose-v2 (apt, needs root)"; fi
+else
+  if node_ready; then DEPS_PLAN="node present"; else DEPS_PLAN="installs Node 22 from NodeSource (apt, needs root)"; fi
+fi
 
 # --- plan ------------------------------------------------------------------
 echo
@@ -424,6 +657,8 @@ else
   printf '    updater:   sidecar on the internal ops network\n'
 fi
 
+printf '    deps:      %s\n' "$DEPS_PLAN"
+
 if [ "$DSH_BIND_IP" != "127.0.0.1" ] && [ "$DSH_BIND_IP" != "localhost" ]; then
   echo
   warn "the web UI on http://$DSH_BIND_IP:$DSH_PORT/ is protected only by a sign-in"
@@ -437,6 +672,97 @@ if [ "$CHECK" = 1 ]; then
   echo
   log "check only — nothing was changed"
   exit 0
+fi
+
+# One confirmation for everything the plan above describes, so the apt and the
+# container work do not start while someone is still reading it.
+if can_ask; then
+  printf 'Proceed? [Y/n] '
+  answer="$(read_from_terminal)"
+  case "$answer" in
+    n|N|no|No|NO) log "cancelled — nothing was changed"; exit 1 ;;
+  esac
+fi
+
+# --- dependencies ----------------------------------------------------------
+# apt, only for what the chosen mode actually needs, and only when it is missing.
+# --no-deps turns this into a check.
+as_root() {
+  if [ "$(id -u)" = 0 ]; then "$@"
+  elif command -v sudo >/dev/null 2>&1; then sudo "$@"
+  else die "installing packages needs root — re-run with sudo, or pass --no-deps"
+  fi
+}
+
+apt_install() {
+  command -v apt-get >/dev/null 2>&1 \
+    || die "this is not a Debian/Ubuntu host — install $* yourself, or pass --no-deps"
+  log "installing $*"
+  as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq || warn "apt-get update failed; trying anyway"
+  as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "$@"
+}
+
+# Docker's own apt repository, for the hosts where the distro packages do not
+# provide `docker compose` (Debian 12, or Ubuntu with universe disabled).
+install_docker_repo() {
+  local id codename
+  id="$(. /etc/os-release 2>/dev/null && printf '%s' "${ID:-}")"
+  codename="$(. /etc/os-release 2>/dev/null && printf '%s' "${VERSION_CODENAME:-}")"
+  case "$id" in
+    ubuntu|debian) ;;
+    *) die "docker's apt repository has no packages for '$id' — install Docker and the compose plugin yourself, or pass --no-deps" ;;
+  esac
+  [ -n "$codename" ] || die "cannot read the release codename from /etc/os-release"
+  log "adding docker's apt repository ($id $codename)"
+  apt_install ca-certificates curl
+  as_root install -m 0755 -d /etc/apt/keyrings
+  as_root curl -fsSL "https://download.docker.com/linux/$id/gpg" -o /etc/apt/keyrings/docker.asc \
+    || die "cannot fetch docker's signing key"
+  as_root chmod a+r /etc/apt/keyrings/docker.asc
+  printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/%s %s stable\n' \
+    "$(dpkg --print-architecture)" "$id" "$codename" \
+    | as_root tee /etc/apt/sources.list.d/docker.list >/dev/null
+  apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+}
+
+ensure_docker() {
+  if docker_ready; then return 0; fi
+  [ "$DEPS" = 1 ] || die "docker (with the compose plugin) is missing and --no-deps was given"
+  if command -v docker >/dev/null 2>&1; then
+    # docker is there but the compose plugin is not: that is the whole gap.
+    apt_install docker-compose-v2 || warn "no docker-compose-v2 package here; trying docker's own repository"
+  else
+    # The distro packages first: no third-party repository, and they are enough
+    # on Ubuntu 24.04. The official repository is the fallback, not the default.
+    if ! apt_install docker.io docker-compose-v2; then
+      warn "the distro has no usable docker packages; using docker's own repository"
+    fi
+  fi
+  if ! docker_ready; then install_docker_repo; fi
+  as_root systemctl enable --now docker >/dev/null 2>&1 || warn "could not start docker — start it yourself"
+  if [ "$(id -u)" = 0 ] && [ -n "${SUDO_USER:-}" ]; then
+    usermod -aG docker "$SUDO_USER" 2>/dev/null && \
+      log "added $SUDO_USER to the docker group (log out and back in to use docker without sudo)"
+  fi
+  docker_ready || die "docker is installed but 'docker compose' still fails — check 'docker compose version'"
+  docker_usable || warn "the docker daemon is not reachable for $(id -un) yet — log out and back in (docker group), then re-run"
+  log "docker ready: $(docker --version)"
+}
+
+ensure_node() {
+  if node_ready; then return 0; fi
+  [ "$DEPS" = 1 ] || die "Node 22+ is missing and --no-deps was given"
+  log "adding the NodeSource repository for Node 22"
+  command -v curl >/dev/null 2>&1 || apt_install curl
+  curl -fsSL https://deb.nodesource.com/setup_22.x | as_root bash - \
+    || die "cannot add the NodeSource repository — install Node 22 yourself, or pass --no-deps"
+  apt_install nodejs || die "could not install nodejs from NodeSource"
+  node_ready || die "node is still older than 22 — install Node 22 yourself, or pass --no-deps"
+  log "node ready: $(node --version)"
+}
+
+if [ "$DEPS" = 1 ]; then
+  if [ "$MODE" = docker ]; then ensure_docker; else ensure_node; fi
 fi
 
 # --- shared: write the deployment .env -------------------------------------
