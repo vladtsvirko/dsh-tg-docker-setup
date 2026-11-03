@@ -47,6 +47,100 @@ dsh_version() {
   printf '%s\n' "${v%-*}"
 }
 
+# --- firewall advisory (native only) ---------------------------------------
+# Same contract as install.sh: ufw gates a systemd service through INPUT, and
+# never gates a published Docker port (Docker DNATs it in nat/FORWARD before
+# INPUT is consulted). Warn, never act.
+#
+# Kept in both files on purpose: install.sh is also fetched as a lone file, so a
+# shared helper would break the `curl … | bash` bootstrap.
+
+ufw_state() {
+  if [ "$(id -u)" = 0 ]; then
+    ufw status 2>/dev/null
+    return 0
+  fi
+  # -n: a status run as a normal user must not sit waiting for a password.
+  if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    sudo -n ufw status 2>/dev/null
+    return 0
+  fi
+  # Unprivileged without passwordless sudo: the rules are root-only, but the
+  # enable flag is world-readable, so say "your firewall is on" anyway.
+  if [ -r /etc/ufw/ufw.conf ] && grep -qx 'ENABLED=yes' /etc/ufw/ufw.conf 2>/dev/null; then
+    printf 'Status: active\n'
+    return 0
+  fi
+  return 1
+}
+
+# Whether the rules themselves are readable: a hint without them cannot claim a
+# port is closed, only that ufw is on.
+ufw_rules_readable() {
+  [ "$(id -u)" = 0 ] && return 0
+  command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null
+}
+
+# The network ufw wants ("allow from 10.0.0.0/8"), from a bind address.
+lan_network() {
+  local addr="$1" cidr="" prefix a b c d num mask net
+  if command -v ip >/dev/null 2>&1; then
+    cidr="$(ip -o -4 addr show scope global 2>/dev/null \
+      | awk -v ip="$addr" '$4 ~ "^" ip "/" { print $4; exit }')"
+  fi
+  # Without an interface carrying the bind address, assume a /24 and still
+  # print the network, not the host address.
+  [ -n "$cidr" ] || cidr="$addr/24"
+  addr="${cidr%/*}"
+  prefix="${cidr##*/}"
+  case "$addr" in ''|*[!0-9.]*) printf '%s\n' "$cidr"; return 0 ;; esac
+  case "$prefix" in ''|*[!0-9]*) prefix=24 ;; esac
+  if [ "$prefix" -lt 8 ] || [ "$prefix" -gt 32 ]; then prefix=24; fi
+  IFS=. read -r a b c d <<<"$addr"
+  num=$(( (a << 24) | (b << 16) | (c << 8) | d ))
+  mask=$(( (0xffffffff << (32 - prefix)) & 0xffffffff ))
+  net=$(( num & mask ))
+  printf '%d.%d.%d.%d/%d\n' $(( (net >> 24) & 255 )) $(( (net >> 16) & 255 )) \
+    $(( (net >> 8) & 255 )) $(( net & 255 )) "$prefix"
+}
+
+# Warn for every (port, bind) pair on a non-loopback address that ufw does not
+# allow. Silent when ufw is absent or inactive.
+ufw_hints() {
+  UFW_HINTED=0
+  [ "${MODE:-}" = native ] || return 0
+  command -v ufw >/dev/null 2>&1 || return 0
+  local status rules port bind net tunnel_port="" readable=1
+  status="$(ufw_state | head -1)" || return 0
+  [ "$status" = "Status: active" ] || return 0
+  ufw_rules_readable || readable=0
+  rules="$(ufw_state | sed -n 's/^\([0-9][0-9]*\)\(\/tcp\)\? *ALLOW.*/\1/p')"
+  while [ "$#" -ge 2 ]; do
+    port="$1"
+    bind="$2"
+    shift 2
+    [ -n "$port" ] && [ -n "$bind" ] || continue
+    case "$bind" in 127.*|localhost|::1) continue ;; esac
+    if [ "$readable" = 1 ] && printf '%s\n' "$rules" | grep -qx "$port"; then continue; fi
+    if [ "$UFW_HINTED" = 0 ]; then
+      echo
+      if [ "$readable" = 1 ]; then
+        warn "ufw is active and does not allow the ports this deployment serves:"
+      else
+        warn "ufw is active (its rules need root to read); if a port is closed, allow it:"
+      fi
+    fi
+    UFW_HINTED=1
+    [ -n "$tunnel_port" ] || tunnel_port="$port"
+    net="$(lan_network "$bind")"
+    warn "  sudo ufw allow from $net to any port $port proto tcp    # $port on $bind"
+  done
+  if [ "$UFW_HINTED" = 1 ]; then
+    warn "  or leave it closed and tunnel: ssh -L $tunnel_port:127.0.0.1:$tunnel_port <user>@<host>"
+  fi
+  return 0
+}
+
 # --- deployment mode ------------------------------------------------------
 # install.sh records MODE in .env. Older deployments have no MODE and are
 # Docker; a native deploy is identified by its systemd unit.
@@ -572,6 +666,10 @@ verify() {
     return 1
   fi
   log "no plugin compatibility complaints since this start"
+  # Native only, and silent unless ufw is active: after a port or bind change
+  # the old rule is harmless but the new port is closed, which looks like a
+  # broken update.
+  ufw_hints "$(env_get DSH_PORT)" "$(env_get DSH_BIND_IP)"
 }
 
 status() {
@@ -594,6 +692,7 @@ status() {
       "${COMPOSE[@]}" exec -T dsh node -p "require('/data/home/profiles/web/node_modules/dsh-telegram-connector/package.json').version" 2>/dev/null || echo 'not installed'
     )"
   fi
+  ufw_hints "$(env_get DSH_PORT)" "$(env_get DSH_BIND_IP)"
 }
 
 # --- components ------------------------------------------------------------

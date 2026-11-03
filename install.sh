@@ -365,6 +365,104 @@ detect_lan_ip() {
   printf '%s\n' "${ip:-127.0.0.1}"
 }
 
+# --- firewall advisory (native only) ---------------------------------------
+# ufw gates a systemd service through its INPUT chain. It does not gate a
+# published Docker port: Docker DNATs it in nat/FORWARD before INPUT is ever
+# consulted, so a docker-mode deployment neither needs a rule nor is protected
+# by one. This is native-only by construction, not by choice.
+#
+# It warns and never acts. The installer cannot know whether a port should be
+# LAN-only, VPN-only or tunnel-only, and a ufw rule outlives --uninstall.
+
+ufw_state() {
+  if [ "$(id -u)" = 0 ]; then
+    ufw status 2>/dev/null
+    return 0
+  fi
+  # -n: a --check run as a normal user must not sit waiting for a password.
+  if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    sudo -n ufw status 2>/dev/null
+    return 0
+  fi
+  # Unprivileged without passwordless sudo (the usual `./install.sh --check`).
+  # The rules are root-only, but the enable flag is world-readable, so a check
+  # can still say "your firewall is on" instead of going silent.
+  if [ -r /etc/ufw/ufw.conf ] && grep -qx 'ENABLED=yes' /etc/ufw/ufw.conf 2>/dev/null; then
+    printf 'Status: active\n'
+    return 0
+  fi
+  return 1
+}
+
+# Whether the rules themselves are readable: a hint without them cannot claim
+# a port is closed, only that ufw is on.
+ufw_rules_readable() {
+  [ "$(id -u)" = 0 ] && return 0
+  command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null
+}
+
+# The network ufw wants ("allow from 10.0.0.0/8"), derived from the bind
+# address so the hint is copy-pasteable instead of a /16 guess.
+lan_network() {
+  local addr="$1" cidr="" prefix a b c d num mask net
+  if command -v ip >/dev/null 2>&1; then
+    cidr="$(ip -o -4 addr show scope global 2>/dev/null \
+      | awk -v ip="$addr" '$4 ~ "^" ip "/" { print $4; exit }')"
+  fi
+  # Without an interface carrying the bind address (a --check on another host,
+  # or a stale .env), assume a /24 and still print the network, not the host.
+  [ -n "$cidr" ] || cidr="$addr/24"
+  addr="${cidr%/*}"
+  prefix="${cidr##*/}"
+  case "$addr" in ''|*[!0-9.]*) printf '%s\n' "$cidr"; return 0 ;; esac
+  case "$prefix" in ''|*[!0-9]*) prefix=24 ;; esac
+  if [ "$prefix" -lt 8 ] || [ "$prefix" -gt 32 ]; then prefix=24; fi
+  IFS=. read -r a b c d <<<"$addr"
+  num=$(( (a << 24) | (b << 16) | (c << 8) | d ))
+  mask=$(( (0xffffffff << (32 - prefix)) & 0xffffffff ))
+  net=$(( num & mask ))
+  printf '%d.%d.%d.%d/%d\n' $(( (net >> 24) & 255 )) $(( (net >> 16) & 255 )) \
+    $(( (net >> 8) & 255 )) $(( net & 255 )) "$prefix"
+}
+
+# Warn for every (port, bind) pair on a non-loopback address that ufw does not
+# allow. Silent when ufw is absent or inactive: a host where the operator did
+# nothing about firewalling gets nothing from us.
+ufw_hints() {
+  UFW_HINTED=0
+  [ "${MODE:-}" = native ] || return 0
+  command -v ufw >/dev/null 2>&1 || return 0
+  local status rules port bind net tunnel_port="" readable=1
+  status="$(ufw_state | head -1)" || return 0
+  [ "$status" = "Status: active" ] || return 0
+  ufw_rules_readable || readable=0
+  rules="$(ufw_state | sed -n 's/^\([0-9][0-9]*\)\(\/tcp\)\? *ALLOW.*/\1/p')"
+  while [ "$#" -ge 2 ]; do
+    port="$1"
+    bind="$2"
+    shift 2
+    [ -n "$port" ] && [ -n "$bind" ] || continue
+    case "$bind" in 127.*|localhost|::1) continue ;; esac
+    if [ "$readable" = 1 ] && printf '%s\n' "$rules" | grep -qx "$port"; then continue; fi
+    if [ "$UFW_HINTED" = 0 ]; then
+      echo
+      if [ "$readable" = 1 ]; then
+        warn "ufw is active and does not allow the ports this deployment serves:"
+      else
+        warn "ufw is active (its rules need root to read); if a port is closed, allow it:"
+      fi
+    fi
+    UFW_HINTED=1
+    [ -n "$tunnel_port" ] || tunnel_port="$port"
+    net="$(lan_network "$bind")"
+    warn "  sudo ufw allow from $net to any port $port proto tcp    # $port on $bind"
+  done
+  if [ "$UFW_HINTED" = 1 ]; then
+    warn "  or leave it closed and tunnel: ssh -L $tunnel_port:127.0.0.1:$tunnel_port <user>@<host>"
+  fi
+  return 0
+}
+
 random_token() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 24
@@ -709,6 +807,11 @@ if [ "$DSH_BIND_IP" != "127.0.0.1" ] && [ "$DSH_BIND_IP" != "localhost" ]; then
   warn "  Keep it on a trusted network, or bind 127.0.0.1 and tunnel with:"
   warn "  ssh -L $DSH_PORT:127.0.0.1:$DSH_PORT <user>@<host>"
 fi
+
+# Native mode only: a published Docker port never reaches ufw's INPUT chain.
+# Printing it here means --check answers "will this be reachable?" without
+# installing anything.
+ufw_hints "$DSH_PORT" "$DSH_BIND_IP"
 
 if [ "$CHECK" = 1 ]; then
   echo
@@ -1183,6 +1286,9 @@ native_apply() {
     die "dsh did not become healthy — inspect: journalctl -u dsh.service -f"
   fi
   design_apply
+  # The port is bound now. Say it again only if the plan did not already have:
+  # the operator may have skipped the plan, e.g. --yes.
+  if [ "$UFW_HINTED" = 0 ]; then ufw_hints "$DSH_PORT" "$DSH_BIND_IP"; fi
 }
 
 if [ "$MODE" = docker ]; then docker_apply; else native_apply; fi

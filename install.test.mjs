@@ -118,6 +118,51 @@ test('--tier is native-only', async () => {
   assert.match(out, /--tier only applies to native mode/)
 })
 
+// --- firewall advisory ----------------------------------------------------
+// ufw gates a native service and never gates a published Docker port, so the
+// plan says nothing in docker mode and names the exact rule in native mode.
+
+/** Stub `ufw` (and `sudo`, which may not be installed for the test user). */
+async function withUfw(statusText, fn) {
+  const bin = await mkdtemp(join(here, '.ufw-bin-'))
+  try {
+    await writeFile(join(bin, 'ufw'), `#!/bin/sh\ncat <<'EOF'\n${statusText}\nEOF\n`, { mode: 0o755 })
+    await writeFile(join(bin, 'sudo'), '#!/bin/sh\nshift\nexec "$@"\n', { mode: 0o755 })
+    return await fn({ PATH: `${bin}:${process.env.PATH}` })
+  } finally {
+    await rm(bin, { recursive: true, force: true })
+  }
+}
+
+const ufwEnv = { DSH_BIND_IP: '192.168.2.98', DSH_PORT: '4310' }
+const ufwOpen = 'Status: active\n22/tcp                     ALLOW       192.168.2.0/24'
+const ufwAllow = 'Status: active\n4310/tcp                   ALLOW       192.168.2.0/24'
+
+test('native plan names the ufw rule when the port is not allowed', async () => {
+  await withUfw(ufwOpen, async (env) => {
+    const { code, out } = await install(['--check', '--mode', 'native', '--yes'], { env: { ...env, ...ufwEnv } })
+    assert.equal(code, 0)
+    assert.match(out, /ufw is active and does not allow the ports this deployment serves/)
+    assert.match(out, /sudo ufw allow from 192\.168\.2\.0\/24 to any port 4310 proto tcp/)
+  })
+})
+
+test('native plan stays quiet when ufw already allows the port', async () => {
+  await withUfw(ufwAllow, async (env) => {
+    const { code, out } = await install(['--check', '--mode', 'native', '--yes'], { env: { ...env, ...ufwEnv } })
+    assert.equal(code, 0)
+    assert.doesNotMatch(out, /ufw is active/)
+  })
+})
+
+test('docker plan says nothing about ufw, which does not gate published ports', async () => {
+  await withUfw(ufwOpen, async (env) => {
+    const { code, out } = await install(['--check', '--mode', 'docker', '--yes'], { env: { ...env, ...ufwEnv } })
+    assert.equal(code, 0)
+    assert.doesNotMatch(out, /ufw is active/)
+  })
+})
+
 // --- update.sh, mode-aware ------------------------------------------------
 
 /** A throwaway deployment directory with just enough for update.sh --status. */

@@ -325,3 +325,46 @@ test('verify only reads the log of the current start', () => {
   assert.match(verify, /logs --no-log-prefix --since 2m dsh/)
   assert.doesNotMatch(verify, /-n 200/)
 })
+
+// --- firewall advisory ----------------------------------------------------
+// Native only: ufw gates the systemd service through INPUT, and never gates a
+// published Docker port (Docker DNATs it before INPUT is consulted). The hint
+// names a copy-pasteable rule, and stays silent when there is nothing to fix.
+
+needsExec('ufw_hints names the rule when ufw is active and the port is closed', async () => {
+  const dir = await deployment({
+    env: 'MODE=native\nDSH_PORT=4310\nDSH_BIND_IP=192.168.2.98\n',
+    bins: {
+      ufw: "echo 'Status: active'; echo '22/tcp   ALLOW   192.168.2.0/24'",
+      sudo: 'shift; exec "$@"',
+    },
+  })
+  try {
+    const out = await source(dir, 'ufw_hints 4310 192.168.2.98 2>&1')
+    assert.match(out, /ufw is active and does not allow the ports this deployment serves/)
+    assert.match(out, /sudo ufw allow from 192\.168\.2\.0\/24 to any port 4310 proto tcp/)
+    assert.match(out, /ssh -L 4310:127\.0\.0\.1:4310/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+needsExec('ufw_hints stays quiet when the rule exists, ufw is inactive or the bind is loopback', async () => {
+  const cases = [
+    { label: 'rule exists', bins: { ufw: "echo 'Status: active'; echo '4310/tcp ALLOW 192.168.2.0/24'" }, args: '4310 192.168.2.98' },
+    { label: 'ufw inactive', bins: { ufw: "echo 'Status: inactive'" }, args: '4310 192.168.2.98' },
+    { label: 'loopback bind', bins: { ufw: "echo 'Status: active'" }, args: '4310 127.0.0.1' },
+  ]
+  for (const c of cases) {
+    const dir = await deployment({
+      env: 'MODE=native\nDSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n',
+      bins: { sudo: 'shift; exec "$@"', ...c.bins },
+    })
+    try {
+      const out = await source(dir, `ufw_hints ${c.args} 2>&1`)
+      assert.equal(out, '', `${c.label}: expected no hint, got: ${out}`)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+})

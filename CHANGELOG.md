@@ -7,6 +7,32 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.3.0
+
+### Added
+
+- **A native install and update say when ufw would block the web UI.** A
+  systemd service is gated by ufw's `INPUT` chain; a published Docker port is
+  not, because Docker DNATs it in `nat`/`FORWARD` before `INPUT` is consulted.
+  The check is therefore native-only by construction. It names the rule to
+  paste, with the network taken from the interface that carries
+  `DSH_BIND_IP` instead of a guessed range:
+
+  ```
+  sudo ufw allow from 192.168.2.0/24 to any port 4310 proto tcp
+  ```
+
+  Nothing is changed: the installer cannot know whether a port should be
+  LAN-only, VPN-only or tunnel-only, and a ufw rule outlives `--uninstall`.
+  Silent when ufw is absent or inactive, when the bind is loopback, or when a
+  rule already allows the port. `--check` run unprivileged (no passwordless
+  `sudo`) still reports that ufw is enabled — the enable flag in
+  `/etc/ufw/ufw.conf` is world-readable — and says the rules need root rather
+  than claiming a port is closed.
+
+  Sites: the install plan before the `Proceed?` prompt, the end of
+  `native_apply` for `--yes` runs, and `update.sh`'s `verify` and `status`.
+
 ## 0.2.1-rc.5-0.2.2
 
 ### Fixed
