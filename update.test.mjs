@@ -14,6 +14,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -312,4 +313,15 @@ needsExec('the native entrypoint runs from the workspace directory', async () =>
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test('verify only reads the log of the current start', () => {
+  // Re-reading the unit's whole journal reported a plugin failure from a
+  // previous boot, so a healthy update said "verification complained".
+  const source = readFileSync(join(here, 'update.sh'), 'utf8')
+  const verify = source.slice(source.indexOf('verify() {'), source.indexOf('\n}\n', source.indexOf('verify() {')))
+  assert.match(verify, /systemctl show -p ActiveEnterTimestamp/)
+  assert.match(verify, /journalctl -u dsh\.service --no-pager --since "\$since"/)
+  assert.match(verify, /logs --no-log-prefix --since 2m dsh/)
+  assert.doesNotMatch(verify, /-n 200/)
 })

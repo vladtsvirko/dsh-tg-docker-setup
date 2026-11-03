@@ -613,3 +613,13 @@ test('every variable write_env persists is initialised under set -u', async () =
   const missing = used.filter((name) => !initialised.has(name))
   assert.deepEqual(missing, [], `uninitialised: ${missing.join(', ')}`)
 })
+
+test('native mode refuses the Docker design stack instead of enabling a dead plugin', async () => {
+  // Enabling the Penpot plugin on a host that cannot run its backend is what
+  // produced "1 entry did not activate" on every boot.
+  const plan = await install(['--check', '--yes', '--mode', 'native', '--design', 'docker'])
+  assert.equal(plan.code, 0, plan.out)
+  assert.match(plan.out, /the Penpot design stack runs in Docker, and native mode has none/)
+  assert.match(plan.out, /design:\s+none/)
+  assert.doesNotMatch(plan.out, /design:\s+Penpot/)
+})

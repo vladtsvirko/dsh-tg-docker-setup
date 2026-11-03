@@ -556,10 +556,13 @@ verify() {
   esac
 
   if [ "$MODE" = native ]; then
-    plugin_warn="$(journalctl -u dsh.service --no-pager -n 200 2>/dev/null \
+    local since
+    since="$(systemctl show -p ActiveEnterTimestamp --value dsh.service 2>/dev/null || true)"
+    [ -n "$since" ] || since="-2 minutes"
+    plugin_warn="$(journalctl -u dsh.service --no-pager --since "$since" 2>/dev/null \
       | grep -i 'incompatible with dsh\|did not activate\|Adapter install failed' || true)"
   else
-    plugin_warn="$("${COMPOSE[@]}" logs --no-log-prefix --tail 200 dsh 2>/dev/null \
+    plugin_warn="$("${COMPOSE[@]}" logs --no-log-prefix --since 2m dsh 2>/dev/null \
       | grep -i 'incompatible with dsh\|did not activate\|Adapter install failed' || true)"
   fi
   if [ -n "$plugin_warn" ]; then
@@ -568,7 +571,7 @@ verify() {
     warn "run: ./update.sh --plugin"
     return 1
   fi
-  log "no plugin compatibility complaints in the last 200 log lines"
+  log "no plugin compatibility complaints since this start"
 }
 
 status() {

@@ -7,6 +7,28 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.2.2
+
+### Fixed
+
+- **A native install no longer enables the design plugin against a backend that
+  cannot exist.** `--design docker` was honoured even in native mode, which has
+  no Docker: the Penpot stack was skipped with a warning, but `.env` still said
+  `PENPOT_ENABLED=1`, so the plugin mounted and failed on every boot
+  (`no Penpot backend available … 1 entry did not activate`). Native now refuses
+  the stack up front and says so; the plugin stays off.
+- **`verify` only reads the log of the current start.** It grepped the last 200
+  lines of the unit's journal, so a plugin failure from a *previous* boot made a
+  healthy update report "verification complained" — and kept reporting it on
+  every later update. Native uses `ActiveEnterTimestamp`, docker uses
+  `--since 2m`.
+
+### Notes
+
+- To enable the design tools later in native mode, point the plugin at an
+  existing Penpot (`PENPOT_API_URL`, `PENPOT_ACCESS_TOKEN`, `PENPOT_ENABLED=1`);
+  the stack itself is a Docker component.
+
 ## 0.2.1-rc.5-0.2.1
 
 ### Fixed

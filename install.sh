@@ -550,6 +550,13 @@ case "${DESIGN:-}" in
   *) die "--design must be none or docker" ;;
 esac
 
+# The design stack is a Docker component; a native host cannot run it. Say so
+# once here, so the plugin is not enabled against a backend that does not exist.
+if [ "$MODE" = native ] && [ "$DESIGN" = docker ]; then
+  warn "the Penpot design stack runs in Docker, and native mode has none — the design tools stay off"
+  DESIGN=none
+fi
+
 if [ "$MODE" = native ]; then
   [ -n "$TIER" ] || TIER=sandbox
   case "$TIER" in sandbox|privileged) ;; *) die "--tier must be sandbox or privileged" ;; esac
