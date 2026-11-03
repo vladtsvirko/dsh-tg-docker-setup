@@ -206,6 +206,12 @@ DSH_TELEGRAM_BOT_TOKEN="${DSH_TELEGRAM_BOT_TOKEN:-}"
 ALLOWED_USER_IDS="${ALLOWED_USER_IDS:-}"
 DSH_ADMIN_USER_ID="${DSH_ADMIN_USER_ID:-}"
 DSH_TELEGRAM_PUBLISHER_TOKENS="${DSH_TELEGRAM_PUBLISHER_TOKENS:-}"
+GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-}"
+GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-}"
+GIT_PROVIDER="${GIT_PROVIDER:-}"
+GIT_TOKEN="${GIT_TOKEN:-}"
+GIT_HOST="${GIT_HOST:-}"
+INSTALL_DOCKER="${INSTALL_DOCKER:-}"
 DSH_UPDATER_TOKEN="${DSH_UPDATER_TOKEN:-}"
 DESIGN="${DESIGN:-}"
 DSH_DESIGN_PORT="${DSH_DESIGN_PORT:-}"
@@ -252,7 +258,7 @@ EOF
 # Strict KEY=VALUE parsing: no sourcing, so a config file cannot execute code.
 CONFIG_KEYS="MODE TIER DIR SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL
 DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT PROVIDER_KEY
-DSH_TELEGRAM_PUBLISHER_TOKENS"
+DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN GIT_HOST"
 load_config() {
   local file="$1" line key value
   [ -f "$file" ] || die "no config file: $file"
@@ -479,7 +485,7 @@ read_existing_env() {
   [ -f "$DIR/.env" ] || return 0
   for key in DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL DSH_TELEGRAM_BOT_TOKEN \
              ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT \
-             DSH_TELEGRAM_PUBLISHER_TOKENS; do
+             DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN; do
     value="$(sed -n "s/^${key}=//p" "$DIR/.env" | head -1)"
     if [ -n "${!key:-}" ]; then
       # An exported variable silently winning over the deployed value is how a
@@ -648,13 +654,6 @@ case "${DESIGN:-}" in
   *) die "--design must be none or docker" ;;
 esac
 
-# The design stack is a Docker component; a native host cannot run it. Say so
-# once here, so the plugin is not enabled against a backend that does not exist.
-if [ "$MODE" = native ] && [ "$DESIGN" = docker ]; then
-  warn "the Penpot design stack runs in Docker, and native mode has none — the design tools stay off"
-  DESIGN=none
-fi
-
 if [ "$MODE" = native ]; then
   [ -n "$TIER" ] || TIER=sandbox
   case "$TIER" in sandbox|privileged) ;; *) die "--tier must be sandbox or privileged" ;; esac
@@ -730,6 +729,33 @@ if [ "$CHECK" != 1 ]; then
     ask DSH_TELEGRAM_PUBLISHER_TOKENS \
       "Extra publisher bot tokens to raise the rate limit (comma separated, blank = main bot only)" ""
   fi
+  # The agent commits; a commit without an author fails. Default to the host's
+  # own identity when there is one, so the answer is usually one Enter.
+  default_git_name="$(git config --global user.name 2>/dev/null || true)"
+  [ -n "$default_git_name" ] || default_git_name="$(id -un)"
+  default_git_email="$(git config --global user.email 2>/dev/null || true)"
+  [ -n "$default_git_email" ] || default_git_email="$(id -un)@$(hostname 2>/dev/null || echo localhost)"
+  ask GIT_AUTHOR_NAME "Git author name for the agent's commits (blank = skip)" "$default_git_name"
+  if [ -n "$GIT_AUTHOR_NAME" ]; then
+    ask GIT_AUTHOR_EMAIL "Git author email" "$default_git_email"
+  fi
+  # Repository access: a token in a profile is what lets the agent clone and
+  # push private repositories. See docs/GIT.md.
+  ask GIT_PROVIDER "Git host for the agent's token (github/gitlab/gitea/forgejo/self-hosted/none)" none
+  case "$GIT_PROVIDER" in
+    ""|none|None) GIT_PROVIDER="" ;;
+    github|gitlab|gitea|forgejo|self-hosted) ;;
+    *) warn "unknown git provider '$GIT_PROVIDER' — skipping repository access"; GIT_PROVIDER="" ;;
+  esac
+  if [ -n "$GIT_PROVIDER" ]; then
+    if [ "$GIT_PROVIDER" = self-hosted ] && [ -z "$GIT_HOST" ]; then
+      ask GIT_HOST "Git host name (for example git.example.com)" ""
+      [ -n "$GIT_HOST" ] || { warn "no host given — skipping repository access"; GIT_PROVIDER=""; }
+    fi
+  fi
+  if [ -n "$GIT_PROVIDER" ]; then
+    ask_secret GIT_TOKEN "Access token for $GIT_PROVIDER (blank = skip)" ""
+  fi
   ask DESIGN "Install the Penpot design stack? (docker/none)" none
   if [ "$DESIGN" = docker ]; then
     ask DSH_DESIGN_PORT "Penpot port" 8090
@@ -759,12 +785,28 @@ UPDATER_URL="$UPDATER_URL_NATIVE"
 [ "$MODE" = native ] && [ "$CHECK" != 1 ] && [ "$(id -u)" != 0 ] \
   && die "native mode installs a systemd service — run with sudo"
 
+# Docker is required by docker mode and by the design stack, and merely useful
+# otherwise: a native host runs the agent without it, but the Penpot stack is a
+# set of containers.
+DOCKER_REQUIRED=0
+if [ "$MODE" = docker ] || [ "$DESIGN" = docker ]; then DOCKER_REQUIRED=1; fi
+
 if [ "$DEPS" = 0 ]; then
   DEPS_PLAN="skipped (--no-deps)"
-elif [ "$MODE" = docker ]; then
-  if docker_ready; then DEPS_PLAN="docker present"; else DEPS_PLAN="installs docker.io + docker-compose-v2 (apt, needs root)"; fi
 else
-  if node_ready; then DEPS_PLAN="node present"; else DEPS_PLAN="installs Node 22 from NodeSource (apt, needs root)"; fi
+  DEPS_PLAN=""
+  if command -v git >/dev/null 2>&1; then DEPS_PLAN="git present"; else DEPS_PLAN="installs git"; fi
+  if [ "$DOCKER_REQUIRED" = 1 ]; then
+    if docker_ready; then DEPS_PLAN="$DEPS_PLAN · docker present"
+    else DEPS_PLAN="$DEPS_PLAN · installs docker.io + docker-compose-v2 (needs root)"; fi
+  elif ! docker_ready; then
+    DEPS_PLAN="$DEPS_PLAN · docker absent (optional here)"
+  else
+    DEPS_PLAN="$DEPS_PLAN · docker present"
+  fi
+  if [ "$MODE" = native ]; then
+    if node_ready; then DEPS_PLAN="$DEPS_PLAN · node present"; else DEPS_PLAN="$DEPS_PLAN · installs Node 22 (NodeSource)"; fi
+  fi
 fi
 
 # --- plan ------------------------------------------------------------------
@@ -798,6 +840,17 @@ else
 fi
 
 printf '    deps:      %s\n' "$DEPS_PLAN"
+if [ -n "$GIT_AUTHOR_NAME" ]; then
+  printf '    git:       %s <%s>\n' "$GIT_AUTHOR_NAME" "${GIT_AUTHOR_EMAIL:-no email}"
+else
+  printf '    git:       no author — commits from a workspace will fail until set\n'
+fi
+if [ -n "$GIT_PROVIDER" ] && [ -n "$GIT_TOKEN" ]; then
+  printf '    git auth:  %s%s (token stored in %s/secrets/git)\n' "$GIT_PROVIDER" \
+    "${GIT_HOST:+ ($GIT_HOST)}" "$DIR"
+else
+  printf '    git auth:  none — the agent can read public repositories only\n'
+fi
 
 if [ "$DSH_BIND_IP" != "127.0.0.1" ] && [ "$DSH_BIND_IP" != "localhost" ]; then
   echo
@@ -906,9 +959,71 @@ ensure_node() {
   log "node ready: $(node --version)"
 }
 
+ensure_git() {
+  if command -v git >/dev/null 2>&1; then return 0; fi
+  [ "$DEPS" = 1 ] || die "git is missing and --no-deps was given"
+  apt_install git || die "could not install git"
+  command -v git >/dev/null 2>&1 || die "git is still missing after the install"
+  log "git ready: $(git --version)"
+}
+
 if [ "$DEPS" = 1 ]; then
-  if [ "$MODE" = docker ]; then ensure_docker; else ensure_node; fi
+  # The agent commits through git in both modes, so it is not optional and not
+  # worth a question.
+  ensure_git
+  if [ "$MODE" = native ]; then ensure_node; fi
+  if [ "$DOCKER_REQUIRED" = 1 ]; then
+    # Chosen explicitly (docker mode, or the design stack): install it without
+    # asking, because the request already said so.
+    ensure_docker
+  elif ! docker_ready && can_ask; then
+    printf 'Docker is not installed. It is optional here (the Penpot design stack would use it).\n' >&2
+    printf 'Install it anyway? [y/N] ' >&2
+    docker_answer="$(read_from_terminal)"
+    case "$docker_answer" in
+      y|Y|yes|Yes) INSTALL_DOCKER=1 ;;
+      *) INSTALL_DOCKER=0 ;;
+    esac
+    [ "$INSTALL_DOCKER" = 1 ] && ensure_docker
+  fi
 fi
+
+# --- git: identity and repository access ------------------------------------
+# The identity goes into the runtime's own home, because that is the user that
+# commits: /data/home inside the container, /srv/dsh/data/home natively.
+write_git_identity() {
+  [ -n "$GIT_AUTHOR_NAME" ] && [ -n "$GIT_AUTHOR_EMAIL" ] || return 0
+  local file="$DATA_HOME/.gitconfig"
+  mkdir -p "$DATA_HOME"
+  git config --file "$file" user.name "$GIT_AUTHOR_NAME" || return 0
+  git config --file "$file" user.email "$GIT_AUTHOR_EMAIL" || return 0
+  git config --file "$file" init.defaultBranch main || true
+  if [ "$MODE" = native ]; then
+    chown "$SERVICE_USER:$SERVICE_USER" "$file" 2>/dev/null || true
+  else
+    chown "${SUDO_UID:-$(id -u)}:${SUDO_GID:-$(id -g)}" "$file" 2>/dev/null || true
+  fi
+  log "git identity: $GIT_AUTHOR_NAME <$GIT_AUTHOR_EMAIL>"
+}
+
+# The manifest writer is a sourced helper: it is testable on its own, and it is
+# the same file docs/GIT.md describes.
+# shellcheck source=scripts/git-profile.sh
+. "$SRC_DIR/scripts/git-profile.sh"
+
+write_git_profile() {
+  [ -n "$GIT_PROVIDER" ] && [ -n "$GIT_TOKEN" ] || return 0
+  local owner file
+  if [ "$MODE" = native ]; then
+    owner="$SERVICE_USER:$SERVICE_USER"
+  else
+    owner="${SUDO_UID:-$(id -u)}:${SUDO_GID:-$(id -g)}"
+  fi
+  file="$(git_profile_write "$DIR/secrets/git" "$owner" "$GIT_PROVIDER" "$GIT_HOST" \
+    "$GIT_TOKEN" "$GIT_AUTHOR_NAME" "$GIT_AUTHOR_EMAIL")" ||
+    die "cannot write $DIR/secrets/git/profiles.json"
+  log "git repository access: $GIT_PROVIDER token written to $file"
+}
 
 # --- shared: write the deployment .env -------------------------------------
 set_env() {
@@ -983,7 +1098,11 @@ wait_health() {
 design_apply() {
   [ "$DESIGN" = docker ] || return 0
   if ! command -v docker >/dev/null 2>&1; then
-    warn "the design stack needs Docker — skipped; re-run with --design docker later"
+    # Requested and impossible: leave the plugin off, so the runtime does not
+    # boot with an entry that cannot start.
+    warn "the design stack needs Docker and it is not available — the design tools stay off"
+    set_env PENPOT_ENABLED 0 "$DIR/.env" 2>/dev/null || true
+    set_env DSH_DESIGN_ENABLED 0 "$DIR/.env" 2>/dev/null || true
     return 0
   fi
   local dir="$DIR/design" env_file="$DIR/design/.env"
@@ -1076,6 +1195,8 @@ docker_apply() {
   # The data directory must be owned by the invoking user, not by root.
   set_env DSH_UID "${SUDO_UID:-$(id -u)}" "$DIR/.env"
   set_env DSH_GID "${SUDO_GID:-$(id -g)}" "$DIR/.env"
+  write_git_identity
+  write_git_profile
   log "building the image (first build downloads DSH; a few minutes)"
   run docker compose build
   log "starting"
@@ -1140,6 +1261,9 @@ Environment=DSH_HOME=$DATA_HOME
 Environment=DSH_WORKSPACE=$DATA_WORKSPACE
 Environment=DSH_SUPERVISOR_STATE=$SUPERVISOR_STATE
 Environment=DSH_ENTRYPOINT=/usr/local/bin/dsh-entrypoint
+# Native installs keep their git manifest inside the deployment; the runtime
+# reads it from there instead of /run/secrets.
+Environment=DSH_GIT_SECRETS=$DIR/secrets/git
 Environment=DSH_PERMISSION_MODE=danger-full-access
 Environment=PATH=$node_dir:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=TMPDIR=$DIR/data/.cache/tmp
@@ -1260,6 +1384,8 @@ native_apply() {
   set_env DSH_GID "$(id -g "$SERVICE_USER")" "$DIR/.env"
   run chown root:"$SERVICE_USER" "$DIR/.env"
   run chmod 640 "$DIR/.env"
+  write_git_identity
+  write_git_profile
 
   native_units
 

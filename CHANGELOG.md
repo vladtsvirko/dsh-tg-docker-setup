@@ -7,6 +7,41 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.5.0
+
+### Added
+
+- **The installer configures git.** The agent commits, and a commit without an
+  author fails, so it now asks for the git author name and email (defaulting to
+  the host's own `git config`, then to the login user and `user@host`) and writes
+  them into the runtime's `~/.gitconfig`.
+- **Repository access is asked for, not just documented.** A provider
+  (`github`, `gitlab`, `gitea`, `forgejo`, `self-hosted`) and a token are enough
+  for the agent to clone and push private repositories: the installer writes
+  `secrets/git/profiles.json` (0600, owned by the runtime user) — the manifest
+  `docs/GIT.md` describes and `git-credentials.mjs` consumes. Native installs
+  keep it at `<dir>/secrets/git` and the unit points `DSH_GIT_SECRETS` there.
+- **`scripts/git-profile.sh`** is sourced and tested on its own: JSON escaping,
+  the self-hosted host, the 0600 file, a backup on rewrite, and a refusal to
+  leave an unparseable manifest behind.
+- **Docker is installed when something needs it.** Choosing the Penpot design
+  stack installs Docker even in native mode — the runtime stays container-less,
+  the stack is not — instead of skipping the stack with a warning while leaving
+  the plugin enabled against a backend that does not exist. When Docker is absent
+  and *not* needed, the installer offers to install it (default: no).
+
+### Changed
+
+- `git` is installed without asking: both modes need it, and `--no-deps` remains
+  the escape hatch for hosts that manage their own packages.
+- The install plan now shows `git: Name <email>`, `git auth: github (token stored
+  in …)` and the dependency line names git, Docker and Node separately.
+
+### Notes
+
+- `install.example.env` accepts `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
+  `GIT_PROVIDER`, `GIT_HOST` and `GIT_TOKEN` for unattended installs.
+
 ## 0.2.1-rc.5-0.4.0
 
 ### Added

@@ -336,7 +336,10 @@ ensure_compat() {
 }
 
 setup_git_credentials() {
-  local manifest=/run/secrets/git/profiles.json
+  # Docker mounts ./secrets at /run/secrets; a native install keeps it inside the
+  # deployment and points DSH_GIT_SECRETS there.
+  local base="${DSH_GIT_SECRETS:-/run/secrets/git}"
+  local manifest="$base/profiles.json"
   [ -f "$manifest" ] || return 0
   if node /usr/local/bin/dsh-git-credentials.mjs; then
     return 0

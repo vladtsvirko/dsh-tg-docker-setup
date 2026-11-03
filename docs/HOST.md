@@ -19,7 +19,9 @@ the update authority. Read this page before choosing native.
   the container runs as a sidecar, bound to **127.0.0.1 only** and authenticated
   with `DSH_UPDATER_TOKEN`. It exists so `/system update all` behaves the same
   from Telegram in both modes.
-- No Docker, no image, no Docker socket anywhere.
+- No Docker, no image, no Docker socket anywhere — the runtime is a systemd
+  unit. Docker is installed only when you also choose the Penpot design stack,
+  which is a set of containers and needs it.
 
 ## What native mode is not
 

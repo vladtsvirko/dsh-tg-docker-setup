@@ -659,12 +659,33 @@ test('every variable write_env persists is initialised under set -u', async () =
   assert.deepEqual(missing, [], `uninitialised: ${missing.join(', ')}`)
 })
 
-test('native mode refuses the Docker design stack instead of enabling a dead plugin', async () => {
-  // Enabling the Penpot plugin on a host that cannot run its backend is what
-  // produced "1 entry did not activate" on every boot.
-  const plan = await install(['--check', '--yes', '--mode', 'native', '--design', 'docker'])
-  assert.equal(plan.code, 0, plan.out)
-  assert.match(plan.out, /the Penpot design stack runs in Docker, and native mode has none/)
-  assert.match(plan.out, /design:\s+none/)
-  assert.doesNotMatch(plan.out, /design:\s+Penpot/)
+
+test('docker is installed when the design stack needs it, in either mode', async () => {
+  // Native mode runs the agent without Docker, but the Penpot stack is a set of
+  // containers: choosing it must install Docker instead of silently skipping it.
+  const native = await install(['--check', '--yes', '--mode', 'native', '--design', 'docker'])
+  assert.equal(native.code, 0, native.out)
+  assert.match(native.out, /installs docker\.io \+ docker-compose-v2/)
+  assert.match(native.out, /design:\s+Penpot/)
+
+  const plain = await install(['--check', '--yes', '--mode', 'native'])
+  assert.match(plain.out, /docker absent \(optional here\)/)
+})
+
+test('the plan names the git author and the repository access', async () => {
+  const withToken = await install(['--check', '--yes'], {
+    env: {
+      GIT_AUTHOR_NAME: 'Vlad',
+      GIT_AUTHOR_EMAIL: 'vlad@example.test',
+      GIT_PROVIDER: 'github',
+      GIT_TOKEN: 'ghp_ci',
+    },
+  })
+  assert.equal(withToken.code, 0, withToken.out)
+  assert.match(withToken.out, /git:\s+Vlad <vlad@example\.test>/)
+  assert.match(withToken.out, /git auth:\s+github \(token stored in/)
+
+  const without = await install(['--check', '--yes'])
+  assert.match(without.out, /git:\s+no author/)
+  assert.match(without.out, /git auth:\s+none/)
 })

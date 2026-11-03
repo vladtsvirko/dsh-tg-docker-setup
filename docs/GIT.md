@@ -38,7 +38,12 @@ volumes:
   - ./secrets:/run/secrets:ro
 ```
 
-Create it from the example:
+The installer can write it for you: it asks for the git author and, optionally,
+for a provider and a token, and writes `secrets/git/profiles.json` (0600, owned by
+the runtime user) with that identity and token. Native installs keep the same file
+inside the deployment (`<dir>/secrets/git`) and point `DSH_GIT_SECRETS` at it.
+
+Create it by hand instead, from the example:
 
 ```sh
 cp -r secrets.example secrets

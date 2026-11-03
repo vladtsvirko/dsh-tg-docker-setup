@@ -35,6 +35,9 @@ jobs:
       - name: Update-path tests
         run: node --test update.test.mjs
 
+      - name: Git profile tests
+        run: node --test git-profile.test.mjs
+
       - name: Penpot CLI tests
         run: node --test penpot.test.mjs
 

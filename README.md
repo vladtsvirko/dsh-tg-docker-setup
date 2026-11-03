@@ -75,7 +75,11 @@ Run it as a normal user with `sudo` available, or as root. It:
    `/system update all` work later,
 3. asks the same questions as a local install, then shows the plan and asks
    before changing anything: `Proceed? [Y/n]`,
-4. installs Docker (or Node), then the runtime, then waits for the health check.
+4. asks what the agent should commit as (git author name and email) and, optionally,
+   which git host it may clone and push from (github, gitlab, gitea, forgejo or a
+   self-hosted one) — the token is stored in `<dir>/secrets/git/profiles.json`, mode 0600,
+5. installs git always, Docker when the mode or the design stack needs it, Node for
+   native, then the runtime, then waits for the health check.
 
 `--check` shows the whole plan first, including what would be installed:
 
@@ -90,7 +94,7 @@ curl -fsSL …/install.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.4.0`, and put the checkout elsewhere with `--dir`. If Docker or
+v0.2.1-rc.5-0.5.0`, and put the checkout elsewhere with `--dir`. If Docker or
 Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -267,7 +271,7 @@ container is disposable and disappears with the container.
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.4.0
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.5.0
          DSH part          product part
 ```
 
