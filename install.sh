@@ -156,7 +156,9 @@ bootstrap() {
   local -a want=()
   command -v git >/dev/null 2>&1 || want+=(git)
   command -v curl >/dev/null 2>&1 && command -v wget >/dev/null 2>&1 || want+=(curl)
-  bootstrap_apt "${want[@]:-}"
+  if [ "${#want[@]}" -gt 0 ]; then
+    bootstrap_apt "${want[@]}"
+  fi
 
   command -v git >/dev/null 2>&1 || die "git is required to fetch the setup"
   [ -n "$ref" ] || ref="$(bootstrap_latest)"
@@ -331,7 +333,7 @@ ask() {
     printf -v "$var" '%s' "$def"
     return 0
   fi
-  printf '%s [%s]: ' "$prompt" "$def"
+  printf '%s [%s]: ' "$prompt" "$def" >&2
   answer="$(read_from_terminal)"
   printf -v "$var" '%s' "${answer:-$def}"
 }
@@ -343,7 +345,7 @@ ask_secret() {
     [ -n "$current" ] || printf -v "$var" '%s' ''
     return 0
   fi
-  printf '%s (blank = disabled): ' "$prompt"
+  printf '%s (blank = disabled): ' "$prompt" >&2
   if [ -t 0 ]; then read -r -s answer || answer=""; else read -r -s answer </dev/tty || answer=""; fi
   printf '\n'
   printf -v "$var" '%s' "$answer"
@@ -469,23 +471,6 @@ uninstall_run() {
   printf '    dir:     %s still exists (rm -rf %s to remove the checkout)\n' "$DIR" "$DIR"
 }
 
-# --- decide ----------------------------------------------------------------
-if [ -z "$MODE" ] && can_ask; then
-  echo
-  echo "Which deployment do you want?"
-  echo "  1) docker  — container boundary, no host access for the agent (recommended)"
-  echo "  2) native  — systemd on this host, no Docker; the agent can read the host"
-  printf 'Mode [1]: '
-  mode_answer="$(read_from_terminal)"
-  case "${mode_answer:-1}" in
-    1|docker|Docker) MODE=docker ;;
-    2|native|Native) MODE=native ;;
-    *) die "unknown mode: $mode_answer" ;;
-  esac
-fi
-[ -n "$MODE" ] || MODE=docker
-case "$MODE" in docker|native) ;; *) die "--mode must be docker or native" ;; esac
-
 docker_ready() {
   command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1
 }
@@ -500,21 +485,57 @@ node_ready() {
   command -v node >/dev/null 2>&1 && [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 22 ]
 }
 
+# --- root, before the questions --------------------------------------------
+# Installing Docker (or the systemd units) needs root. Re-running here, before
+# the first question, is the difference between answering once and answering
+# twice — and `</dev/tty` keeps the prompts working when this script arrived
+# through a pipe.
+rerun_as_root() {
+  log "this install needs root — re-running with sudo"
+  # -E is refused by some sudoers policies (Ubuntu prints "preserving the entire
+  # environment is not supported"); pass the answers explicitly instead.
+  local -a keep=() pair
+  while IFS= read -r pair; do
+    case "$pair" in
+      DSH_*=*|PROVIDER_KEY=*|ALLOWED_USER_IDS=*|SERVICE_USER=*) keep+=("$pair") ;;
+    esac
+  done < <(env 2>/dev/null || true)
+  exec sudo env "${keep[@]}" bash "$SRC_DIR/install.sh" "$@" </dev/tty
+}
+
+if [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$(id -u)" != 0 ]; then
+  # Without a usable Docker, docker mode needs root as much as native does; with
+  # one, a docker-group user may proceed, so the mode question comes first.
+  if [ -n "$MODE" ] && [ "$MODE" = native ] || ! docker_usable; then
+    if command -v sudo >/dev/null 2>&1; then rerun_as_root; fi
+    die "this needs root — re-run with sudo, or install Docker and join the docker group"
+  fi
+fi
+
+# --- decide ----------------------------------------------------------------
+if [ -z "$MODE" ] && can_ask; then
+  echo
+  echo "Which deployment do you want?"
+  echo "  1) docker  — container boundary, no host access for the agent (recommended)"
+  echo "  2) native  — systemd on this host, no Docker; the agent can read the host"
+  printf 'Mode [1]: ' >&2
+  mode_answer="$(read_from_terminal)"
+  case "${mode_answer:-1}" in
+    1|docker|Docker) MODE=docker ;;
+    2|native|Native) MODE=native ;;
+    *) die "unknown mode: $mode_answer" ;;
+  esac
+fi
+[ -n "$MODE" ] || MODE=docker
+case "$MODE" in docker|native) ;; *) die "--mode must be docker or native" ;; esac
+
 # Both modes need root for what comes next: Docker's daemon, or the systemd
 # units. Re-run under sudo here, before a single question is asked, so nobody
 # answers everything twice.
-if [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$(id -u)" != 0 ] && \
-   { [ "$MODE" = native ] || ! docker_usable; }; then
-  if command -v sudo >/dev/null 2>&1; then
-    log "this install needs root — re-running with sudo"
-    # -E keeps the answers given as environment variables; some sudoers policies
-    # refuse it, and plain sudo is better than stopping.
-    if sudo -E true >/dev/null 2>&1; then
-      exec sudo -E bash "$SRC_DIR/install.sh" "$@"
-    fi
-    exec sudo bash "$SRC_DIR/install.sh" "$@"
-  fi
-  die "run this with sudo: it $([ "$MODE" = native ] && echo "installs a systemd service" || echo "installs or uses Docker")"
+# A docker-group user who picked native above: the mode is known only now.
+if [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$(id -u)" != 0 ] && [ "$MODE" = native ]; then
+  if command -v sudo >/dev/null 2>&1; then rerun_as_root; fi
+  die "native mode installs a systemd service — run with sudo"
 fi
 
 case "${DESIGN:-}" in
@@ -567,7 +588,7 @@ if [ "$UNINSTALL" = 1 ]; then
   fi
   if [ "$YES" != 1 ]; then
     can_ask || die "refusing to uninstall without a terminal — add --yes to confirm"
-    printf 'Type "yes" to continue: '
+    printf 'Type "yes" to continue: ' >&2
     answer="$(read_from_terminal)"
     [ "$answer" = yes ] || die "cancelled"
   fi
@@ -677,7 +698,7 @@ fi
 # One confirmation for everything the plan above describes, so the apt and the
 # container work do not start while someone is still reading it.
 if can_ask; then
-  printf 'Proceed? [Y/n] '
+  printf 'Proceed? [Y/n] ' >&2
   answer="$(read_from_terminal)"
   case "$answer" in
     n|N|no|No|NO) log "cancelled — nothing was changed"; exit 1 ;;

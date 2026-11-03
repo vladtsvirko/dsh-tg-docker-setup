@@ -7,6 +7,25 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.1.1
+
+### Fixed
+
+- **The sudo re-run asked the mode twice and looped.** The root check sat after
+  the mode question, so the answer was lost across the re-exec: it asked again,
+  and on a piped stdin every further answer went to a question that had already
+  been answered — the install appeared to hang. It now runs *before* any
+  question, so nothing is asked twice.
+- **`sudo -E` is not portable.** Ubuntu's default sudoers answers "preserving the
+  entire environment is not supported, '-E' is ignored", which also dropped the
+  answers given as environment variables. The re-run passes them explicitly
+  (`sudo env DSH_… bash install.sh`) and attaches stdin to the terminal, so the
+  prompts keep working when the script arrived through a pipe.
+- **The bootstrap called apt with no packages.** \`==> installing\` with an empty
+  list, and an `apt-get install ""` behind it, whenever git and curl were already
+  present. It now skips apt entirely in that case.
+- Prompts are written to stderr, so they survive a redirected stdout.
+
 ## 0.2.1-rc.5-0.1.0
 
 ### Added
