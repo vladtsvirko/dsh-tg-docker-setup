@@ -4,6 +4,7 @@
 #
 #   ./update.sh --plugin     re-resolve the Telegram adapter from its git ref
 #   ./update.sh --status     what is installed / running / healthy
+#   ./update.sh --doctor     full health check; --fix repairs what it can
 #   ./update.sh --self-check # latest compatible tag? change nothing
 #   ./update.sh --self [--i-know-versions-are-incompatible]
 #                            # jump to the latest compatible tag, build, health gate, rollback
@@ -322,6 +323,7 @@ native_apply() {
   fi
 
   verify || warn "healthy, but verification complained — inspect: journalctl -u dsh.service"
+  repair_deployment || warn "the update is applied, but the health check found something — ./update.sh --doctor"
   log "done — $target is running (detached HEAD)"
 }
 
@@ -638,6 +640,7 @@ self_update() {
   fi
 
   verify || warn "healthy, but verification complained — inspect: docker compose logs dsh"
+  repair_deployment || warn "the update is applied, but the health check found something — ./update.sh --doctor"
   log "done — $target is running (detached HEAD)"
 }
 
@@ -670,6 +673,15 @@ verify() {
   # the old rule is harmless but the new port is closed, which looks like a
   # broken update.
   ufw_hints "$(env_get DSH_PORT)" "$(env_get DSH_BIND_IP)"
+}
+
+# The same doctor install.sh runs, from the same file, in both modes. An update
+# just rewrote .env and the profile, so this is the cheapest moment to catch a
+# duplicated key or a credential the web UI stored that outranks it.
+repair_deployment() {
+  local script="$DEPLOY_DIR/scripts/repair.sh"
+  [ -x "$script" ] || return 0
+  bash "$script" --dir "$DEPLOY_DIR" --mode "$MODE" --fix
 }
 
 status() {
@@ -857,6 +869,16 @@ if [ "$UPDATE_SOURCED" = 1 ]; then return 0; fi
 
 case "${1:---status}" in
   --status)   status ;;
+  --doctor)
+    doctor_fix=0
+    if [ "${2:-}" = "--fix" ]; then doctor_fix=1
+    elif [ -n "${2:-}" ]; then die "unknown option for --doctor: ${2}"; fi
+    if [ ! -x "$DEPLOY_DIR/scripts/repair.sh" ]; then die "scripts/repair.sh is missing — reinstall with ./install.sh"; fi
+    if [ "$doctor_fix" = 1 ]; then
+      exec bash "$DEPLOY_DIR/scripts/repair.sh" --dir "$DEPLOY_DIR" --mode "$MODE" --fix
+    fi
+    exec bash "$DEPLOY_DIR/scripts/repair.sh" --dir "$DEPLOY_DIR" --mode "$MODE"
+    ;;
   --component)
     comp_name="${2:-}"; comp_action="${3:-enable}"; comp_port=""
     [ -n "$comp_name" ] || die "usage: ./update.sh --component <name> <enable|disable|configure> [--port N]"

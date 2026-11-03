@@ -32,10 +32,13 @@ the `/data` volume expose; nothing else on the server is mounted.
 | `SECURITY.md` | Reporting, and the deployment's own rules |
 | `LICENSE` | MIT |
 | `.github/workflows/ci.yml` | Supervisor tests and shell syntax checks |
-| `install.sh` | One-command installer for both modes: interactive, `--check` for a dry run |
+| `install.sh` | One-command installer for both modes: interactive, `--check` for a dry run, `--doctor [--fix]` to diagnose/repair |
+| `scripts/repair.sh` | The health check both `install.sh --doctor` and `update.sh --doctor` run; `--fix` repairs the safe subset |
+| `scripts/credentials.mjs` | Reads and reconciles `data/home/.credentials.yaml` without printing a secret |
 | `design/` | Optional Penpot stack + the `penpot` CLI for design work (`--design docker`) |
 | `docs/DESIGN.md` | The design stack: install, token, the plugin and CLI, data, removal |
 | `docs/HOST.md` | Native (no-Docker) deployment: tiers, layout, updates, switching |
+| `docs/PARITY.md` | Native vs Docker: what is identical, what is intentionally different, and the native-first rule |
 | `docs/UPSTREAM-WATCH.md` | The daily check for a new DSH release candidate, and the upgrade plans it produces |
 
 ## Before you start
@@ -94,7 +97,7 @@ curl -fsSL …/install.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.5.1`, and put the checkout elsewhere with `--dir`. If Docker or
+v0.2.1-rc.5-0.6.0`, and put the checkout elsewhere with `--dir`. If Docker or
 Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -213,6 +216,16 @@ managed `# >>> dsh-provider` block in
 stale provider config never lingers (verified by switching opencode-go →
 deepseek-official → back).
 
+**One key, one place.** The runtime resolves a provider key in this order: a
+credential stored by the web UI's Models page, then the process environment
+(what compose and systemd export from `.env`), then `.env` files. A key saved
+once in the Models page therefore wins over every later `.env` edit, which is
+why a repair that "wrote the key" could leave model calls failing. The installer
+keeps the deployed key instead of asking again (`--rotate-key` when you mean to
+replace it), writes exactly one key variable per route, and reconciles an
+existing `data/home/.credentials.yaml` to the `.env` value.
+`./install.sh --doctor` reports a stored key that `.env` does not have.
+
 The route also decides what each Telegram chat gets, since the adapter pins the
 same provider/model when it creates a session.
 
@@ -271,7 +284,7 @@ container is disposable and disappears with the container.
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.5.1
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.6.0
          DSH part          product part
 ```
 
@@ -486,6 +499,43 @@ updates are reversible only through the automatic rollback or a manual host
 procedure, not `/system rollback`. The full boundary is in
 [`docs/LIMITS.md`](docs/LIMITS.md).
 
+### Repairing and diagnosing
+
+Re-running `./install.sh` is the repair path: it reads the deployment's `.env`,
+keeps every value it already has (including the provider key) and re-applies the
+units, the launcher and the runtime. Two commands answer "what is wrong right
+now?" without changing anything:
+
+```sh
+./install.sh --doctor          # or ./update.sh --doctor — same checks
+./install.sh --doctor --fix    # repair the safe subset
+./install.sh --rotate-key      # ask for a new provider key (otherwise: keep)
+```
+
+| Check | What it catches |
+|---|---|
+| `env-file` | a key assigned twice, CRLF line endings, a world-readable `.env` |
+| `provider-key` | empty, truncated, or whitespace-bearing key — boots fine, fails every call |
+| `credential-store` | a key saved in the web UI's Models page that outranks `.env` |
+| `patch` | duplicated or unbalanced managed blocks in `cordis.patch.yml` |
+| `registry` | the workspace document the web UI lists: unparseable, or naming a directory that vanished |
+| `instance` | a second runtime over the same data directory |
+| `version`, `service`, `web`, `data-owner` | half-applied updates, a stopped unit, an unreachable port, root-owned data |
+
+Everything is repaired automatically after an install and after a successful
+self-update, so the next repair does not have to find it.
+
+### One runtime per data directory
+
+The runtime takes a kernel lock on `data/.runtime.lock` and records
+`data/.runtime.json` (`mode`, `pid`, `startedAt`). A second runtime over the
+same `data` — a native service left running beside the Docker stack, or two
+containers from two checkouts — waits 20 s and then refuses to start, naming the
+holder. Do not force it: two runtimes over one data directory corrupt the
+session store, poll the same bot token, and hold each other's session write
+handles. That is what makes a session answer "held by another client" after a
+restart, while the other runtime's web UI shows a different workspace list.
+
 ## Updating dsh
 
 The normal path is `/system update all` in the bot: it drains every agent, asks
@@ -494,6 +544,7 @@ commands remain the bootstrap, break-glass and deliberate manual path:
 
 ```sh
 ./update.sh --status     # setup/DSH version, container health, adapter, HTTP
+./update.sh --doctor     # the same checks ./install.sh --doctor runs
 ./update.sh --self-check # latest compatible setup tag, change nothing
 ./update.sh --self       # latest compatible tag, build, health gate, rollback
 ./update.sh --plugin     # re-resolve the pinned Telegram adapter
@@ -598,6 +649,9 @@ container's subnet. Worth doing if you ever expose the bot to a group chat.
 | `/system update all` says updater unreachable | updater not running, token mismatch, or wrong `DSH_DOCKER_GID` | `docker compose ps updater`; `docker compose logs updater` |
 | `/system update all` says `canApply` false | `DSH_UPDATER_TOKEN` is empty | set it in `.env` and `docker compose up -d updater` |
 | Updater can't access Docker | `DSH_DOCKER_GID` does not match `getent group docker` | fix `.env`, `docker compose up -d updater` |
+| Model calls fail after re-running the installer | the runtime prefers a key stored by the web UI over `.env` (or `.env` has two copies) | `./install.sh --doctor --fix`, then restart |
+| Web UI lists no workspace after a restart, Telegram still does | the connector's bindings and the runtime's registry disagree | `/sync` in the group repairs it; the connector retries at boot |
+| Telegram: "this session is held by another client" right after a restart | a second runtime over the same data directory holds the lock | `./install.sh --doctor` names it; stop the other mode, then `/system restart now` |
 
 If you are validating a release, [`docs/UAT.md`](docs/UAT.md) is the
 step-by-step acceptance run for both modes.

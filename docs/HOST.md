@@ -83,9 +83,26 @@ below. `--no-deps` keeps the installer away from apt when Node is managed
 elsewhere; `--check` shows the whole plan, including what it would install.
 
 The installer is idempotent: re-running repairs the units, the symlinks and the
-`.env`. It refuses to clobber the other mode silently — switching is explicit
-(see below). A native install run as a normal user re-executes itself under
-`sudo` before asking anything, so the questions are asked once.
+`.env`, and keeps every value the deployment already has — including the
+provider key, which is `--rotate-key` away from being replaced. It refuses to
+clobber the other mode silently — switching is explicit (see below). A native
+install run as a normal user re-executes itself under `sudo` before asking
+anything, so the questions are asked once.
+
+`./install.sh --doctor` (and `./update.sh --doctor`) check the same things in
+both modes; `--fix` repairs the safe subset: duplicate or CRLF `.env` lines, a
+provider key the web UI's stored copy shadows, a duplicated managed block in the
+profile patch, wrong ownership. Every install and every successful self-update
+runs it with `--fix`, so a damaged file is repaired rather than reported next
+time.
+
+Only one runtime may own a data directory. The entrypoint takes a kernel lock
+and writes `data/.runtime.json`; a second runtime over the same `data` (a
+native service beside a Docker stack, or two containers from two checkouts)
+waits 20 s and refuses to start, naming the holder. That state is the one a
+restart cannot clear: both processes hold each other's session write handles,
+the web UIs disagree about the workspace list, and Telegram answers "this
+session is held by another client".
 
 ## Updates
 

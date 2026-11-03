@@ -1,6 +1,6 @@
 # Acceptance run: Docker host and native VM
 
-These steps were written for `v0.2.1-rc.5-0.5.1`; if you are accepting a later
+These steps were written for `v0.2.1-rc.5-0.6.0`; if you are accepting a later
 tag, substitute it everywhere below.
 
 Two runs, one per mode. Each takes ~20 minutes. The point is not to see it work
@@ -28,8 +28,8 @@ Do not touch the running one. Use another directory and port, and install the
 way a stranger would — one downloaded file:
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.5.1/install.sh | bash -s -- --check --dir /tmp/uat-docker
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.5.1/install.sh | bash -s -- --dir /tmp/uat-docker
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.6.0/install.sh | bash -s -- --check --dir /tmp/uat-docker
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.6.0/install.sh | bash -s -- --dir /tmp/uat-docker
 ```
 
 - [ ] the first line prints what it will fetch, then the full plan, and changes
@@ -45,7 +45,13 @@ Answers to have ready: a **new** bot token (a second bot, so the two deployments
 never poll the same token), its group with Topics + the bot as admin, your user
 id, your provider key, a free port (e.g. 4320).
 
-- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.5.1 (docker mode)`
+- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.6.0 (docker mode)`
+- [ ] the self-check that follows reports `clean` (a stopped container is a
+      failure, so run it while the stack is up)
+- [ ] `./install.sh --doctor --fix` is idempotent: a second run changes nothing
+- [ ] re-running `./install.sh` with the same answers keeps
+      `OPENCODE_GO_API_KEY` byte-for-byte (`grep ^OPENCODE_GO_API_KEY= .env`
+      before and after) and leaves exactly one such line
 - [ ] the summary prints `web: http://<ip>:<port>/ (send /web …)` and the key line
       says either `set` or how to add it
 - [ ] it warns about web UI exposure when binding a LAN address
@@ -58,7 +64,8 @@ id, your provider key, a free port (e.g. 4320).
       dashboard
 - [ ] `/new` in the group creates a topic; a message in it gets a streamed answer
 - [ ] `/system status` shows: version `0.6.0`, the admin line, `web: 127.0.0.1:<port> answered …`,
-      `key: set`, `last agent error: none`
+      `key: set`, `registry: 1 workspace(s) in the runtime · 1 bound to Telegram`,
+      `data: … this runtime (docker)`, `last agent error: none`
 
 ### A3. The two surfaces, both directions
 
@@ -133,13 +140,18 @@ Use a fresh Debian/Ubuntu VM (2 CPU, 4 GB). Root access, network, nothing else.
 ### B1. Install
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.5.1/install.sh | sudo bash -s -- --check --mode native --dir /srv/dsh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.5.1/install.sh | sudo bash -s -- --mode native --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.6.0/install.sh | sudo bash -s -- --check --mode native --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.6.0/install.sh | sudo bash -s -- --mode native --dir /srv/dsh
 ```
 
 - [ ] `--check` shows `tier: sandbox`, `user: dsh`, `data: /srv/dsh/data`
 - [ ] the installer installs `dsh` **and** `pnpm` (it says so)
-- [ ] it ends with `==> installed: 0.2.1-rc.5-0.5.1 (native mode)`
+- [ ] it ends with `==> installed: 0.2.1-rc.5-0.6.0 (native mode)`
+- [ ] the self-check reports `clean`: `service`, `web` and `data-owner` all ok
+- [ ] `sudo ./install.sh --doctor` (no `--fix`) exits 0 and names the deployed
+      `OPENCODE_GO_API_KEY` without printing it
+- [ ] `sudo ./install.sh` (repair run, press Enter at every prompt) does not ask
+      for the provider key again and restarts the service once
 - [ ] `systemctl status dsh.service` is `active (running)`
 - [ ] `journalctl -u dsh.service -n 30` shows the runtime listening and the
       connector connected
@@ -150,6 +162,16 @@ wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2
 - [ ] `/web` gives a link to the VM's address, and it opens from your laptop
 - [ ] a prompt in a topic gets a streamed answer
 - [ ] a prompt from the browser mirrors into the topic (echo, then answer)
+
+### B2b. The restart the user reported
+
+- [ ] create a workspace + session in the web UI, make no successful call, then
+      `sudo systemctl restart dsh.service`
+- [ ] the web UI still lists that workspace and its session
+- [ ] `/system status` reports the same workspace count as the web UI
+- [ ] a prompt in the Telegram topic works (no "held by another client")
+- [ ] with the Docker stack started from the same directory, the native unit
+      refuses to start and names the holder (`data/.runtime.json`)
 
 ### B3. Update and rollback in native mode
 

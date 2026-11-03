@@ -115,6 +115,62 @@ prepare_dirs() {
   chmod 0750 "$DSH_HOME" "$DSH_WORKSPACE" 2>/dev/null || true
 }
 
+# --- one runtime per data directory ---------------------------------------
+# Two runtimes over the same /data (a native service left running beside the
+# Docker stack, a second container from another checkout) corrupt the session
+# store, fight over the Telegram long poll, and each holds the other's session
+# write handles. That last one is what the user sees: the web UI of one runtime
+# shows a stale workspace list while the other's Telegram says "this session is
+# held by another client", and restarting one does not clear it — the other
+# process still holds the lock.
+#
+# The kernel owns the lock, so a crashed runtime never leaves it behind. The
+# marker beside it is informational: it names the holder for the refusal message
+# and for ./install.sh --doctor.
+DATA_ROOT="$(cd "$DSH_HOME/.." 2>/dev/null && pwd -P || printf '%s' "$DSH_HOME/..")"
+export DSH_DATA_ROOT="$DATA_ROOT"
+INSTANCE_LOCK="$DATA_ROOT/.runtime.lock"
+INSTANCE_FILE="$DATA_ROOT/.runtime.json"
+
+instance_holder() {
+  [ -f "$INSTANCE_FILE" ] || return 0
+  local mode pid since
+  mode="$(sed -n 's/.*"mode":[[:space:]]*"\([^"]*\)".*/\1/p' "$INSTANCE_FILE" | head -1)"
+  pid="$(sed -n 's/.*"pid":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$INSTANCE_FILE" | head -1)"
+  since="$(sed -n 's/.*"startedAt":[[:space:]]*"\([^"]*\)".*/\1/p' "$INSTANCE_FILE" | head -1)"
+  printf '%s mode, pid %s, since %s' "${mode:-?}" "${pid:-?}" "${since:-?}"
+}
+
+acquire_instance() {
+  local wait_s="${DSH_INSTANCE_WAIT_SECONDS:-20}" waited=0 holder
+  if ! command -v flock >/dev/null 2>&1; then
+    warn "flock is unavailable — the one-runtime-per-data-directory guard is off"
+    return 0
+  fi
+  mkdir -p "$DATA_ROOT" 2>/dev/null || true
+  exec 9>>"$INSTANCE_LOCK" || { warn "cannot open $INSTANCE_LOCK — continuing without the instance guard"; return 0; }
+  while ! flock -n 9; do
+    if [ "$waited" = 0 ]; then
+      holder="$(instance_holder)"
+      warn "another dsh runtime already uses $DATA_ROOT${holder:+ — its marker says $holder}"
+      warn "two runtimes on one data directory corrupt sessions and hold each other's write handles;"
+      warn "stop the other one first:  docker compose down  ·  sudo systemctl stop dsh.service"
+    fi
+    [ "$waited" -ge "$wait_s" ] && return 1
+    sleep 1
+    waited=$((waited + 1))
+  done
+  # The id, not the pid, is what identifies this runtime to its children: the
+  # entrypoint execs into the supervisor and the supervisor spawns dsh as a
+  # child, so the plugin process has a different pid but the same environment.
+  INSTANCE_ID="${SETUP_VERSION}-$-$(date +%s)"
+  export DSH_INSTANCE_ID="$INSTANCE_ID"
+  printf '{"id":"%s","mode":"%s","pid":%s,"version":"%s","startedAt":"%s"}\n' \
+    "$INSTANCE_ID" "${MODE:-docker}" "$" "$SETUP_VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$INSTANCE_FILE.tmp" 2>/dev/null &&
+    mv "$INSTANCE_FILE.tmp" "$INSTANCE_FILE" 2>/dev/null || true
+  return 0
+}
+
 init_profile() {
   [ -f "$PROFILE_DIR/package.json" ] && return 0
   log "materialising the 'web' profile in $DSH_HOME"
@@ -489,6 +545,14 @@ web_bind_ip() {
 
 serve() {
   local bind args public authority
+  # The guard comes first: preparing the profile while another runtime serves it
+  # would rewrite the patch under a live process for no benefit.
+  if ! acquire_instance; then
+    warn "not starting: another runtime owns $DATA_ROOT — stop it and start this one again"
+    # Exit cleanly. systemd would otherwise restart the unit forever, and the
+    # container's policy ignores the code anyway; the wait above bounds both.
+    exit 0
+  fi
   # dsh rejects wildcard binds, so bind the container's own (non-loopback)
   # address; that is what the published port forwards to.
   bind="$(web_bind_ip)"

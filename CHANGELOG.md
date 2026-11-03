@@ -7,6 +7,57 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.6.0
+
+The release that makes a repair run safe and makes a second runtime impossible
+to leave behind. Both were visible as "model calls stopped working" and "the web
+UI lost my workspace" after `systemctl restart` / `docker compose restart`.
+
+### Fixed
+
+- **A repair run keeps the provider key it already has.** `install.sh` prompted
+  for `OPENCODE_GO_API_KEY` on every run and wrote the answer to `.env`, while
+  the runtime resolves a credential stored by the web UI's Models page *before*
+  the environment. One deployment could therefore hold two keys, the older one
+  winning, and model calls failed with a credential nobody remembered setting.
+  The installer now reads the deployed key and keeps it (a new `--rotate-key`
+  asks only when you mean to replace it), writes one key variable per provider
+  route, and reconciles an existing `.credentials.yaml` to the `.env` value
+  (backup kept, 0600). It also reports a stored key that `.env` does not have.
+- **`.env` can no longer contain the same key twice.** A fresh Docker deployment
+  copied `.env.example` and then appended the managed values, so the file kept a
+  sample `OPENCODE_GO_API_KEY=` near the top and the real one at the bottom —
+  the runtime reads the last assignment, which is not the line the file invites
+  you to edit. The copy now drops sample assignments and keeps the comments.
+- **The installer no longer prompts for mode from a stale file.** `--dir` is
+  consulted before the checkout's own `.env` when deciding the deployment mode.
+
+### Added
+
+- **`./install.sh --doctor` and `./update.sh --doctor`** run the same checks in
+  both modes, and `--fix` repairs the safe subset: duplicate or CRLF `.env`
+  assignments, a world-readable `.env`, a provider key the web UI shadows, a
+  duplicated managed block in the profile patch, a data directory owned by the
+  wrong user, and a missing `DSH_SETUP_VERSION`. It also reads the workspace
+  document the web UI lists: one that does not parse (the registry plugin then
+  fails to activate and the UI shows nothing) is a failure naming the snapshot
+  that restores it, and a workspace whose directory vanished is a warning. Every install and every
+  successful self-update runs it with `--fix`, so a half-broken file is repaired
+  instead of reported next time.
+- **One runtime per data directory.** The entrypoint takes a kernel lock on
+  `data/.runtime.lock` and writes `data/.runtime.json` with its mode and pid. A
+  second runtime over the same `data` (a native service beside the Docker stack,
+  or two containers from two checkouts) waits 20 s and then refuses to start with
+  the holder's mode and pid. That state is the one failure a restart cannot
+  clear: each process holds the other's session write handles, the web UIs
+  disagree about the workspace list, and Telegram reports "held by another
+  client". The doctor reports a live marker from a different mode as a failure.
+  The marker carries an instance id, exported to the runtime, because the plugin
+  runs in a child process whose pid is not the one in the marker.
+- **`docs/PARITY.md`** states the native-first rule and the full table of what is
+  identical, what is intentionally different, and how a feature is added so the
+  two modes cannot drift silently.
+
 ## 0.2.1-rc.5-0.5.1
 
 ### Fixed

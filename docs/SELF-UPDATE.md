@@ -15,22 +15,28 @@ docs) to a release tag. Neither pulls `main`.
 ./update.sh --self-check   # fetch tags, show the target and its commits; change nothing
 ./update.sh --self         # latest compatible tag, build, health gate, rollback
 ./update.sh --self --i-know-versions-are-incompatible   # allow a major/DSH jump
-./update.sh --self-to v0.2.1-rc.5-0.5.1                # exact target, used by the updater
+./update.sh --self-to v0.2.1-rc.5-0.6.0                # exact target, used by the updater
 ```
 
 `--self-check` exits `0` when there is no newer compatible tag, `2` when there is,
 and `1` on an error. `--self` asks for confirmation unless `ASSUME_YES=1`.
+
+Every successful update ends with the same health check an install runs
+(`scripts/repair.sh --fix`, exposed as `./update.sh --doctor`). It catches the
+files an update rewrites — `.env`, the profile patch, the stored credential —
+so a half-applied change is repaired before the next boot instead of surfacing
+as a model call that fails for no visible reason.
 `--self-to` requires the target to be a newer aligned tag and a descendant of the
 running one.
 
 ## Tag convention
 
 Tags match `<dsh>-<major>.<minor>.<patch>`, for example
-`v0.2.1-rc.5-0.5.1`, and the target must be a descendant of the current one:
+`v0.2.1-rc.5-0.6.0`, and the target must be a descendant of the current one:
 
 ```sh
-git tag v0.2.1-rc.5-0.5.1
-git push origin v0.2.1-rc.5-0.5.1
+git tag v0.2.1-rc.5-0.6.0
+git push origin v0.2.1-rc.5-0.6.0
 ```
 
 - Product `0.x` is the compatible line; `1.0.0` marks a break.

@@ -197,6 +197,7 @@ SETUP_VERSION="$(tr -d '\n' < "$SRC_DIR/VERSION")"
 DSH_VERSION="$(printf '%s' "$SETUP_VERSION" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+$//')"
 
 MODE="" TIER="" DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0 DEPS=1 CLEAN_SOURCE=0
+DOCTOR=0 FIX=0 ROTATE_KEY=0
 SERVICE_USER="${SERVICE_USER:-dsh}"
 DSH_PORT="${DSH_PORT:-}"
 DSH_BIND_IP="${DSH_BIND_IP:-}"
@@ -248,6 +249,10 @@ Options:
   --clean-source         remove the downloaded checkout once installed (native)
   --yes, -y              accept defaults, never prompt
   --check                print the plan and change nothing
+  --doctor, --status     check this deployment and report; change nothing
+  --fix                  repair what the check can repair (implies --doctor)
+  --rotate-key           ask for the provider key again (default: keep the
+                         deployed OPENCODE_GO_API_KEY / DEEPSEEK_API_KEY)
   --uninstall            stop and remove the deployment (keeps data/)
   --purge                with --uninstall: also delete data/, .env and backups/
   -h, --help             this text
@@ -307,6 +312,9 @@ while [ $# -gt 0 ]; do
     --clean-source) CLEAN_SOURCE=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --purge)  PURGE=1; shift ;;
+    --doctor|--status) DOCTOR=1; shift ;;
+    --fix)    FIX=1; shift ;;
+    --rotate-key) ROTATE_KEY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
@@ -349,13 +357,17 @@ ask() {
 }
 
 ask_secret() {
-  local var="$1" prompt="$2" current answer
+  local var="$1" prompt="$2" blank="${3:-disabled}" current answer
   current="${!var:-}"
   if [ -n "$current" ] || ! can_ask; then
     [ -n "$current" ] || printf -v "$var" '%s' ''
     return 0
   fi
-  printf '%s (blank = disabled): ' "$prompt" >&2
+  if [ "$blank" = "" ]; then
+    printf '%s: ' "$prompt" >&2
+  else
+    printf '%s (blank = %s): ' "$prompt" "$blank" >&2
+  fi
   if [ -t 0 ]; then read -r -s answer || answer=""; else read -r -s answer </dev/tty || answer=""; fi
   printf '\n'
   printf -v "$var" '%s' "$answer"
@@ -479,14 +491,28 @@ random_token() {
   fi
 }
 
+provider_key_env() {
+  case "$1" in
+    opencode-go) printf %s OPENCODE_GO_API_KEY ;;
+    deepseek-official) printf %s DEEPSEEK_API_KEY ;;
+    *) printf %s DSH_PROVIDER_API_KEY ;;
+  esac
+}
+
 # Re-running must keep what the deployment already answered; only fill blanks.
+# The provider key is read after the loop: it belongs to whichever provider the
+# file names, and a repair must never ask for it again (a second answer is how a
+# working deployment ends up with two keys and no way to tell which one is live).
 read_existing_env() {
-  local key value
+  local key value provider key_var
   [ -f "$DIR/.env" ] || return 0
   for key in DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL DSH_TELEGRAM_BOT_TOKEN \
              ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT \
-             DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN; do
-    value="$(sed -n "s/^${key}=//p" "$DIR/.env" | head -1)"
+             DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN \
+             DSH_PROVIDER_API_KEY_ENV; do
+    # The last assignment is what the runtime reads (systemd, compose and
+    # Node's .env loader all agree), so the installer agrees too.
+    value="$(sed -n "s/^${key}=//p" "$DIR/.env" | tail -1)"
     if [ -n "${!key:-}" ]; then
       # An exported variable silently winning over the deployed value is how a
       # repair run rewrites a working allowlist by accident.
@@ -497,6 +523,13 @@ read_existing_env() {
     fi
     if [ -n "$value" ]; then printf -v "$key" '%s' "$value"; fi
   done
+  provider="${DSH_PROVIDER:-}"
+  [ -n "$provider" ] || provider="$(sed -n 's/^DSH_PROVIDER=//p' "$DIR/.env" | tail -1)"
+  [ -n "$provider" ] || provider=opencode-go
+  key_var="${DSH_PROVIDER_API_KEY_ENV:-}"
+  [ -n "$key_var" ] || key_var="$(provider_key_env "$provider")"
+  DEPLOYED_KEY="$(sed -n "s/^${key_var}=//p" "$DIR/.env" | tail -1)"
+  DEPLOYED_KEY_ENV="$key_var"
   return 0
 }
 
@@ -504,7 +537,7 @@ read_existing_env() {
 # or `./install.sh --yes` on a native host defaults to docker and converts (or
 # silently disables) the running install.
 if [ -z "$MODE" ]; then
-  for candidate in "$SRC_DIR/.env" /srv/dsh/.env; do
+  for candidate in "${DIR:+$DIR/.env}" "$SRC_DIR/.env" /srv/dsh/.env; do
     [ -f "$candidate" ] || continue
     MODE="$(sed -n 's/^MODE=//p' "$candidate" | head -1)"
     [ -n "$MODE" ] && break
@@ -614,7 +647,7 @@ rerun_as_root() {
   exec sudo env "${keep[@]}" DSH_BOOTSTRAP_SOURCE="$SRC_DIR" bash "$SRC_DIR/install.sh" "$@" </dev/tty
 }
 
-if [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$(id -u)" != 0 ]; then
+if [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$DOCTOR" = 0 ] && [ "$(id -u)" != 0 ]; then
   # Without a usable Docker, docker mode needs root as much as native does; with
   # one, a docker-group user may proceed, so the mode question comes first.
   if [ -n "$MODE" ] && [ "$MODE" = native ] || ! docker_usable; then
@@ -644,7 +677,7 @@ case "$MODE" in docker|native) ;; *) die "--mode must be docker or native" ;; es
 # units. Re-run under sudo here, before a single question is asked, so nobody
 # answers everything twice.
 # A docker-group user who picked native above: the mode is known only now.
-if [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$(id -u)" != 0 ] && [ "$MODE" = native ]; then
+if [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$DOCTOR" = 0 ] && [ "$(id -u)" != 0 ] && [ "$MODE" = native ]; then
   if command -v sudo >/dev/null 2>&1; then rerun_as_root; fi
   die "native mode installs a systemd service — run with sudo"
 fi
@@ -665,18 +698,23 @@ fi
 
 read_existing_env
 
+# --- doctor ----------------------------------------------------------------
+# One health check, shared with update.sh, so a native host and a Docker host
+# answer the same questions in the same words. It never installs anything and
+# works on a stopped deployment; --fix repairs the safe subset (duplicate .env
+# keys, the provider key shadowed by a stored copy, duplicated patch blocks).
+if [ "$DOCTOR" = 1 ] || [ "$FIX" = 1 ]; then
+  [ -x "$SRC_DIR/scripts/repair.sh" ] || die "scripts/repair.sh is missing — run this from a release checkout"
+  repair_args=(--dir "$DIR" --mode "$MODE")
+  [ "$FIX" = 1 ] && repair_args+=(--fix)
+  exec bash "$SRC_DIR/scripts/repair.sh" "${repair_args[@]}"
+fi
+
 # Defaults apply after the existing .env, so a repair keeps the deployed values.
 [ -n "$DSH_PORT" ] || DSH_PORT=4310
 [ -n "$DESIGN" ] || DESIGN=none
 [ "$DESIGN" = docker ] && { [ -n "$DSH_DESIGN_PORT" ] || DSH_DESIGN_PORT=8090; }
 [ -n "$DSH_PROVIDER" ] || DSH_PROVIDER=opencode-go
-provider_key_env() {
-  case "$1" in
-    opencode-go) printf %s OPENCODE_GO_API_KEY ;;
-    deepseek-official) printf %s DEEPSEEK_API_KEY ;;
-    *) printf %s DSH_PROVIDER_API_KEY ;;
-  esac
-}
 
 model_default() {
   case "$1" in
@@ -716,7 +754,22 @@ if [ "$CHECK" != 1 ]; then
   [ -n "$DSH_MODEL" ] || DSH_MODEL="$(model_default "$DSH_PROVIDER")"
   ask DSH_MODEL "Model" "$(model_default "$DSH_PROVIDER")"
   PROVIDER_KEY_ENV="$(provider_key_env "$DSH_PROVIDER")"
-  ask_secret PROVIDER_KEY "$PROVIDER_KEY_ENV (leave blank to add later)"
+  # Keep the key the deployment already has. Asking again on every repair is
+  # how one deployment ends up with two keys: the new answer lands in .env, an
+  # older copy stored by the web UI keeps winning, and model calls fail with a
+  # credential nobody remembers setting.
+  deployed_key=""
+  if [ -f "$DIR/.env" ] && [ "$(sed -n 's/^DSH_PROVIDER=//p' "$DIR/.env" | tail -1)" = "$DSH_PROVIDER" ]; then
+    deployed_key="$(sed -n "s/^${PROVIDER_KEY_ENV}=//p" "$DIR/.env" | tail -1)"
+  fi
+  if [ -n "${PROVIDER_KEY:-}" ]; then
+    : # an explicit answer (environment or --config) always wins
+  elif [ -n "$deployed_key" ] && [ "$ROTATE_KEY" != 1 ]; then
+    PROVIDER_KEY="$deployed_key"
+    PROVIDER_KEY_KEPT=1
+  else
+    ask_secret PROVIDER_KEY "$PROVIDER_KEY_ENV (blank = keep the deployed key)" ""
+  fi
   ask_secret DSH_TELEGRAM_BOT_TOKEN "Telegram bot token"
   if [ -n "$DSH_TELEGRAM_BOT_TOKEN" ]; then
     ask ALLOWED_USER_IDS "Allowed Telegram user ids (comma separated)" ""
@@ -765,6 +818,10 @@ if [ "$CHECK" != 1 ]; then
     log "generated an updater token (stored in the deployment .env)"
   fi
 fi
+if [ "$ROTATE_KEY" = 1 ] && [ -z "${PROVIDER_KEY:-}" ] && [ "$CHECK" != 1 ]; then
+  die "--rotate-key needs a terminal (drop --yes) or PROVIDER_KEY in the environment / --config"
+fi
+
 # Unattended runs never asked, so derive both from the provider that applies.
 [ -n "$DSH_PROVIDER" ] || DSH_PROVIDER=opencode-go
 [ -n "$DSH_MODEL" ] || DSH_MODEL="$(model_default "$DSH_PROVIDER")"
@@ -810,6 +867,14 @@ else
 fi
 
 # --- plan ------------------------------------------------------------------
+# A deployment that already exists gets its health report first: "what would a
+# repair change?" is only answerable together with "what is wrong right now?".
+if [ -f "$DIR/.env" ] && [ -x "$SRC_DIR/scripts/repair.sh" ]; then
+  echo
+  log "existing deployment"
+  bash "$SRC_DIR/scripts/repair.sh" --dir "$DIR" --mode "$MODE" || true
+fi
+
 echo
 log "plan"
 printf '    mode:      %s\n' "$MODE"
@@ -1036,11 +1101,63 @@ set_env() {
   mv "$tmp" "$file"
 }
 
+# Drop every assignment of one key. Used when a provider route changes hands: an
+# old key left beside the new one is what makes "which key is live?" unanswerable.
+del_env() {
+  local key="$1" file="$2" tmp
+  [ -f "$file" ] || return 0
+  grep -q "^${key}=" "$file" || return 0
+  tmp="$(mktemp)"
+  grep -v "^${key}=" "$file" > "$tmp" || true
+  mv "$tmp" "$file"
+}
+
+# The runtime resolves a stored credential before the environment, so a key
+# saved once through the web UI outranks every .env the installer writes. Make
+# the deployment key win where that file already exists; a missing file is left
+# missing (the environment is then the only source, which is what a first
+# install wants, and creating it as root would lock the runtime out).
+sync_stored_credential() {
+  local file="$1" home="$DATA_HOME" store="$DATA_HOME/.credentials.yaml"
+  local key_var key owner state
+  [ -f "$store" ] || return 0
+  [ -f "$SRC_DIR/scripts/credentials.mjs" ] || return 0
+  key_var="${PROVIDER_KEY_ENV:-$(provider_key_env "$DSH_PROVIDER")}"
+  key="$(sed -n "s/^${key_var}=//p" "$file" | tail -1)"
+  command -v node >/dev/null 2>&1 || {
+    warn "cannot reconcile $store without node; save $key_var in Settings -> Models to match .env"
+    return 0
+  }
+  if [ -z "$key" ]; then
+    state="$(DSH_VALUE= node "$SRC_DIR/scripts/credentials.mjs" status --home "$home" --ref "$key_var" 2>/dev/null || true)"
+    case "$state" in
+      ""|absent) ;;
+      *) warn "$key_var is stored by the web UI but not in $file — the stored key is what model calls use" ;;
+    esac
+    return 0
+  fi
+  state="$(DSH_VALUE="$key" node "$SRC_DIR/scripts/credentials.mjs" status --home "$home" --ref "$key_var" 2>/dev/null || true)"
+  case "$state" in
+    ""|absent|match) return 0 ;;
+  esac
+  if DSH_VALUE="$key" node "$SRC_DIR/scripts/credentials.mjs" sync --home "$home" --ref "$key_var" >/dev/null 2>&1; then
+    if [ "$MODE" = native ]; then owner="$SERVICE_USER:$SERVICE_USER"; else owner="${SUDO_UID:-$(id -u)}:${SUDO_GID:-$(id -g)}"; fi
+    chown "$owner" "$store" "$store.bak" 2>/dev/null || true
+    log "reconciled the stored $key_var with $file (backup: $store.bak)"
+  else
+    warn "could not reconcile $store; save $key_var in Settings -> Models or remove the file"
+  fi
+}
+
 write_env() {
   local file="$1"
   if [ ! -f "$file" ]; then
     if [ "$MODE" = docker ] && [ -f "$SRC_DIR/.env.example" ]; then
-      cp "$SRC_DIR/.env.example" "$file"
+      # Keep the documentation, drop the sample assignments. A copied
+      # `OPENCODE_GO_API_KEY=` line beside the managed one is the duplicate
+      # that makes a hand edit "do nothing": the runtime reads the last
+      # assignment, which is not the line the file invites you to edit.
+      grep -vE '^[A-Za-z_][A-Za-z0-9_]*=' "$SRC_DIR/.env.example" > "$file" || :
     else
       : > "$file"
     fi
@@ -1050,8 +1167,16 @@ write_env() {
   set_env DSH_BIND_IP "$DSH_BIND_IP" "$file"
   set_env DSH_PROVIDER "$DSH_PROVIDER" "$file"
   set_env DSH_MODEL "$DSH_MODEL" "$file"
+  PROVIDER_KEY_ENV="${PROVIDER_KEY_ENV:-$(provider_key_env "$DSH_PROVIDER")}"
   if [ -n "${PROVIDER_KEY:-}" ]; then
-    set_env "${PROVIDER_KEY_ENV:-$(provider_key_env "$DSH_PROVIDER")}" "$PROVIDER_KEY" "$file"
+    # One route, one key variable: switching provider drops the other key, so a
+    # stale credential can never be mistaken for the live one.
+    local other
+    for other in OPENCODE_GO_API_KEY DEEPSEEK_API_KEY DSH_PROVIDER_API_KEY; do
+      [ "$other" = "$PROVIDER_KEY_ENV" ] && continue
+      del_env "$other" "$file"
+    done
+    set_env "$PROVIDER_KEY_ENV" "$PROVIDER_KEY" "$file"
   fi
   set_env DSH_TELEGRAM_BOT_TOKEN "$DSH_TELEGRAM_BOT_TOKEN" "$file"
   set_env ALLOWED_USER_IDS "$ALLOWED_USER_IDS" "$file"
@@ -1080,6 +1205,7 @@ write_env() {
   fi
   set_env DSH_UPDATER_URL "$UPDATER_URL" "$file"
   chmod 600 "$file"
+  sync_stored_credential "$file"
 }
 
 wait_health() {
@@ -1435,6 +1561,15 @@ fi
 printf '    update:  /system update all (Telegram) or ./update.sh --self (host)\n'
 printf '    switch:  ./install.sh --mode %s (stops the other mode; data is not moved, see docs/HOST.md)\n' \
   "$([ "$MODE" = docker ] && echo native || echo docker)"
+
+# Self-check after every install, with the summary already printed: the two
+# failures this catches ("model calls stopped working") are only confusing when
+# they appear before the operator has read what was installed.
+echo
+if [ -x "$SRC_DIR/scripts/repair.sh" ]; then
+  bash "$SRC_DIR/scripts/repair.sh" --dir "$DIR" --mode "$MODE" --fix \
+    || warn "the health check found something above — ./install.sh --doctor"
+fi
 
 # --- the download is not the deployment ------------------------------------
 # `curl … | bash` leaves the fetched release somewhere (default ~/dsh-setup).
