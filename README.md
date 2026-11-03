@@ -36,6 +36,7 @@ the `/data` volume expose; nothing else on the server is mounted.
 | `design/` | Optional Penpot stack + the `penpot` CLI for design work (`--design docker`) |
 | `docs/DESIGN.md` | The design stack: install, token, the plugin and CLI, data, removal |
 | `docs/HOST.md` | Native (no-Docker) deployment: tiers, layout, updates, switching |
+| `docs/UPSTREAM-WATCH.md` | The daily check for a new DSH release candidate, and the upgrade plans it produces |
 
 ## Before you start
 
@@ -164,6 +165,15 @@ deepseek-official → back).
 The route also decides what each Telegram chat gets, since the adapter pins the
 same provider/model when it creates a session.
 
+**The picker only offers what this deployment can actually call.** A provider
+appears once it has a usable credential — a key in the environment, or a saved
+API key for the built-in route — and a route without one is hidden from the
+model selector; a saved `models` list replaces the offered set. On the
+`deepseek-official` route the list follows DeepSeek's published `/models`
+listing (refreshed in the background, built-in catalog when the call fails), so
+a model DeepSeek publishes later shows up without a release, and a listed model
+that needs a newer harness is refused before it is sent.
+
 ## Data layout
 
 ```
@@ -210,7 +220,7 @@ container is disposable and disappears with the container.
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.2-0.8.0
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.0.0
          DSH part          product part
 ```
 
@@ -461,7 +471,7 @@ exemption in `<profile>/compatibility.json`:
 ```
 
 The connector declares `>=0.1.0-rc.6 <0.3.0-0` for the DSH packages, so the
-tested `0.2.1-rc.2` needs no exemption. `ensure_compat` checks this on every boot
+tested `0.2.1-rc.5` needs no exemption. `ensure_compat` checks this on every boot
 and grants one only when the runtime is genuinely outside the declared ranges —
 that is the unsafe, out-of-matrix case, and it logs a warning. A plugin upgrade
 does not inherit the old exact-version key, which is why the boot check exists.

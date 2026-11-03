@@ -14,10 +14,10 @@ repository.
 
 ```
 <dsh-version>-<major>.<minor>.<patch>          tag: v<same>
-v0.2.1-rc.2-0.8.0
+v0.2.1-rc.5-0.0.0
 ```
 
-- **DSH part** (`0.2.1-rc.2`) is the exact DSH release the pair was built and
+- **DSH part** (`0.2.1-rc.5`) is the exact DSH release the pair was built and
   tested against. Prerelease suffixes are part of the version.
 - **Product part** (`0.3.1`) is ours.
   - It resets to `0.0.0` when the pair aligns to a new DSH line.

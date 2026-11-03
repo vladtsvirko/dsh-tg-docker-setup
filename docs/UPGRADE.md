@@ -6,7 +6,9 @@ healthy **and** someone confirms it; otherwise the supervisor restores the
 previous checkout, image and profile by itself.
 
 Read this before the first upgrade you actually need, and run the drill once
-while nothing is at stake.
+while nothing is at stake. To learn whether there is anything to upgrade to, and
+what it would cost, see [`UPSTREAM-WATCH.md`](UPSTREAM-WATCH.md) and the
+per-release plans in [`upgrades/`](upgrades/).
 
 ## What an upgrade touches
 
@@ -25,7 +27,7 @@ and the connector tag are always identical.
 ## Which upgrades are allowed
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.2-0.6.0
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.0.0
 ```
 
 - **Compatible** (the default): same DSH part, same product major. Any newer
@@ -58,7 +60,7 @@ updater job).
 ```sh
 ./update.sh --self-check    # what a compatible upgrade would do; changes nothing
 ./update.sh --self          # do it, with the first prompt asking to confirm
-./update.sh --self-to v0.2.1-rc.2-0.6.0   # an exact target (what the updater uses)
+./update.sh --self-to v0.2.1-rc.5-0.0.0   # an exact target (what the updater uses)
 ```
 
 Use this for a broken bot, a first install of the updater, or a deliberate

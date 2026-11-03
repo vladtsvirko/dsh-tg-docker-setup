@@ -5,8 +5,33 @@ tag, the image tag and the connector tag at once. Connector-side changes are in
 that repository's changelog; this file records what the installer, the
 supervisor, the updater and the entrypoint changed.
 
-Earlier releases are the git tags `v0.2.1-rc.2-0.1.x` … `v0.2.1-rc.2-0.4.11`;
-this file starts here.
+Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
+
+## 0.2.1-rc.5-0.0.0
+
+Alignment release against DSH `0.2.1-rc.5` (from `0.2.1-rc.2`). The product
+part restarts at `0.0.0` for the new DSH line; no setup code changed.
+
+### Changed
+
+- `Dockerfile` pins `DSH_VERSION=0.2.1-rc.5`; `VERSION`, the image tags, the
+  AGENTS example and the native installer's `DSH_PKG` default follow.
+- The connector is rebuilt against rc.5 and re-tagged; the setup image installs
+  that tag through the usual derived ref.
+
+### Added
+
+- `docs/UPSTREAM-WATCH.md` — the daily check for a new DSH release candidate
+  (npm `dist-tags` → release notes → tree diff → contract-package byte compare),
+  with the per-release plans it produces in `docs/upgrades/`.
+- `docs/upgrades/0.2.1-rc.5.md` — the first plan, including the rc.2 → rc.5
+  compatibility findings (no contract change; 24 of 294 shipped packages differ).
+
+### Notes
+
+- The model picker follows provider credentials: a route without a usable key is
+  hidden, and the `deepseek-official` route follows DeepSeek's published model
+  list. Only models the deployment can actually call are offered.
 
 ## 0.2.1-rc.2-0.8.0
 
