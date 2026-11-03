@@ -596,3 +596,20 @@ test('the downloaded checkout is described as separate from the deployment', asy
   // and never deletes a checkout the deployment updates from
   assert.match(source, /is the source this deployment updates from/)
 })
+
+test('every variable write_env persists is initialised under set -u', async () => {
+  // `set -u` plus an unset variable aborts the install at the .env write — which
+  // is how DSH_ADMIN_USER_ID and later DSH_TELEGRAM_PUBLISHER_TOKENS broke the
+  // unattended path while every --check run stayed green.
+  const source = await readFile(join(here, 'install.sh'), 'utf8')
+  const writeEnv = source.slice(source.indexOf('write_env() {'), source.indexOf('\n}\n', source.indexOf('write_env() {')))
+  const used = [...writeEnv.matchAll(/set_env ([A-Z_]+) "\$\{?([A-Z_]+)/g)]
+    .filter((match) => match[1] === match[2])
+    .map((match) => match[1])
+  assert.ok(used.length > 0, 'no set_env calls found')
+  const initialised = new Set(
+    [...source.matchAll(/^([A-Z_]+)=/gm)].map((match) => match[1]),
+  )
+  const missing = used.filter((name) => !initialised.has(name))
+  assert.deepEqual(missing, [], `uninitialised: ${missing.join(', ')}`)
+})

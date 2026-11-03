@@ -7,6 +7,17 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.2.1
+
+### Fixed
+
+- **The unattended install aborted while writing `.env`.** `DSH_TELEGRAM_PUBLISHER_TOKENS`
+  was used before it was initialised, and `set -u` turns that into an error at
+  the one step `--check` never reaches — so every `--check` stayed green while
+  `--yes` failed. It is initialised with the other answers, and a test now
+  asserts that every variable `write_env` persists is initialised (the same
+  mistake had already happened once with `DSH_ADMIN_USER_ID`).
+
 ## 0.2.1-rc.5-0.2.0
 
 ### Added
