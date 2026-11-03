@@ -660,15 +660,34 @@ test('every variable write_env persists is initialised under set -u', async () =
 })
 
 
-test('docker is installed when the design stack needs it, in either mode', async () => {
+/** A PATH prefix whose `docker` never works, so the plan is host-independent. */
+async function withoutDocker() {
+  const root = process.env.DSH_TEST_TMPDIR ?? tmpdir()
+  const bin = await mkdtemp(join(root, 'no-docker-'))
+  const stub = join(bin, 'docker')
+  await writeFile(stub, '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+  try {
+    await exec(stub, [], { timeout: 5000 })
+  } catch (error) {
+    if (error.code === 'EACCES') return null
+  }
+  return `${bin}:${process.env.PATH}`
+}
+
+test('docker is installed when the design stack needs it, in either mode', async (t) => {
   // Native mode runs the agent without Docker, but the Penpot stack is a set of
   // containers: choosing it must install Docker instead of silently skipping it.
-  const native = await install(['--check', '--yes', '--mode', 'native', '--design', 'docker'])
+  const path = await withoutDocker()
+  if (path === null) {
+    t.skip('temp directory is noexec; cannot shadow docker')
+    return
+  }
+  const native = await install(['--check', '--yes', '--mode', 'native', '--design', 'docker'], { env: { PATH: path } })
   assert.equal(native.code, 0, native.out)
   assert.match(native.out, /installs docker\.io \+ docker-compose-v2/)
   assert.match(native.out, /design:\s+Penpot/)
 
-  const plain = await install(['--check', '--yes', '--mode', 'native'])
+  const plain = await install(['--check', '--yes', '--mode', 'native'], { env: { PATH: path } })
   assert.match(plain.out, /docker absent \(optional here\)/)
 })
 

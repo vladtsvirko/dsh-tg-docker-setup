@@ -7,6 +7,15 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.5.1
+
+### Fixed
+
+- The installer test that pins "choosing the design stack installs Docker" read
+  the host it ran on: the CI runner has Docker, so the plan said "docker present"
+  where the test expected an install. It now shadows `docker` with a failing stub,
+  which makes the plan the same everywhere.
+
 ## 0.2.1-rc.5-0.5.0
 
 ### Added

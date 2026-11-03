@@ -14,7 +14,7 @@ repository.
 
 ```
 <dsh-version>-<major>.<minor>.<patch>          tag: v<same>
-v0.2.1-rc.5-0.5.0
+v0.2.1-rc.5-0.5.1
 ```
 
 - **DSH part** (`0.2.1-rc.5`) is the exact DSH release the pair was built and
