@@ -514,7 +514,7 @@ test('an .env from an older release is repaired, not rejected', async () => {
   }
 })
 
-test('a lone install.sh fetches a release and shows the full plan', async () => {
+test('a lone install.sh fetches a release and shows the full plan', async (t) => {
   // The wget case: one file, no checkout. It clones into a throwaway directory,
   // runs the real installer's --check against the requested target, and leaves
   // the target untouched.
@@ -526,6 +526,12 @@ test('a lone install.sh fetches a release and shows the full plan', async () => 
     // can only clone what the repository already has.
     const { stdout: tagList } = await exec('git', ['tag', '--sort=-v:refname'], { cwd: here })
     const tag = tagList.split('\n').map((line) => line.trim()).filter(Boolean)[0]
+    if (tag === undefined) {
+      // A shallow clone has no tags to bootstrap from; CI checks out with
+      // fetch-depth 0, so this is a local-only situation.
+      t.skip('no release tag in this checkout')
+      return
+    }
     const version = tag.replace(/^v/, '')
     const { stdout } = await exec('bash', ['install.sh', '--check', '--ref', tag, '--dir', target], {
       cwd: lone,
