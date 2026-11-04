@@ -26,11 +26,24 @@ const exec = promisify(execFile)
 const repair = join(here, 'scripts', 'repair.sh')
 const credentials = join(here, 'scripts', 'credentials.mjs')
 
+/**
+ * A deterministic "docker is installed but unusable" binary.
+ *
+ * The doctor treats an unreachable daemon as a warning, not a failure: a host
+ * can legitimately run without Docker. A CI runner does have a working daemon,
+ * where `docker compose ps` against a throwaway directory answers "no
+ * container" — a failure. The tests must not read the machine they run on, so
+ * they shadow `docker` with one that fails every call.
+ */
+const shimDir = await mkdtemp(join(tmpdir(), 'repair-docker-shim-'))
+await writeFile(join(shimDir, 'docker'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+const shimEnv = { PATH: `${shimDir}:${process.env.PATH ?? ''}` }
+
 async function run(args, { env = {}, cwd = here } = {}) {
   try {
     const { stdout, stderr } = await exec('bash', [repair, ...args], {
       cwd,
-      env: { ...process.env, ...env },
+      env: { ...process.env, ...shimEnv, ...env },
     })
     return { code: 0, out: stdout + stderr }
   } catch (error) {
@@ -234,7 +247,10 @@ test('a stale marker from a dead pid is not a failure', async () => {
 test('install.sh --doctor runs the doctor instead of installing', async () => {
   const dir = await fixture()
   try {
-    const { stdout } = await exec('bash', [join(here, 'install.sh'), '--doctor', '--dir', dir], { timeout: 20000 })
+    const { stdout } = await exec('bash', [join(here, 'install.sh'), '--doctor', '--dir', dir], {
+      timeout: 20000,
+      env: { ...process.env, ...shimEnv },
+    })
     assert.match(stdout, /checking docker deployment/)
     assert.match(stdout, /provider-key/)
     assert.doesNotMatch(stdout, /==> plan/)

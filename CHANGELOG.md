@@ -7,6 +7,18 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.6.1
+
+### Fixed
+
+- The new doctor test read the machine it ran on. A CI runner has a working
+  Docker daemon, so `docker compose ps` against the throwaway fixture answered
+  "no container" and `repair.sh` reported a **failure** where the test expected
+  the "docker is absent" warning. The test now shadows `docker` with one that is
+  installed but unusable (`docker info` exits 1), which is the contract it was
+  written for; the product code is unchanged. Tagged because the setup CI must be
+  green for the tag it released.
+
 ## 0.2.1-rc.5-0.6.0
 
 The release that makes a repair run safe and makes a second runtime impossible
