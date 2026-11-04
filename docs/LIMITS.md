@@ -66,9 +66,11 @@ it cannot repair a dead bot, a dead updater, or a dead systemd.
   `SIGTERM`, then `SIGKILL` after ten seconds. A cancelled or timed-out update is
   reported in the chat; the runtime may need `/system restart` afterwards.
 - The Cancel button before acceptance still only clears the pending request.
-- New prompts are blocked while the update is pending. Messages sent while dsh is
-  down are answered once after boot with "update finished — send it again" and
-  are **not** executed.
+- New prompts are blocked while the update is pending. After boot, the first
+  Telegram batch (messages that arrived while dsh was down) is split: plain
+  prompts and attachments are delivered, commands are answered once with
+  "update finished — commands sent while it restarted are not executed; send it
+  again" and are **not** executed.
 - Compatible means same DSH part and same product major. Crossing either needs
   `--i-know-versions-are-incompatible`; `/system` never crosses without it.
 - The updater refuses older targets. It only moves forward.

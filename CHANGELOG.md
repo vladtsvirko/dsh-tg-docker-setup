@@ -7,6 +7,15 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.9.4
+
+Connector fix for messages sent during an update; the setup pin moves with it.
+
+- The first Telegram batch after an update now delivers plain prompts and
+  attachments instead of refusing all of them. Only commands are refused with
+  "send it again", because they refer to the state the update replaced.
+- LIMITS and UPDATER describe that split.
+
 ## 0.2.1-rc.5-0.9.3
 
 Cleanup release; no behaviour change.

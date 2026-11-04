@@ -124,8 +124,10 @@ the instant before the updater restarts the service; that best-effort race is
 accepted.
 
 After a restart, the first Telegram update batch is treated as “arrived during
-the update”: each allowed sender gets one “update finished — send it again”
-reply, and none of those messages are executed.
+the update”. Plain prompts and attachments in it are delivered; commands are
+refused with one “update finished — commands sent while it restarted are not
+executed; send it again” reply per sender, because a queued `/system …` or trial
+confirmation refers to the state the update replaced.
 
 ## Report
 
