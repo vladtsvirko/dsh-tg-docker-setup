@@ -7,6 +7,22 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.6.3
+
+### Fixed
+
+- **The doctor fixture assumed uid 1000.** The installer records the invoking
+  user's ids in `.env`, and the doctor compares them with the data directory it
+  created; a CI runner is uid **1001**, so the fixture's hardcoded `1000` made
+  the ownership check fail on CI while passing locally. The fixture now reads
+  `process.getuid()`/`getgid()`, and a new test pins the mismatch itself (a data
+  directory owned by another user is a failure, with the expected/actual ids in
+  the message).
+
+`v0.2.1-rc.5-0.6.2` fixed the credential helper's YAML dependency and the Docker
+daemon assumption; this is the third environment assumption in the same fixture,
+and the last one the local machine differs on.
+
 ## 0.2.1-rc.5-0.6.2
 
 ### Fixed

@@ -66,8 +66,11 @@ async function fixture(mode = 'docker', env = {}) {
     DSH_TELEGRAM_ENABLED: 'auto',
     DSH_UPDATER_TOKEN: 'updater-token-for-the-test',
     DSH_SETUP_VERSION: (await readFile(join(here, 'VERSION'), 'utf8')).trim(),
-    DSH_UID: '1000',
-    DSH_GID: '1000',
+    // The installer writes the *invoking* user's ids, and the doctor compares
+    // them with the data directory it just created. A CI runner is uid 1001,
+    // not 1000, so the fixture must not guess.
+    DSH_UID: String(typeof process.getuid === 'function' ? process.getuid() : 1000),
+    DSH_GID: String(typeof process.getgid === 'function' ? process.getgid() : 1000),
     ...env,
   }
   const body = Object.entries(values)
@@ -376,5 +379,20 @@ test('credentials.mjs round-trips a value YAML would otherwise reinterpret', asy
     assert.equal((await stat(join(home, '.credentials.yaml'))).mode & 0o777, 0o600)
   } finally {
     await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('a data directory owned by another user is a failure, not a warning', async () => {
+  // The installer writes the invoking user's ids; a deployment whose data is
+  // owned by someone else cannot write its sessions, and the runtime then fails
+  // at the first turn rather than at boot.
+  const mismatch = typeof process.getuid === 'function' ? (process.getuid() === 0 ? 1 : 0) : 1
+  const dir = await fixture('docker', { DSH_UID: String(mismatch), DSH_GID: String(mismatch) })
+  try {
+    const { code, out } = await run(['--dir', dir, '--mode', 'docker'])
+    assert.equal(code, 1)
+    assert.match(out, /fail\s+data-owner\s+.*is owned by .*, not /)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
   }
 })
