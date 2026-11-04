@@ -15,6 +15,11 @@ DSH_HOME="${DSH_HOME:-/srv/dsh/data/home}"
 DSH_WORKSPACE="${DSH_WORKSPACE:-/srv/dsh/data/workspace}"
 DSH_PORT="${DSH_PORT:-4310}"
 SETUP_VERSION="${DSH_SETUP_VERSION:-0.0.0}"
+# The checkout this script belongs to. The entrypoint is symlinked into
+# /usr/local/bin, so resolve the link before taking its directory: the shipped
+# assets (skills/) sit beside the real file, not beside the symlink.
+SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
+SETUP_DIR="$(cd "$(dirname "$SELF")" && pwd -P)"
 PLUGIN_REF="${DSH_TELEGRAM_PLUGIN:-github:vladtsvirko/dsh-telegram-connector#v${SETUP_VERSION}}"
 # The setup release owns the connector version: if the configured ref points at
 # this connector, force the matching tag instead of an older user override.
@@ -473,11 +478,36 @@ BLOCK
   rm -f "$block"
 }
 
+# Skills shipped in this checkout land in the user skill root, where the harness
+# discovers them for every workspace and session. The copy is managed by the
+# setup: a release refreshes it, so change the repository copy, not the
+# installed one. Only skills with a SKILL.md are copied; anything else under
+# $DSH_HOME/skills stays untouched.
+install_skills() {
+  local src="$SETUP_DIR/skills" dst="$DSH_HOME/skills" dir name
+  [ -d "$src" ] || return 0
+  for dir in "$src"/*/; do
+    [ -f "$dir/SKILL.md" ] || continue
+    name="$(basename "$dir")"
+    if [ -d "$dst/$name" ] && diff -rq "$dir" "$dst/$name" >/dev/null 2>&1; then
+      continue
+    fi
+    mkdir -p "$dst"
+    rm -rf "$dst/$name"
+    if cp -R "$dir" "$dst/$name"; then
+      log "skill installed: $name"
+    else
+      warn "could not install the '$name' skill from $src"
+    fi
+  done
+}
+
 prepare() {
   prepare_dirs
   setup_git_credentials
   init_profile
   set_provider_patch
+  install_skills
 
   log "model route: $PROVIDER/$MODEL"
   if [ -n "$KEY_ENV" ] && [ -z "$(printenv "$KEY_ENV" 2>/dev/null || true)" ]; then

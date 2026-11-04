@@ -1,7 +1,9 @@
 # Setup updater
 
-`/system update setup` drains all agents, then asks a privileged updater service
-to move the setup to a release tag. The updater snapshots state, checks out the
+`/system update setup` posts a confirmation card with the target and the number
+of running sessions. **Update now** drains all agents, then asks a privileged
+updater service to move the setup to a release tag; nothing is applied before
+that button. The updater snapshots state, checks out the
 tag, installs the matching DSH, restarts the runtime, and rolls back on failure.
 It reports the result to the control chat itself.
 

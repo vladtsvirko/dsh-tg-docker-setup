@@ -358,6 +358,22 @@ ask() {
   printf -v "$var" '%s' "${answer:-$def}"
 }
 
+# Like ask_secret, but an existing value is kept unless the user types a new
+# one, and the value is never echoed (publisher tokens are secrets too).
+ask_secret_keep() {
+  local var="$1" prompt="$2" current answer
+  current="${!var:-}"
+  if ! can_ask; then return 0; fi
+  if [ -n "$current" ]; then
+    printf '%s (blank = keep current): ' "$prompt" >&2
+  else
+    printf '%s (blank = none): ' "$prompt" >&2
+  fi
+  if [ -t 0 ]; then read -r -s answer || answer=""; else read -r -s answer </dev/tty || answer=""; fi
+  printf '\n'
+  if [ -n "$answer" ]; then printf -v "$var" '%s' "$answer"; fi
+}
+
 ask_secret() {
   local var="$1" prompt="$2" blank="${3-disabled}" current answer
   current="${!var:-}"
@@ -906,8 +922,8 @@ if [ "$CHECK" != 1 ]; then
     ask DSH_ADMIN_USER_ID "Admin user id (may update/restart/roll back)" "$first_allowed"
     # One bot has one budget: ~20 messages/minute per group, shared by every
     # topic. Extra bots multiply it, and each must be a member of the group.
-    ask DSH_TELEGRAM_PUBLISHER_TOKENS \
-      "Extra publisher bot tokens to raise the rate limit (comma separated, blank = main bot only)" ""
+    ask_secret_keep DSH_TELEGRAM_PUBLISHER_TOKENS \
+      "Extra publisher bot tokens to raise the rate limit (comma separated)"
   fi
   # The agent commits; a commit without an author fails. A repair must keep the
   # identity the agent already commits as: the deployed .gitconfig wins over the

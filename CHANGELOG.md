@@ -7,6 +7,32 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## Unreleased
+
+### Added
+
+- A shipped **`apple-hig` skill**: a distilled, link-first guide to Apple's Human
+  Interface Guidelines for designing, reviewing, and implementing iOS, iPadOS,
+  macOS, tvOS, visionOS, watchOS, and Apple-flavored web UI. It is available in
+  every session (`/skills`, `/skill apple-hig`) and the agent can load it when a
+  task matches its description.
+- The entrypoint now installs the checkout's `skills/` directory into
+  `data/home/skills/` at boot. The copies are managed by the setup, so a release
+  refreshes them; skills a user adds under other names are untouched.
+
+## 0.2.1-rc.5-0.10.3
+
+Publisher-token prompt fix and the connector update-flow release.
+
+### Fixed
+
+- **The installer no longer echoes publisher tokens.** The prompt is masked and
+  an existing value is kept unless a new one is typed (blank = keep). Only
+  `install.sh` writes the key; `update.sh` never touches it, and `repair.sh`
+  only collapses duplicate keys. A regression test feeds a deployed
+  `DSH_TELEGRAM_PUBLISHER_TOKENS` through `--check` and asserts the count is
+  preserved and the tokens are not printed.
+
 ## 0.2.1-rc.5-0.10.2
 
 Connector UX fixes; the setup pin moves with them.

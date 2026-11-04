@@ -455,6 +455,35 @@ test('the runtime binds DSH_BIND_IP directly, loopback included', async () => {
   }
 })
 
+test('the entrypoint installs the shipped skills into the user skill root', async () => {
+  const { dir, home, env } = await entrypointFixture()
+  try {
+    const { code, out } = await runEntrypoint(env)
+    assert.equal(code, 0, out)
+    const shipped = await readFile(join(here, 'skills', 'apple-hig', 'SKILL.md'), 'utf8')
+    const installed = await readFile(join(home, 'skills', 'apple-hig', 'SKILL.md'), 'utf8')
+    assert.equal(installed, shipped)
+    assert.match(installed, /^---\nname: apple-hig\n/)
+    assert.match(out, /skill installed: apple-hig/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('a shipped skill is refreshed when the installed copy drifts', async () => {
+  const { dir, home, env } = await entrypointFixture()
+  try {
+    const target = join(home, 'skills', 'apple-hig', 'SKILL.md')
+    await mkdir(join(home, 'skills', 'apple-hig'), { recursive: true })
+    await writeFile(target, 'stale\n')
+    const { code, out } = await runEntrypoint(env)
+    assert.equal(code, 0, out)
+    assert.match(await readFile(target, 'utf8'), /^---\nname: apple-hig\n/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('a second runtime over the same data directory is refused, naming the holder', async () => {
   const { dir, env } = await entrypointFixture()
   try {

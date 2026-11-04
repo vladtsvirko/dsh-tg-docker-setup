@@ -105,7 +105,7 @@ curl -fsSL …/install.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.10.2`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.10.3`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -196,6 +196,22 @@ is why an update can be a `git checkout` without leaving root-owned profile
 files behind. Back up `data/home` if you care about session history (it is the
 agent's memory), and `data/workspace` if you care about its files.
 
+### Skills
+
+Skills live in `data/home/skills/<name>/SKILL.md` and are available to every
+session and workspace. The agent loads one when the task matches its
+description; you can also list them with `/skills` and load one with
+`/skill <name>`.
+
+The checkout's `skills/` directory is copied into `data/home/skills/` at boot.
+Those copies are **managed by the setup**: a release refreshes them, so change
+the repository copy, not the installed one. A skill you add yourself under a
+different name is never touched. The setup currently ships:
+
+| Skill | Use it for |
+|---|---|
+| `apple-hig` | Apple Human Interface Guidelines — designing, reviewing, or implementing iOS, iPadOS, macOS, tvOS, visionOS, watchOS, or Apple-flavored web UI. |
+
 ## Knobs that matter
 
 | Setting | Why |
@@ -218,7 +234,7 @@ agent's memory), and `data/workspace` if you care about its files.
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.10.2
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.10.3
          DSH part          product part
 ```
 

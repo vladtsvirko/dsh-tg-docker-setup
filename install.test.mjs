@@ -653,6 +653,25 @@ test('Podman is planned for the agent and skipped when containers are off', asyn
   }
 })
 
+test('a deployed publisher token is preserved and counted, never echoed', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'install-publishers-'))
+  try {
+    const dir = join(root, 'deploy')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, '.env'), [
+      'DSH_TELEGRAM_BOT_TOKEN=123:main',
+      'DSH_TELEGRAM_PUBLISHER_TOKENS=456:first,789:second',
+      '',
+    ].join('\n'))
+    const { code, out } = await install(['--check', '--yes', '--dir', dir])
+    assert.equal(code, 0, out)
+    assert.match(out, /bots:\s+main \+ 2 publisher\(s\)/)
+    assert.doesNotMatch(out, /456:first|789:second/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('DSH_PUBLIC_URL is an accepted answer and is written to .env', async () => {
   const source = await readFile(join(here, 'install.sh'), 'utf8')
   assert.match(source, /CONFIG_KEYS="[^"]*DSH_PUBLIC_URL/)
