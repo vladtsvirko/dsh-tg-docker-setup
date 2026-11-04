@@ -653,6 +653,23 @@ test('Podman is planned for the agent and skipped when containers are off', asyn
   }
 })
 
+test('the plan reports the deployed git manifest instead of "none"', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'install-git-manifest-'))
+  try {
+    const dir = join(root, 'deploy')
+    await mkdir(join(dir, 'secrets', 'git'), { recursive: true })
+    await writeFile(join(dir, 'secrets', 'git', 'profiles.json'), JSON.stringify({
+      default: { provider: 'github', auth: 'https', token: 'secret-token' },
+    }))
+    const { code, out } = await install(['--check', '--yes', '--dir', dir])
+    assert.equal(code, 0, out)
+    assert.match(out, /git auth:\s+1 account\(s\): github\/https \(deployed manifest kept\)/)
+    assert.doesNotMatch(out, /secret-token/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a deployed publisher token is preserved and counted, never echoed', async () => {
   const root = await mkdtemp(join(tmpdir(), 'install-publishers-'))
   try {
@@ -687,19 +704,24 @@ test('the installer asks for a resource share and writes it to the unit', async 
 })
 
 test('the plan names the git author and the repository access', async () => {
-  const withToken = await install(['--check', '--yes'], {
-    env: {
-      GIT_AUTHOR_NAME: 'Vlad',
-      GIT_AUTHOR_EMAIL: 'vlad@example.test',
-      GIT_PROVIDER: 'github',
-      GIT_TOKEN: 'ghp_ci',
-    },
-  })
-  assert.equal(withToken.code, 0, withToken.out)
-  assert.match(withToken.out, /git:\s+Vlad <vlad@example\.test>/)
-  assert.match(withToken.out, /git auth:\s+github \(token stored in/)
+  const root = await mkdtemp(join(tmpdir(), 'install-git-plan-'))
+  try {
+    const withToken = await install(['--check', '--yes', '--dir', join(root, 'a')], {
+      env: {
+        GIT_AUTHOR_NAME: 'Vlad',
+        GIT_AUTHOR_EMAIL: 'vlad@example.test',
+        GIT_PROVIDER: 'github',
+        GIT_TOKEN: 'ghp_ci',
+      },
+    })
+    assert.equal(withToken.code, 0, withToken.out)
+    assert.match(withToken.out, /git:\s+Vlad <vlad@example\.test>/)
+    assert.match(withToken.out, /git auth:\s+github \(token stored in/)
 
-  const without = await install(['--check', '--yes'])
-  assert.match(without.out, /git:\s+no author/)
-  assert.match(without.out, /git auth:\s+none/)
+    const without = await install(['--check', '--yes', '--dir', join(root, 'b')])
+    assert.match(without.out, /git:\s+no author/)
+    assert.match(without.out, /git auth:\s+none/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

@@ -7,6 +7,16 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.10.5
+
+### Fixed
+
+- **The plan no longer says `git auth: none` when a manifest already exists.**
+  It reports the deployed accounts (`1 account(s): github/https (deployed
+  manifest kept)`) without printing any token. The prompt now says that
+  existing accounts are kept, so a repair cannot look like it removed them.
+  The manifest and generated `.gitconfig` were never touched by the installer.
+
 ## 0.2.1-rc.5-0.10.4
 
 Release-notes and skill-text fix for the `apple-hig` skill that shipped in

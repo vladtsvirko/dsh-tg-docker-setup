@@ -456,7 +456,7 @@ ask_git_accounts() {
     existing="$(node -e 'const m=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); const h=[]; if(m.default) h.push(m.default.host||m.default.provider); for (const k of Object.keys(m.hosts||{})) h.push(k); console.log(h.join(", "))' "$DIR/secrets/git/profiles.json" 2>/dev/null || true)"
     [ -n "$existing" ] && printf '    existing git accounts: %s\n' "$existing" >&2
   fi
-  ask GIT_PROVIDER "Repository access for the agent — git host (github/gitlab/gitea/forgejo/self-hosted/none)" none
+  ask GIT_PROVIDER "Add a git account (github/gitlab/gitea/forgejo/self-hosted/none) — existing accounts are kept" none
   case "$GIT_PROVIDER" in
     ""|none|None) GIT_PROVIDER=""; return 0 ;;
     github|gitlab|gitea|forgejo|self-hosted) ;;
@@ -545,6 +545,26 @@ ask_git_accounts() {
       *) more=0 ;;
     esac
   done
+}
+
+# What the deployed manifest already holds, without printing any secret. A
+# repair keeps this file; the plan must say so instead of "none".
+git_manifest_summary() {
+  local file="$DIR/secrets/git/profiles.json"
+  [ -f "$file" ] && command -v node >/dev/null 2>&1 || return 1
+  node -e '
+    const m = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))
+    const rows = []
+    const one = (a, where) => {
+      if (!a || typeof a !== "object") return
+      rows.push(`${a.provider ?? "?"}/${a.auth ?? "?"}${where ? ` @ ${where}` : ""}`)
+    }
+    one(m.default, "")
+    for (const [host, a] of Object.entries(m.hosts ?? {})) one(a, host)
+    for (const [name, a] of Object.entries(m.projects ?? {})) one(a, `workspace ${name}`)
+    if (rows.length === 0) process.exit(1)
+    process.stdout.write(`${rows.length} account(s): ${rows.join(", ")}`)
+  ' "$file" 2>/dev/null
 }
 
 # Write (or merge) the manifest. A manifest copied from GIT_PROFILES_FILE wins
@@ -1063,6 +1083,8 @@ fi
 if [ -n "$GIT_PROVIDER" ] && [ -n "$GIT_TOKEN" ]; then
   printf '    git auth:  %s%s (token stored in %s/secrets/git)\n' "$GIT_PROVIDER" \
     "${GIT_HOST:+ ($GIT_HOST)}" "$DIR"
+elif manifest_summary="$(git_manifest_summary)"; then
+  printf '    git auth:  %s (deployed manifest kept)\n' "$manifest_summary"
 else
   printf '    git auth:  none — the agent can read public repositories only\n'
 fi
