@@ -7,7 +7,23 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
-## Unreleased
+## 0.2.1-rc.5-0.10.4
+
+Release-notes and skill-text fix for the `apple-hig` skill that shipped in
+0.10.3; the connector maintenance tag moves with it.
+
+### Fixed
+
+- The `apple-hig` skill's tab-bar and segmented-control guidance now matches the
+  current HIG wording: a small, stable set of tabs (about five or fewer), not a
+  fixed 2–5 range, and about five segments on iPhone.
+- The 0.10.3 notes now record the `apple-hig` skill and the `skills/` install
+  step under the release that shipped them, instead of leaving them under
+  "Unreleased".
+
+## 0.2.1-rc.5-0.10.3
+
+Publisher-token prompt fix and the connector update-flow release.
 
 ### Added
 
@@ -19,10 +35,6 @@ Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 - The entrypoint now installs the checkout's `skills/` directory into
   `data/home/skills/` at boot. The copies are managed by the setup, so a release
   refreshes them; skills a user adds under other names are untouched.
-
-## 0.2.1-rc.5-0.10.3
-
-Publisher-token prompt fix and the connector update-flow release.
 
 ### Fixed
 

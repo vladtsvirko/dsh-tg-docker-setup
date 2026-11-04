@@ -28,8 +28,7 @@ JavaScript shell, so `web_fetch` gets the real content.
 https://developer.apple.com/design/human-interface-guidelines/<slug>.md
 ```
 
-- Index: `.../design-principles.md`? No — start at `.../human-interface-guidelines.md` for the
-  full topic map, then fetch one slug per topic.
+- Index: `.../human-interface-guidelines.md` maps every topic; fetch one slug per topic.
 - Slugs are flat in the current site: `.../layout.md`, `.../color.md`, `.../buttons.md`.
   Older nested paths (`/foundations/color`) redirect to the flat one.
 - If the fetch fails, say the specific rule is unverified and rely on this summary.
@@ -167,7 +166,7 @@ borderless ones.
 
 | Need | Use | Key rule |
 |---|---|---|
-| Top-level destinations | Tab bar | 2–5 items, always visible, avoid overflow |
+| Top-level destinations | Tab bar | A small, stable set (about five or fewer); avoid overflow |
 | Deep hierarchy on large screens | Sidebar | Hideable, content extends beneath it |
 | Task in place | Sheet | One scoped task, obvious dismiss, confirm data loss |
 | Short choice list | Action sheet / menu | For an intentional action, not for information |

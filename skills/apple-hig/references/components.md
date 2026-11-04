@@ -49,7 +49,7 @@ Fetch a component's page at
 
 | Component | Slug | Use | Key rule |
 |---|---|---|---|
-| Tab bars | `tab-bars` | Top-level destinations | 2–5 items, persistent, avoid overflow and a “More” tab. |
+| Tab bars | `tab-bars` | Top-level destinations | Small, stable set (about five or fewer); persistent; avoid overflow and a “More” tab. |
 | Search fields | `search-fields` | Finding content | Placeholder describes scope; results update as people type. |
 | Path controls | `path-controls` | Hierarchy location (macOS) | Show the full path; each segment navigable. |
 | Token fields | `token-fields` | Multi-value filters | Tokens are editable and removable. |
@@ -75,7 +75,7 @@ Fetch a component's page at
 | Toggles | `toggles` | On/off with immediate effect | Apply immediately; never require a separate Save. |
 | Sliders | `sliders` | Continuous value | Show the value; provide a precise alternative when needed. |
 | Steppers | `steppers` | Small discrete increments | Label the value and range. |
-| Segmented controls | `segmented-controls` | 2–5 mutually exclusive views | Keep labels short; do not use for navigation. |
+| Segmented controls | `segmented-controls` | A few mutually exclusive views (about five on iPhone) | Keep labels short; do not use for navigation. |
 | Pickers | `pickers` | Choosing from a known set | Prefer a wheel/list over free text. |
 | Combo boxes | `combo-boxes` | Editable choice (macOS) | Allow free text only when valid. |
 | Color / image wells | `color-wells`, `image-wells` | Picking a color/image | Show the current selection clearly. |
