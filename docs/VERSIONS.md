@@ -14,7 +14,7 @@ repository.
 
 ```
 <dsh-version>-<major>.<minor>.<patch>          tag: v<same>
-v0.2.1-rc.5-0.8.2
+v0.2.1-rc.5-0.9.0
 ```
 
 - **DSH part** (`0.2.1-rc.5`) is the exact DSH release the pair was built and
@@ -67,7 +67,7 @@ There is no `DSH_VERSION` environment knob. The DSH version is the prefix of
 | From → to | Allowed by default? | How |
 |---|---|---|
 | same DSH part, same product major | yes | `/system update all` (mode `compatible`) |
-| same product major, different DSH part | no | `/system update all --i-know-versions-are-incompatible` or host `./update.sh --self --i-know-versions-are-incompatible` |
+| same product major, different DSH part | no | `/system update all --i-know-versions-are-incompatible` or host `./update.sh --apply --i-know-versions-are-incompatible` |
 | different product major | no | same explicit flag |
 | same version | no-op | updater reports no target |
 | older tag | no | the updater rejects it; rollback is a separate, automatic path |
@@ -87,7 +87,7 @@ chat. `/system status` and the update card show the target before acceptance.
 |---|---|---|
 | `/system restart`, `/system update connector`, plugins | **profile** (`data/home/profiles/web`) | supervisor snapshot; Commit / Roll back / deadline |
 | `/system update all` | setup checkout, installed DSH, connector pin, profile state snapshot | automatic on failed health gate; one previous checkout + one `self-*.tgz` |
-| host `./update.sh --self` | same as `/system update all`, without draining agents | same |
+| host `./update.sh --apply` | same as `/system update all`, without draining agents | same |
 | `/system rollback` | profile only | does **not** move the checkout or the setup tag |
 
 The updater only moves forward. There is no Telegram command that says "check

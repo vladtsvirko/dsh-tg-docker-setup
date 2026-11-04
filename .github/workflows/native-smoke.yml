@@ -46,7 +46,7 @@ jobs:
 
       - name: Install this release
         # It installs the release under test (the tag this workflow was triggered
-        # by), then `--plugin` below runs the same prepare, restart and health
+        # by), then `--tg-connector` below runs the same prepare, restart and health
         # path an update takes — from the deployment directory, which is where a
         # real one is run.
         run: sudo -E ./install.sh --config .github/native-answers.env --yes --ref "${{ steps.release.outputs.ref }}"
@@ -75,13 +75,13 @@ jobs:
         run: test -x /usr/local/bin/dsh-entrypoint
 
       - name: An update-path run from the deployment directory
-        # `--plugin` re-resolves the connector through run_as_service, then
+        # `--tg-connector` re-resolves the connector through run_as_service, then
         # restarts the unit and waits for health — the same steps an update runs,
         # including the working directory that made prepare fail.
         run: |
           set -o pipefail
-          if ! sudo -E bash -c 'cd /srv/dsh-ci && ASSUME_YES=1 ./update.sh --plugin' 2>&1 | tee /tmp/plugin.log; then
-            echo "::error::update.sh --plugin failed"; tail -40 /tmp/plugin.log
+          if ! sudo -E bash -c 'cd /srv/dsh-ci && ASSUME_YES=1 ./update.sh --tg-connector' 2>&1 | tee /tmp/plugin.log; then
+            echo "::error::update.sh --tg-connector failed"; tail -40 /tmp/plugin.log
             sudo journalctl -u dsh.service --no-pager -n 60 || true
             exit 1
           fi

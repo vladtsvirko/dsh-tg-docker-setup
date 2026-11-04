@@ -5,7 +5,7 @@ There are two entry points to the same update path:
 - **`/system update all`** in the bot control chat — normal operation, no host
   shell. The connector drains all agents, asks the updater service, and reports
   the result to Telegram. See [`UPDATER.md`](UPDATER.md).
-- **`./update.sh --self`** on the host — bootstrap, break-glass, or a deliberate
+- **`./update.sh --apply`** on the host — bootstrap, break-glass, or a deliberate
   manual update. It does not require the connector to be healthy.
 
 Both move the **setup checkout** (installer, entrypoint, supervisor, updater,
@@ -13,16 +13,16 @@ docs) to a release tag, install the matching DSH, and restart `dsh.service`.
 Neither pulls `main`.
 
 ```sh
-./update.sh --self-check   # fetch tags, show the target and its commits; change nothing
-sudo ./update.sh --self    # latest compatible tag, install, health gate, rollback
-sudo ./update.sh --self --i-know-versions-are-incompatible   # allow a major/DSH jump
-sudo ./update.sh --self-to <newer tag>                        # exact target, used by the updater
+./update.sh --check   # fetch tags, show the target and its commits; change nothing
+sudo ./update.sh --apply    # latest compatible tag, install, health gate, rollback
+sudo ./update.sh --apply --i-know-versions-are-incompatible   # allow a major/DSH jump
+sudo ./update.sh --to <newer tag>                        # exact target, used by the updater
 ```
 
-`--self-check` exits `0` when there is no newer tag at all, `2` when a newer tag
+`--check` exits `0` when there is no newer tag at all, `2` when a newer tag
 exists (compatible or only incompatible — it prints which), and `1` on an error.
-`--self` asks for confirmation unless `ASSUME_YES=1`. Run it as root
-(`sudo ./update.sh --self`): it writes the root-owned checkout, installs DSH
+`--apply` asks for confirmation unless `ASSUME_YES=1`. Run it as root
+(`sudo ./update.sh --apply`): it writes the root-owned checkout, installs DSH
 globally and restarts the unit.
 
 Every successful update ends with the same health check an install runs
@@ -30,8 +30,8 @@ Every successful update ends with the same health check an install runs
 files an update rewrites — `.env`, the profile patch, the stored credential —
 so a half-applied change is repaired before the next boot instead of surfacing
 as a model call that fails for no visible reason.
-`--self-to` requires the target to be a newer aligned tag and a descendant of the
-running one, and it enforces the same compatibility rule as `--self`: crossing a
+`--to` requires the target to be a newer aligned tag and a descendant of the
+running one, and it enforces the same compatibility rule as `--apply`: crossing a
 DSH line or a product major needs `--i-know-versions-are-incompatible`. The
 updater passes that flag only after its own `/update` check accepted the
 crossing, so an unattended update cannot cross on its own.
@@ -39,11 +39,11 @@ crossing, so an unattended update cannot cross on its own.
 ## Tag convention
 
 Tags match `<dsh>-<major>.<minor>.<patch>`, for example
-`v0.2.1-rc.5-0.8.2`, and the target must be a descendant of the current one:
+`v0.2.1-rc.5-0.9.0`, and the target must be a descendant of the current one:
 
 ```sh
-git tag v0.2.1-rc.5-0.8.2
-git push origin v0.2.1-rc.5-0.8.2
+git tag v0.2.1-rc.5-0.9.0
+git push origin v0.2.1-rc.5-0.9.0
 ```
 
 - Product `0.x` is the compatible line; `1.0.0` marks a break.
@@ -65,7 +65,7 @@ git describe --tags --exact-match   # must print a tag
 Ordering is release-aware (`versionsort.suffix=-rc`); a tag on a side branch is
 skipped because it is not a descendant of the current one.
 
-## What `--self` does
+## What `--apply` does
 
 1. Refuses a dirty tree, fetches tags, resolves **current tag** and the latest
    **compatible target** (`current_tag`, `newer_tags`, `target_tag`).
@@ -101,7 +101,7 @@ The previous release is a tag plus the data snapshot.
   The card's **✖ Cancel** button exists only while it is still draining. A stuck
   session blocks the drain, not the apply. `/system rollback` is a profile
   rollback, not a setup-tag rollback.
-- A host `--self` needs a root shell. The normal path is the updater service,
+- A host `--apply` needs a root shell. The normal path is the updater service,
   which reaches `127.0.0.1:8787` with the token from `.env`. See
   [`LIMITS.md`](LIMITS.md).
 - The updater's code is the checkout it runs. A setup update changes that code

@@ -251,7 +251,7 @@ Options:
   --clean-source         remove the downloaded checkout once installed
   --yes, -y              accept defaults, never prompt
   --check                print the plan and change nothing
-  --doctor, --status     check this deployment and report; change nothing
+  --doctor               check this deployment and report; change nothing
   --fix                  repair what the check can repair (implies --doctor)
   --rotate-key           ask for the provider key again (default: keep the
                          deployed OPENCODE_GO_API_KEY / DEEPSEEK_API_KEY)
@@ -313,7 +313,7 @@ while [ $# -gt 0 ]; do
     --clean-source) CLEAN_SOURCE=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --purge)  PURGE=1; shift ;;
-    --doctor|--status) DOCTOR=1; shift ;;
+    --doctor) DOCTOR=1; shift ;;
     --fix)    FIX=1; shift ;;
     --rotate-key) ROTATE_KEY=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -1622,7 +1622,7 @@ printf '    logs:    journalctl -u dsh.service -f\n'
 if [ -z "$(grep -E '^(OPENCODE_GO_API_KEY|DEEPSEEK_API_KEY)=.+' "$DIR/.env" 2>/dev/null || true)" ]; then
   printf '    key:     none yet — add %s to %s/.env, then systemctl restart dsh\n' "$(provider_key_env "$DSH_PROVIDER")" "$DIR"
 fi
-printf '    update:  /system update all (Telegram) or ./update.sh --self (host)\n'
+printf '    update:  /system update all (Telegram) or ./update.sh --apply (host)\n'
 
 # Self-check after every install, with the summary already printed: the two
 # failures this catches ("model calls stopped working") are only confusing when

@@ -10,7 +10,7 @@ isolation it does and does not give, and the update authority.
 | Unit | User | What it does |
 |---|---|---|
 | `dsh.service` | `dsh` (the service user) | `entrypoint.sh serve` → `supervisor.mjs` → `dsh` |
-| `dsh-updater.service` | `root` | `updater.mjs` on `127.0.0.1:8787`, bearer token; runs `update.sh --self-to` |
+| `dsh-updater.service` | `root` | `updater.mjs` on `127.0.0.1:8787`, bearer token; runs `update.sh --to` |
 
 The runtime is unprivileged. The updater is root because restarting
 `dsh.service` requires it — that is the only reason. The updater has no
@@ -100,8 +100,8 @@ Both paths end in the same script and the same tag policy.
 
 | Trigger | Path |
 |---|---|
-| Telegram `/system update all` | connector → `dsh-updater.service` (127.0.0.1:8787, bearer token) → `update.sh --self-to <tag>` |
-| Host `./update.sh --self` | `update.sh --self` (root) |
+| Telegram `/system update all` | connector → `dsh-updater.service` (127.0.0.1:8787, bearer token) → `update.sh --to <tag>` |
+| Host `./update.sh --apply` | `update.sh --apply` (root) |
 | Telegram `/system update connector` | supervisor → `entrypoint reset-plugin`, profile only |
 
 The apply path:

@@ -2,15 +2,17 @@
 #
 # Move the setup to a release tag; the DSH version moves with it.
 #
-#   ./update.sh --plugin     re-resolve the Telegram adapter from its git ref
-#   ./update.sh --status     what is installed / running / healthy
+#   ./update.sh              what is installed, and is it healthy (same as --status)
+#   ./update.sh --check      what a compatible update would do; change nothing
+#   ./update.sh --apply      latest compatible tag: checkout, install, health gate, rollback
+#   ./update.sh --to <tag>   exact target (used by the updater service)
+#   ./update.sh --tg-connector   re-resolve the pinned Telegram connector
 #   ./update.sh --doctor     full health check; --fix repairs what it can
-#   ./update.sh --self-check # latest compatible tag? change nothing
-#   ./update.sh --self [--i-know-versions-are-incompatible]
-#                            # jump to the latest compatible tag, health gate, rollback
-#   ./update.sh --self-to <tag> [--i-know-versions-are-incompatible]
-#                            # exact target (used by the updater service);
-#                            # crossing a DSH line or a product major needs the flag
+#   ./update.sh --component <name> <enable|disable|configure> [--port N]
+#
+# --yes (or ASSUME_YES=1) skips the confirmation. --check, --apply and --to also
+# accept --i-know-versions-are-incompatible to cross a DSH line or a product
+# major. Deprecated aliases: --self-check, --self, --self-to, --plugin.
 #
 # Run it from this directory (next to VERSION and .env).
 #
@@ -167,7 +169,7 @@ wait_native_healthy() {
 }
 
 # Run a command as the unprivileged runtime user, with the deployment's env.
-# Used by `--plugin` and by the native apply path to run the entrypoint's
+# Used by `--tg-connector` and by the native apply path to run the entrypoint's
 # prepare step without leaving root-owned files in the profile.
 # The systemd unit runs the launcher from /usr/local/bin; a partial install may
 # only have it inside the deployment directory. update.sh used to assume the
@@ -344,7 +346,7 @@ web_ready() {
 
 
 # --- setup repo updates, tag by tag --------------------------------------
-# The setup repo is deployed at release tags, never off main. `--self` moves to
+# The setup repo is deployed at release tags, never off main. `--apply` moves to
 # the latest compatible tag: skipping within the compatible line is allowed, a
 # branch or a tag that is not a descendant is not. Rollback restores the
 # previous checkout and the data snapshot.
@@ -454,8 +456,8 @@ self_update() {
     [ "$target" != "$cur" ] || die "target is already running"
     grep -Fqx -- "$target" <<<"$all" || die "target $target is not a newer aligned tag"
     git merge-base --is-ancestor "$cur" "$target" || die "target $target is not a descendant of $cur"
-    # --self-to is the raw explicit path, but it is not a policy bypass: the same
-    # rule as --self applies unless the caller says it means to cross. The
+    # --to is the raw explicit path, but it is not a policy bypass: the same
+    # rule as --apply applies unless the caller says it means to cross. The
     # updater passes the flag only after its own /update check accepted it.
     if [ "$allow" != 1 ] && [ "$override_allow" != 1 ] &&
        { [ "$(tag_dsh "$target")" != "$(tag_dsh "$cur")" ] || [ "$(tag_major "$target")" != "$(tag_major "$cur")" ]; }; then
@@ -500,7 +502,7 @@ verify() {
   if [ -n "$plugin_warn" ]; then
     warn "the harness reported a plugin problem:"
     printf '%s\n' "$plugin_warn" | sed 's/^/    /'
-    warn "run: ./update.sh --plugin"
+    warn "run: ./update.sh --tg-connector"
     return 1
   fi
   log "no plugin compatibility complaints since this start"
@@ -684,6 +686,16 @@ component_apply() {
 
 if [ "$UPDATE_SOURCED" = 1 ]; then return 0; fi
 
+# --yes is accepted anywhere and means the same as ASSUME_YES=1.
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    --yes|-y) ASSUME_YES=1 ;;
+    *) args+=("$arg") ;;
+  esac
+done
+set -- "${args[@]}"
+
 case "${1:---status}" in
   --status)   status ;;
   --doctor)
@@ -709,29 +721,33 @@ case "${1:---status}" in
     done
     component_apply "$comp_name" "$comp_action" "$comp_port"
     ;;
-  --plugin)
-    log "re-resolving the Telegram adapter"
+  --tg-connector|--plugin)
+    [ "$1" = "--plugin" ] && warn "--plugin is deprecated; use --tg-connector"
+    log "re-resolving the Telegram connector"
     entry="$(entrypoint_bin)" || die "no entrypoint launcher found — reinstall with ./install.sh"
     run_as_service "$entry" reset-plugin
     systemctl restart dsh.service
     wait_native_healthy && verify
     ;;
-  --self-check)
+  --check|--self-check)
+    [ "$1" = "--self-check" ] && warn "--self-check is deprecated; use --check"
     if [ "${2:-}" = "--i-know-versions-are-incompatible" ]; then self_check 1
-    elif [ -n "${2:-}" ]; then die "unknown option for --self-check: ${2}"
+    elif [ -n "${2:-}" ]; then die "unknown option for --check: ${2}"
     else self_check 0; fi
     ;;
-  --self)
+  --apply|--self)
+    [ "$1" = "--self" ] && warn "--self is deprecated; use --apply"
     if [ "${2:-}" = "--i-know-versions-are-incompatible" ]; then self_update 1
-    elif [ -n "${2:-}" ]; then die "unknown option for --self: ${2}"
+    elif [ -n "${2:-}" ]; then die "unknown option for --apply: ${2}"
     else self_update 0; fi
     ;;
-  --self-to)
-    [ -n "${2:-}" ] || die "usage: ./update.sh --self-to <tag> [--i-know-versions-are-incompatible]"
+  --to|--self-to)
+    [ "$1" = "--self-to" ] && warn "--self-to is deprecated; use --to"
+    [ -n "${2:-}" ] || die "usage: ./update.sh --to <tag> [--i-know-versions-are-incompatible]"
     case "${3:-}" in
       "") self_update 0 "$2" 0 ;;
       --i-know-versions-are-incompatible) self_update 0 "$2" 1 ;;
-      *) die "unknown option for --self-to: ${3}" ;;
+      *) die "unknown option for --to: ${3}" ;;
     esac
     ;;
   *)

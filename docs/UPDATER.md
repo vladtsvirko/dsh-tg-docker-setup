@@ -26,7 +26,7 @@ connector (dsh.service, user dsh)
 dsh-updater.service (root, 127.0.0.1:8787)
    ├─ validate token/mode/target
    ├─ send "update started" via Bot API
-   ├─ bash update.sh --self-to <target>
+   ├─ bash update.sh --to <target>
    │    ├─ snapshot data/home + data/supervisor
    │    ├─ checkout target
    │    ├─ install @deepseek-ai/dsh@<DSH part> when it changes
@@ -89,7 +89,7 @@ bump is a break. The product part resets to `0.0.0` on a new DSH alignment.
   `/system update all --i-know-versions-are-incompatible`; it may cross a DSH
   line or product major.
 - `exact`: the updater's explicit target; must be newer than the current tag,
-  never an older one. The apply step (`update.sh --self-to`) additionally
+  never an older one. The apply step (`update.sh --to`) additionally
   refuses a tag that is not a descendant of the running one.
 - `rollback` mode is deliberately not exposed. A failed health gate rolls back
   automatically; a manual tag rollback is a host operation.
@@ -218,7 +218,7 @@ Real stack, disposable setup:
   half-applied checkout; the snapshot and the previous checkout are the recovery
   inputs. A stuck session blocks the drain, not the apply.
 - The updater's **code** is the checkout it runs, but its **unit** is not
-  rewritten by `--self`. A change to the unit needs `sudo ./install.sh --yes`
+  rewritten by `--apply`. A change to the unit needs `sudo ./install.sh --yes`
   (idempotent; it keeps `.env`), not an update.
 - A crash of the updater mid-apply is not automatically resumed. `result.json`,
   the checkout and the snapshot are the recovery inputs.

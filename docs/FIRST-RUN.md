@@ -161,14 +161,14 @@ and recovering from a dead runtime. [LIMITS.md](LIMITS.md) is the exact boundary
 ./install.sh --doctor            # add --fix to repair the safe subset
 
 # update the whole setup (the bot does this too, via /system update all)
-./update.sh --self-check         # what would change
-sudo ./update.sh --self          # check out, install, health gate, automatic rollback
+./update.sh --check         # what would change
+sudo ./update.sh --apply          # check out, install, health gate, automatic rollback
 
 # change a setting: edit .env, then restart (the unit re-reads it on start)
 sudo systemctl restart dsh.service
 ```
 
-`update.sh --self` needs root (`sudo ./update.sh --self`); it writes the
+`update.sh --apply` needs root (`sudo ./update.sh --apply`); it writes the
 root-owned checkout and restarts `dsh.service`.
 
 **Add a project.** Create the workspace (`/workspace new <name>`), then clone

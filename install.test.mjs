@@ -189,7 +189,7 @@ async function canExec(dir) {
   }
 }
 
-test('update.sh --self-to applies natively: checkout, env, restart, health gate', async (t) => {
+test('update.sh --to applies natively: checkout, env, restart, health gate', async (t) => {
   // Stubs live outside the checkout: update.sh refuses a dirty tree.
   const outer = await mkdtemp(join(tmpdir(), 'update-native-apply-'))
   const dir = join(outer, 'repo')
@@ -203,7 +203,7 @@ test('update.sh --self-to applies natively: checkout, env, restart, health gate'
   try {
     await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
     await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.1.18\n')
-    await writeFile(join(dir, '.env'), 'MODE=native\nDSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n')
+    await writeFile(join(dir, '.env'), 'DSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n')
     await writeFile(join(dir, 'data'), '')
     await rm(join(dir, 'data'))
     await mkdir(join(dir, 'data', 'home'), { recursive: true })
@@ -238,8 +238,8 @@ test('update.sh --self-to applies natively: checkout, env, restart, health gate'
     await stub(bins, 'curl', 'printf 200')
     await stub(bins, 'runuser', 'while [ "$1" != "--" ]; do shift; done; shift; exec "$@"')
 
-    const { stdout } = await exec('bash', [join(dir, 'update.sh'), '--self-to', 'v0.2.1-rc.2-0.1.19'], {
-      env: { ...process.env, PATH: `${bins}:${process.env.PATH}`, ASSUME_YES: '1', DSH_ENTRYPOINT: join(bins, 'dsh-entrypoint') },
+    const { stdout } = await exec('bash', [join(dir, 'update.sh'), '--to', 'v0.2.1-rc.2-0.1.19', '--yes'], {
+      env: { ...process.env, PATH: `${bins}:${process.env.PATH}`, DSH_ENTRYPOINT: join(bins, 'dsh-entrypoint') },
       timeout: 30000,
     })
     const calls = await readFile(log, 'utf8')

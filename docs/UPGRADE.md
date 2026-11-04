@@ -33,7 +33,7 @@ part is the prefix of `VERSION`; there is no separate DSH pin to edit.
   tag is fine, and jumps are fine (`0.6.0 → 0.9.1`).
 - **Crossing** a DSH line or a product major needs the explicit flag
   `/system update all --i-know-versions-are-incompatible` (or
-  `./update.sh --self --i-know-versions-are-incompatible`). Neither path crosses
+  `./update.sh --apply --i-know-versions-are-incompatible`). Neither path crosses
   on its own, and the updater refuses targets that are not newer.
 
 ## Upgrading from Telegram
@@ -46,7 +46,7 @@ What happens, in order:
 
 1. The bot reports the drain and waits for every agent to go idle (a web UI turn
    counts too; `/system status` shows who is blocked).
-2. The updater runs `update.sh --self-to <latest compatible tag>` on the host.
+2. The updater runs `update.sh --to <latest compatible tag>` on the host.
 3. The target tag is checked out and the matching DSH installed while the old
    runtime runs; `dsh.service` is restarted, and the new runtime must pass the
    health gate (the unit active **and** the web port answering).
@@ -59,9 +59,9 @@ cancels a running updater job).
 ## Upgrading from the host
 
 ```sh
-sudo ./update.sh --self-check    # what a compatible upgrade would do; changes nothing
-sudo ./update.sh --self          # do it, with the first prompt asking to confirm
-sudo ./update.sh --self-to v0.2.1-rc.5-0.8.0   # an exact target (what the updater uses)
+sudo ./update.sh --check    # what a compatible upgrade would do; changes nothing
+sudo ./update.sh --apply          # do it, with the first prompt asking to confirm
+sudo ./update.sh --to v0.2.1-rc.5-0.8.0   # an exact target (what the updater uses)
 ```
 
 Use this for a broken bot, a first install of the updater, or a deliberate
@@ -83,7 +83,7 @@ install — opens a supervisor **trial**. The bot posts a card with **Commit** a
 - A runtime that never comes up rolls back after `DSH_BOOT_GRACE_SECONDS`
   (120 s), or immediately if it exits.
 
-**A setup upgrade** — `/system update all` or `./update.sh --self` — opens no
+**A setup upgrade** — `/system update all` or `./update.sh --apply` — opens no
 trial and posts no Commit/Roll back card. It has a **health gate** instead: the
 restarted service must be active **and** answer on the web port. If either
 fails, `update.sh` restores the snapshot, checks the previous tag out, rewrites
@@ -110,13 +110,13 @@ Run this once, on a quiet deployment:
 That proves the supervisor, the bot and the trial card. It does **not** exercise
 the setup rollback, which is the updater's health gate, not a trial: to drill
 that one, break a disposable deployment on purpose (a target whose unit cannot
-start, or a web bind that does not answer) and watch `update.sh --self` restore
+start, or a web bind that does not answer) and watch `update.sh --apply` restore
 the previous tag and snapshot and report `rolled back`; the apply path it
 exercises is [`SELF-UPDATE.md`](SELF-UPDATE.md). If the card never arrives, the
 supervisor or its token is misconfigured — fix that before you need a rollback
 for real (`/system status` reports both).
 
-`./update.sh --self-to <current tag>` is **not** a no-op drill: an exact-or-older
+`./update.sh --to <current tag>` is **not** a no-op drill: an exact-or-older
 target is refused on purpose, so the drill has to be the trial above.
 
 ## Upgrading from an older install (0.4.x and before)
@@ -142,7 +142,7 @@ Nothing has to be done by hand:
 | Updater unreachable | token mismatch or the service is down | `systemctl status dsh-updater.service`, `journalctl -u dsh-updater.service` |
 | Half-applied checkout | stopped between checkout and restart | [Manual recovery](#manual-recovery) below |
 
-`--self-to` cannot go backwards: it refuses older tags on purpose, so a manual
+`--to` cannot go backwards: it refuses older tags on purpose, so a manual
 recovery is a host operation.
 
 ### Manual recovery

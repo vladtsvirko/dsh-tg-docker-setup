@@ -40,7 +40,7 @@ session between the two.
 | `docs/HOST.md` | The host deployment: layout, tiers, resource limits, security boundary |
 | `docs/VERSIONS.md` | Version scheme, release coupling and update rules |
 | `docs/UPGRADE.md` | Upgrading, the health gate vs. a trial, and the rollback drill |
-| `docs/SELF-UPDATE.md` | `update.sh --self` in detail |
+| `docs/SELF-UPDATE.md` | `update.sh --apply` in detail |
 | `docs/UPDATER.md` | The privileged updater service |
 | `docs/GIT.md` | Repository access: HTTPS tokens and SSH keys, per host and workspace |
 | `docs/UAT.md` | The acceptance run for a release |
@@ -82,7 +82,7 @@ Run it as a normal user with `sudo` available, or as root. It:
 1. says what it is going to fetch (the newest release tag) and where
    (`/opt/dsh-setup` as root, `~/dsh-setup` otherwise),
 2. downloads that release into a git checkout — which is what makes
-   `update.sh --self` work later,
+   `update.sh --apply` work later,
 3. asks the questions, then shows the plan and asks before changing anything:
    `Proceed? [Y/n]`,
 4. asks what the agent should commit as, and optionally for one or more git
@@ -104,7 +104,7 @@ curl -fsSL …/install.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.8.2`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.9.0`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -217,7 +217,7 @@ agent's memory), and `data/workspace` if you care about its files.
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.8.2
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.9.0
          DSH part          product part
 ```
 
@@ -261,7 +261,7 @@ connector version, runtime version and updater state.
 
 The package name is derived from the ref (or set `DSH_TELEGRAM_PACKAGE`), because
 the patch row, the install check and the version exemption all key off it. After
-changing it, run `sudo ./update.sh --plugin` once — otherwise the previous
+changing it, run `sudo ./update.sh --tg-connector` once — otherwise the previous
 plugin stays installed and two pollers fight over the same token.
 
 ## Operating it
@@ -400,7 +400,7 @@ fails, the snapshot is restored before the runtime comes back.
 updater service to check out, install and start the latest **compatible setup
 tag**, and reports the result to the control chat. If `DSH_UPDATER_TOKEN` is
 empty, the command degrades to diagnostics and prints the host fallback
-(`./update.sh --self-check` / `--self`).
+(`./update.sh --check` / `--apply`).
 
 Scopes:
 
@@ -469,14 +469,18 @@ the updater service, and the updater runs the same host update script. The host
 commands remain the bootstrap, break-glass and deliberate manual path:
 
 ```sh
-./update.sh --status     # setup/DSH version, service health, adapter, HTTP
-./update.sh --doctor     # the same checks ./install.sh --doctor runs
-./update.sh --self-check # latest compatible setup tag, change nothing
-./update.sh --self       # latest compatible tag, health gate, rollback
-./update.sh --plugin     # re-resolve the pinned Telegram adapter
+./update.sh --status       # setup/DSH version, service health, adapter, HTTP
+./update.sh --doctor       # the same checks ./install.sh --doctor runs
+./update.sh --check        # latest compatible setup tag, change nothing
+./update.sh --apply        # latest compatible tag, health gate, rollback
+./update.sh --to <tag>     # exact target (what the updater service uses)
+./update.sh --tg-connector # re-resolve the pinned Telegram connector
 ```
 
-`--self` snapshots `data/home` + `data/supervisor`, checks out the target tag,
+The old spellings (`--self-check`, `--self`, `--self-to`, `--plugin`) still work
+and print a deprecation note.
+
+`--apply` snapshots `data/home` + `data/supervisor`, checks out the target tag,
 installs the matching `dsh` globally, re-runs the entrypoint's prepare step as
 the service user, restarts `dsh.service` and waits for health. On failure it
 restores the snapshot and the previous tag. One `backups/self-*.tgz` is kept.
@@ -508,13 +512,13 @@ outside the tested row is a compatibility event, not a normal update.
 
 ### Staying on latest safely
 
-Each setup release derives its DSH version from `VERSION`. `--self-check` tells
-you when a compatible tag moves; `--self` applies it with a health gate and a
+Each setup release derives its DSH version from `VERSION`. `--check` tells
+you when a compatible tag moves; `--apply` applies it with a health gate and a
 one-step rollback. `ASSUME_YES=1` makes it unattended:
 
 ```cron
 # Monday 04:17 — apply the latest compatible setup tag
-17 4 * * 1 cd /srv/dsh && ASSUME_YES=1 ./update.sh --self >> /var/log/dsh-update.log 2>&1 || \
+17 4 * * 1 cd /srv/dsh && ASSUME_YES=1 ./update.sh --apply >> /var/log/dsh-update.log 2>&1 || \
   echo "dsh update failed" | mail -s "dsh" you@example.com
 ```
 
@@ -543,7 +547,7 @@ full list is in [`docs/LIMITS.md`](docs/LIMITS.md).
 |---|---|---|
 | Service restarts, log shows permission denied on `data/` | data owned by root | `sudo chown -R dsh:dsh /srv/dsh/data`, `sudo systemctl restart dsh.service` |
 | `dsh.service` fails at boot | bad unit or missing Node | `journalctl -u dsh.service -n 60`; `./install.sh --doctor` |
-| `adapter install failed` in log | no egress during first boot, or the version gate | `journalctl -u dsh.service \| grep -i plugin`; `sudo ./update.sh --plugin` |
+| `adapter install failed` in log | no egress during first boot, or the version gate | `journalctl -u dsh.service \| grep -i plugin`; `sudo ./update.sh --tg-connector` |
 | Web UI 200 but API calls 403 | opened the bare origin instead of the `?token=` URL | use the URL from the log, or set `DSH_PUBLIC_URL` |
 | `failed to bind …: cannot assign requested address` | `DSH_BIND_IP` isn't an address of this host | fix `.env`, `sudo systemctl restart dsh.service` |
 | UI loads but keeps saying **reconnecting** | the browser dials an address it cannot reach | set `DSH_PUBLIC_URL` to the root you actually use |

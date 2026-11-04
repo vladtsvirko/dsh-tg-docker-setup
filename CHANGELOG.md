@@ -7,7 +7,7 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
-## 0.2.1-rc.5-0.8.2
+## 0.2.1-rc.5-0.9.0
 
 Fixes the 0.8.1 tag build and one installer gap it exposed.
 

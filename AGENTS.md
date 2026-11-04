@@ -3,8 +3,8 @@
 The setup repo ships one aligned release together with DSH and the connector:
 
 ```
-VERSION:      0.2.1-rc.5-0.8.2
-git tag:      v0.2.1-rc.5-0.8.2
+VERSION:      0.2.1-rc.5-0.9.0
+git tag:      v0.2.1-rc.5-0.9.0
 Dockerfile:   (none — the DSH part is derived from VERSION)
 ```
 
@@ -21,7 +21,7 @@ Dockerfile:   (none — the DSH part is derived from VERSION)
   releases.
 - Different product major **or a different DSH part**: only with the explicit
   `--i-know-versions-are-incompatible` flag. Both `/system update all` and
-  `update.sh --self` accept it; neither crosses without it.
+  `update.sh --apply` accept it; neither crosses without it.
 - Tags are immutable. `VERSION`, the tag, the `AGENTS.md` example and the
   connector tag move together.
 - Every setup release needs a **matching connector tag**, including a setup-only
@@ -47,8 +47,8 @@ Dockerfile:   (none — the DSH part is derived from VERSION)
    checklist.
 
 `/system update all` is the normal no-SSH path: it drains agents, then the
-`updater` service runs `update.sh --self-to <target>`, which checks out,
+`updater` service runs `update.sh --to <target>`, which checks out,
 installs and restarts the service, and rolls back on a failed health gate. The
-host `./update.sh --self` path remains for bootstrap, break-glass, or a
+host `./update.sh --apply` path remains for bootstrap, break-glass, or a
 deliberate manual update. The runtime has no privileged access; the updater is
 the only component that restarts it.

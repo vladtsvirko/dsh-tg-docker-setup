@@ -270,9 +270,9 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
     let output = ''
     let child
     try {
-      // --self-to enforces the compatibility policy too; this flag is the
+      // --to enforces the compatibility policy too; this flag is the
       // updater's explicit assertion that /update already accepted the crossing.
-      const args = ['update.sh', '--self-to', job.target]
+      const args = ['update.sh', '--to', job.target]
       if (crossesCompat(job.from, job.target)) args.push('--i-know-versions-are-incompatible')
       child = spawn('bash', args, {
         cwd: repo,
