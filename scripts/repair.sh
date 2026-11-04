@@ -377,7 +377,7 @@ check_service() {
   if systemctl is-active --quiet dsh-updater.service 2>/dev/null; then
     ok service "dsh-updater.service is active"
   else
-    warns service "dsh-updater.service is not active — /system update all will be unavailable"
+    warns service "dsh-updater.service is not active — /system update setup will be unavailable"
   fi
 }
 

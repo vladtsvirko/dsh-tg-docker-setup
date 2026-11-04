@@ -1589,7 +1589,7 @@ native_apply() {
     run systemctl enable dsh-updater.service
     run systemctl restart dsh-updater.service
   else
-    warn "no updater token — /system update all will degrade to host instructions"
+    warn "no updater token — /system update setup will degrade to host instructions"
   fi
 
   log "waiting for health"
@@ -1622,7 +1622,7 @@ printf '    logs:    journalctl -u dsh.service -f\n'
 if [ -z "$(grep -E '^(OPENCODE_GO_API_KEY|DEEPSEEK_API_KEY)=.+' "$DIR/.env" 2>/dev/null || true)" ]; then
   printf '    key:     none yet — add %s to %s/.env, then systemctl restart dsh\n' "$(provider_key_env "$DSH_PROVIDER")" "$DIR"
 fi
-printf '    update:  /system update all (Telegram) or ./update.sh --apply (host)\n'
+printf '    update:  /system update setup (Telegram) or ./update.sh --apply (host)\n'
 
 # Self-check after every install, with the summary already printed: the two
 # failures this catches ("model calls stopped working") are only confusing when
@@ -1646,7 +1646,7 @@ if [ -n "${DSH_BOOTSTRAP_SOURCE:-}" ] && [ -d "$DSH_BOOTSTRAP_SOURCE" ]; then
     case "$origin" in
       "$source_abs"|"$source_abs"/*)
         # The deployment updates from the download: removing it would cut
-        # /system update all off from new releases.
+        # /system update setup off from new releases.
         printf '    note:    %s is the source this deployment updates from — keep it\n' "$source_abs"
         ;;
       *)

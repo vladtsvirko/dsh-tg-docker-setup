@@ -7,6 +7,16 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.9.3
+
+Cleanup release; no behaviour change.
+
+- The installer plan, repair warning and updater comment no longer say
+  `/system update all`; the command is `/system update setup`.
+- Penpot plugin pinned at `v0.1.2` (docs-only: `/system components`).
+- A stale comment in `updater.mjs` and a test comment still described Docker
+  mode; both removed.
+
 ## 0.2.1-rc.5-0.9.2
 
 Connector fix for the dashboard card; the setup pin moves with it.

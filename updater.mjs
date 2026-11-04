@@ -680,7 +680,7 @@ if (isCli) {
   const token = process.env.DSH_UPDATER_TOKEN ?? ''
   const botToken = process.env.DSH_TELEGRAM_BOT_TOKEN ?? ''
   const port = Number(process.env.DSH_UPDATER_PORT ?? 8787)
-  // Docker mode publishes no port at all (ops network only). Native mode runs
+  // The runtime runs on the host and binds DSH_BIND_IP directly.
   // on the host, so it pins the listener to loopback explicitly.
   const host = process.env.DSH_UPDATER_HOST ?? '0.0.0.0'
   const app = createUpdater({ repo, dataDir, botToken, token, apply: true, refreshTags: () => fetchTags(repo) })

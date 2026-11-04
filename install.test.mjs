@@ -106,7 +106,7 @@ test('a config file cannot smuggle in an unknown key', async () => {
 
 // --- firewall advisory ----------------------------------------------------
 // ufw gates a native service and never gates a published Docker port, so the
-// plan says nothing in docker mode and names the exact rule in native mode.
+// plan names the exact firewall rule the updater would run.
 
 /** Stub `ufw` (and `sudo`, which may not be installed for the test user). */
 async function withUfw(statusText, fn) {

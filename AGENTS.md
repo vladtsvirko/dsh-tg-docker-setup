@@ -3,8 +3,8 @@
 The setup repo ships one aligned release together with DSH and the connector:
 
 ```
-VERSION:      0.2.1-rc.5-0.9.2
-git tag:      v0.2.1-rc.5-0.9.2
+VERSION:      0.2.1-rc.5-0.9.3
+git tag:      v0.2.1-rc.5-0.9.3
 Dockerfile:   (none — the DSH part is derived from VERSION)
 ```
 
