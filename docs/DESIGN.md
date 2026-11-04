@@ -7,8 +7,8 @@ a browser.
 The stack is **opt-in** and separate from the runtime:
 
 ```
-runtime (penpot CLI) ──HTTP──► design-frontend ──► design-backend ──► postgres / redis
-                                     └───────────► design-exporter
+runtime (penpot CLI) ──HTTP──► penpot-frontend ──► penpot-backend ──► postgres / redis
+                                     └───────────► penpot-exporter
 ```
 
 The runtime calls the frontend on its published address
@@ -120,7 +120,7 @@ operations, and reimplementing that is a project, not a wrapper.
 - `design/data/postgres` — the design database.
 - `design/data/assets` — uploaded images and fonts.
 - Backup: stop the stack and copy `design/data/`, or `pg_dump` from the
-  `design-postgres` service.
+  `penpot-postgres` service.
 
 ```sh
 (cd design && podman-compose -f compose.yaml down)

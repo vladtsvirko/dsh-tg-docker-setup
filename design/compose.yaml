@@ -10,8 +10,8 @@
 # runtime reaches it with the `penpot` CLI over that address.
 x-penpot: &penpot
   PENPOT_PUBLIC_URI: http://${DSH_BIND_IP:-127.0.0.1}:${DSH_DESIGN_PORT:-8090}
-  PENPOT_DATABASE_URI: postgresql://penpot:${PENPOT_DB_PASSWORD:?set PENPOT_DB_PASSWORD}@design-postgres:5432/penpot
-  PENPOT_REDIS_URI: redis://design-redis:6379/0
+  PENPOT_DATABASE_URI: postgresql://penpot:${PENPOT_DB_PASSWORD:?set PENPOT_DB_PASSWORD}@penpot-postgres:5432/penpot
+  PENPOT_REDIS_URI: redis://penpot-redis:6379/0
   PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY:?set PENPOT_SECRET_KEY}
   # Registration is on so the first account can be created; email verification is
   # off because a LAN instance has no SMTP. Access tokens are what the agent CLI
@@ -24,7 +24,7 @@ x-penpot: &penpot
   PENPOT_TELEMETRY_ENABLED: "false"
 
 services:
-  design-postgres:
+  penpot-postgres:
     image: docker.io/library/postgres:15
     restart: unless-stopped
     environment:
@@ -41,18 +41,18 @@ services:
       timeout: 5s
       retries: 10
 
-  design-redis:
+  penpot-redis:
     image: docker.io/library/redis:7.2
     restart: unless-stopped
     networks: [design]
 
-  design-backend:
+  penpot-backend:
     image: docker.io/penpotapp/backend:2.18
     restart: unless-stopped
     depends_on:
-      design-postgres:
+      penpot-postgres:
         condition: service_healthy
-      design-redis:
+      penpot-redis:
         condition: service_started
     environment:
       <<: *penpot
@@ -62,22 +62,22 @@ services:
       - ./data/assets:/opt/data/assets
     networks: [design]
 
-  design-exporter:
+  penpot-exporter:
     image: docker.io/penpotapp/exporter:2.18
     restart: unless-stopped
-    depends_on: [design-redis]
+    depends_on: [penpot-redis]
     environment:
-      PENPOT_PUBLIC_URI: http://design-frontend:8080
-      PENPOT_REDIS_URI: redis://design-redis:6379/0
+      PENPOT_PUBLIC_URI: http://penpot-frontend:8080
+      PENPOT_REDIS_URI: redis://penpot-redis:6379/0
       PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY:?set PENPOT_SECRET_KEY}
       PENPOT_BROWSER_CHROMIUM: "true"
       PENPOT_BROWSER_HEADLESS: "true"
     networks: [design]
 
-  design-frontend:
+  penpot-frontend:
     image: docker.io/penpotapp/frontend:2.18
     restart: unless-stopped
-    depends_on: [design-backend, design-exporter]
+    depends_on: [penpot-backend, penpot-exporter]
     environment:
       <<: *penpot
     ports:

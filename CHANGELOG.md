@@ -7,6 +7,18 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.10.7
+
+### Fixed
+
+- **Penpot's compose services use the names its images expect.** The frontend
+  nginx config hardcodes `penpot-backend` and `penpot-exporter`; our Podman
+  migration had renamed the services to `design-*`, so nginx failed with
+  `host not found in upstream "penpot-backend"` and the stack never listened on
+  8090. The services are now `penpot-postgres`, `penpot-redis`,
+  `penpot-backend`, `penpot-exporter`, `penpot-frontend`, matching the upstream
+  images and their internal URIs.
+
 ## 0.2.1-rc.5-0.10.6
 
 ### Fixed
