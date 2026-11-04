@@ -7,6 +7,16 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.9.2
+
+Connector fix for the dashboard card; the setup pin moves with it.
+
+- The dashboard **Status** button now shows a workspace/runtime summary
+  (sessions, model route, poller, timezone); **Sessions** lists the sessions.
+  Both used to return the same dashboard text because `/status` without a
+  session was treated as `/sessions` on that surface.
+- `/status` on the dashboard no longer prints the session list; docs updated.
+
 ## 0.2.1-rc.5-0.9.1
 
 Docs and command names follow the native-only deployment.
