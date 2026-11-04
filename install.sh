@@ -212,6 +212,10 @@ GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-}"
 GIT_PROVIDER="${GIT_PROVIDER:-}"
 GIT_TOKEN="${GIT_TOKEN:-}"
 GIT_HOST="${GIT_HOST:-}"
+GIT_AUTH="${GIT_AUTH:-}"
+GIT_KEY="${GIT_KEY:-}"
+GIT_KNOWN_HOSTS="${GIT_KNOWN_HOSTS:-}"
+GIT_PROFILES_FILE="${GIT_PROFILES_FILE:-}"
 INSTALL_DOCKER="${INSTALL_DOCKER:-}"
 DSH_UPDATER_TOKEN="${DSH_UPDATER_TOKEN:-}"
 DESIGN="${DESIGN:-}"
@@ -263,7 +267,8 @@ EOF
 # Strict KEY=VALUE parsing: no sourcing, so a config file cannot execute code.
 CONFIG_KEYS="MODE TIER DIR SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL
 DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT PROVIDER_KEY
-DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN GIT_HOST"
+DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN GIT_HOST
+GIT_AUTH GIT_KEY GIT_KNOWN_HOSTS GIT_PROFILES_FILE"
 load_config() {
   local file="$1" line key value
   [ -f "$file" ] || die "no config file: $file"
@@ -357,7 +362,7 @@ ask() {
 }
 
 ask_secret() {
-  local var="$1" prompt="$2" blank="${3:-disabled}" current answer
+  local var="$1" prompt="$2" blank="${3-disabled}" current answer
   current="${!var:-}"
   if [ -n "$current" ] || ! can_ask; then
     [ -n "$current" ] || printf -v "$var" '%s' ''
@@ -381,6 +386,190 @@ detect_lan_ip() {
   fi
   [ -n "$ip" ] || ip="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | head -n1 || true)"
   printf '%s\n' "${ip:-127.0.0.1}"
+}
+
+# --- repository access: accounts and the manifest --------------------------
+# One install can hold several git accounts (GitHub, GitLab, a self-hosted
+# forge). One account is written as `default` (the historical shape); two or
+# more become host-scoped entries so a token for one forge is never offered to
+# another. scripts/git-manifest.mjs does the merge, so a repair adds accounts
+# instead of replacing the file.
+json_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+GIT_ENTRIES_JSON=""
+
+# A preset host, or empty for providers that must be told.
+git_preset_host() {
+  case "$1" in
+    github) printf 'github.com' ;;
+    gitlab) printf 'gitlab.com' ;;
+    *) printf '' ;;
+  esac
+}
+
+# Resolve a key/known_hosts answer: a bare name lives in secrets/git, an
+# absolute path is used as given.
+git_secret_path() {
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *) printf '%s/secrets/git/%s' "$DIR" "$1" ;;
+  esac
+}
+
+# git_add_entry <provider> <host> <auth> <token> <key> <known_hosts>
+git_add_entry() {
+  local entry
+  entry="{\"provider\":\"$(json_escape "$1")\",\"host\":\"$(json_escape "$2")\",\"auth\":\"$(json_escape "$3")\""
+  if [ "$3" = https ]; then
+    entry="$entry,\"token\":\"$(json_escape "$4")\"}"
+  else
+    entry="$entry,\"key\":\"$(json_escape "$5")\",\"known_hosts\":\"$(json_escape "$6")\"}"
+  fi
+  if [ -z "$GIT_ENTRIES_JSON" ]; then
+    GIT_ENTRIES_JSON="[$entry]"
+  else
+    GIT_ENTRIES_JSON="${GIT_ENTRIES_JSON%]},$entry]"
+  fi
+}
+
+ask_git_accounts() {
+  local provider host auth token key known more first=1
+  [ -z "$GIT_PROFILES_FILE" ] || return 0
+  # A repair adds to what is there; say what that is, so "none" is an informed
+  # choice rather than a silent skip.
+  if [ -f "$DIR/secrets/git/profiles.json" ] && command -v node >/dev/null 2>&1; then
+    existing="$(node -e 'const m=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); const h=[]; if(m.default) h.push(m.default.host||m.default.provider); for (const k of Object.keys(m.hosts||{})) h.push(k); console.log(h.join(", "))' "$DIR/secrets/git/profiles.json" 2>/dev/null || true)"
+    [ -n "$existing" ] && printf '    existing git accounts: %s\n' "$existing" >&2
+  fi
+  ask GIT_PROVIDER "Repository access for the agent — git host (github/gitlab/gitea/forgejo/self-hosted/none)" none
+  case "$GIT_PROVIDER" in
+    ""|none|None) GIT_PROVIDER=""; return 0 ;;
+    github|gitlab|gitea|forgejo|self-hosted) ;;
+    *) warn "unknown git provider '$GIT_PROVIDER' — skipping repository access"; GIT_PROVIDER=""; return 0 ;;
+  esac
+  more=1
+  while [ "$more" = 1 ]; do
+    provider="$GIT_PROVIDER"
+    if [ "$first" != 1 ]; then
+      # A second account starts from blank answers, not the previous token or
+      # the previous "yes, add another" (which would otherwise loop forever).
+      GIT_HOST="" GIT_AUTH="" GIT_TOKEN="" GIT_KEY="" GIT_KNOWN_HOSTS=""
+      GIT_ADD_MORE="" GIT_USE_GH="" GIT_GENERATE=""
+    fi
+    first=0
+    host="$(git_preset_host "$provider")"
+    case "$provider" in
+      gitea|forgejo|self-hosted)
+        ask GIT_HOST "Host name (for example git.example.com)" ""
+        host="$GIT_HOST"
+        [ -n "$host" ] || { warn "no host given — skipping this account"; provider=""; }
+        ;;
+    esac
+    if [ -n "$provider" ]; then
+      ask GIT_AUTH "Authentication (https/ssh)" "https"
+      case "$GIT_AUTH" in
+        https|HTTPS) auth=https ;;
+        ssh|SSH) auth=ssh ;;
+        *) warn "unknown auth '$GIT_AUTH' — skipping this account"; provider="" ;;
+      esac
+    fi
+    if [ -n "$provider" ] && [ "$auth" = https ]; then
+      token=""
+      # GitHub has more than one way to get a token: a PAT, or the one the
+      # GitHub CLI already stores. Offer the CLI when it is logged in.
+      if [ "$provider" = github ] && command -v gh >/dev/null 2>&1 && gh auth token >/dev/null 2>&1; then
+        ask GIT_USE_GH "Use the token from 'gh auth login'? (y/N)" n
+        case "$GIT_USE_GH" in y|Y|yes|Yes) token="$(gh auth token 2>/dev/null || true)" ;; esac
+      fi
+      if [ -z "$token" ]; then
+        ask_secret GIT_TOKEN "Access token for $provider (blank = skip this account)" ""
+        token="$GIT_TOKEN"
+      fi
+      if [ -n "$token" ]; then
+        git_add_entry "$provider" "$host" https "$token" "" ""
+        log "repository access: $provider over HTTPS ($host)"
+      else
+        warn "no token — $provider skipped"
+      fi
+    elif [ -n "$provider" ]; then
+      ask GIT_KEY "Private key (name under secrets/git, or absolute path)" "${provider}_ed25519"
+      ask GIT_KNOWN_HOSTS "known_hosts (name under secrets/git, or absolute path)" "known_hosts"
+      key="$(git_secret_path "$GIT_KEY")"
+      known="$(git_secret_path "$GIT_KNOWN_HOSTS")"
+      case "$GIT_KEY" in /*)
+        [ "$MODE" = docker ] && warn "an absolute key path is outside /run/secrets and will not be visible in the container"
+      ;; esac
+      if [ ! -f "$key" ] && command -v ssh-keygen >/dev/null 2>&1; then
+        ask GIT_GENERATE "No key at $key — generate an ed25519 key now? (y/N)" n
+        case "$GIT_GENERATE" in
+          y|Y|yes|Yes)
+            mkdir -p "$(dirname "$key")" && chmod 700 "$(dirname "$key")" 2>/dev/null || true
+            if ssh-keygen -q -t ed25519 -N '' -C "${GIT_AUTHOR_EMAIL:-dsh}" -f "$key" >/dev/null 2>&1; then
+              chmod 600 "$key" 2>/dev/null || true
+              log "generated $key"
+              printf '    public key — add it to %s as a deploy key:\n' "$host"
+              sed 's/^/      /' "$key.pub" 2>/dev/null || true
+            else
+              warn "ssh-keygen failed — create $key yourself"
+            fi
+          ;;
+        esac
+      fi
+      [ -f "$key" ] || warn "no private key at $key — SSH to $host will fail until it exists"
+      [ -f "$known" ] || warn "no known_hosts at $known — create it with: ssh-keyscan $host >> $known"
+      git_add_entry "$provider" "$host" ssh "" "$GIT_KEY" "$GIT_KNOWN_HOSTS"
+      log "repository access: $provider over SSH ($host)"
+    fi
+    ask GIT_ADD_MORE "Add another git account? (y/N)" n
+    case "$GIT_ADD_MORE" in
+      y|Y|yes|Yes)
+        GIT_PROVIDER=""
+        ask GIT_PROVIDER "Next git host (github/gitlab/gitea/forgejo/self-hosted)" github
+        case "$GIT_PROVIDER" in
+          github|gitlab|gitea|forgejo|self-hosted) ;;
+          *) warn "unknown git provider '$GIT_PROVIDER' — stopping"; more=0 ;;
+        esac
+      ;;
+      *) more=0 ;;
+    esac
+  done
+}
+
+# Write (or merge) the manifest. A manifest copied from GIT_PROFILES_FILE wins
+# outright: that is the unattended path for several accounts.
+write_git_manifest() {
+  local file="$DIR/secrets/git/profiles.json" owner args=()
+  if [ -n "$GIT_PROFILES_FILE" ]; then
+    [ -f "$GIT_PROFILES_FILE" ] || die "GIT_PROFILES_FILE not found: $GIT_PROFILES_FILE"
+    command -v node >/dev/null 2>&1 || die "node is required to validate GIT_PROFILES_FILE"
+    node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' "$GIT_PROFILES_FILE" 2>/dev/null \
+      || die "GIT_PROFILES_FILE is not valid JSON: $GIT_PROFILES_FILE"
+    mkdir -p "$DIR/secrets/git" && chmod 700 "$DIR/secrets/git" 2>/dev/null || true
+    cp "$GIT_PROFILES_FILE" "$file" || die "cannot write $file"
+    chmod 600 "$file" 2>/dev/null || true
+    log "git repository access: manifest copied from $GIT_PROFILES_FILE"
+  elif [ -n "$GIT_ENTRIES_JSON" ]; then
+    command -v node >/dev/null 2>&1 || die "node is required to write the git manifest"
+    mkdir -p "$DIR/secrets/git" && chmod 700 "$DIR/secrets/git" 2>/dev/null || true
+    args=(--file "$file")
+    [ -f "$file" ] && args+=(--merge)
+    if [ -n "$GIT_AUTHOR_NAME" ] && [ -n "$GIT_AUTHOR_EMAIL" ]; then
+      args+=(--name "$GIT_AUTHOR_NAME" --email "$GIT_AUTHOR_EMAIL")
+    fi
+    printf '%s' "$GIT_ENTRIES_JSON" | node "$SRC_DIR/scripts/git-manifest.mjs" "${args[@]}" \
+      || die "cannot write $file"
+    log "git repository access: $file"
+  else
+    return 0
+  fi
+  if [ "$MODE" = native ]; then
+    owner="$SERVICE_USER:$SERVICE_USER"
+  else
+    owner="${SUDO_UID:-$(id -u)}:${SUDO_GID:-$(id -g)}"
+  fi
+  chown -R "$owner" "$DIR/secrets" 2>/dev/null || true
 }
 
 # --- firewall advisory (native only) ---------------------------------------
@@ -804,23 +993,8 @@ if [ "$CHECK" != 1 ]; then
   if [ -n "$GIT_AUTHOR_NAME" ]; then
     ask GIT_AUTHOR_EMAIL "Git author email" "$default_git_email"
   fi
-  # Repository access: a token in a profile is what lets the agent clone and
-  # push private repositories. See docs/GIT.md.
-  ask GIT_PROVIDER "Git host for the agent's token (github/gitlab/gitea/forgejo/self-hosted/none)" none
-  case "$GIT_PROVIDER" in
-    ""|none|None) GIT_PROVIDER="" ;;
-    github|gitlab|gitea|forgejo|self-hosted) ;;
-    *) warn "unknown git provider '$GIT_PROVIDER' — skipping repository access"; GIT_PROVIDER="" ;;
-  esac
-  if [ -n "$GIT_PROVIDER" ]; then
-    if [ "$GIT_PROVIDER" = self-hosted ] && [ -z "$GIT_HOST" ]; then
-      ask GIT_HOST "Git host name (for example git.example.com)" ""
-      [ -n "$GIT_HOST" ] || { warn "no host given — skipping repository access"; GIT_PROVIDER=""; }
-    fi
-  fi
-  if [ -n "$GIT_PROVIDER" ]; then
-    ask_secret GIT_TOKEN "Access token for $GIT_PROVIDER (blank = skip)" ""
-  fi
+  # Repository access: one or more git accounts. See docs/GIT.md.
+  ask_git_accounts
   ask DESIGN "Install the Penpot design stack? (docker/none)" none
   if [ "$DESIGN" = docker ]; then
     ask DSH_DESIGN_PORT "Penpot port" 8090
@@ -1083,25 +1257,6 @@ write_git_identity() {
   log "git identity: $GIT_AUTHOR_NAME <$GIT_AUTHOR_EMAIL>"
 }
 
-# The manifest writer is a sourced helper: it is testable on its own, and it is
-# the same file docs/GIT.md describes.
-# shellcheck source=scripts/git-profile.sh
-. "$SRC_DIR/scripts/git-profile.sh"
-
-write_git_profile() {
-  [ -n "$GIT_PROVIDER" ] && [ -n "$GIT_TOKEN" ] || return 0
-  local owner file
-  if [ "$MODE" = native ]; then
-    owner="$SERVICE_USER:$SERVICE_USER"
-  else
-    owner="${SUDO_UID:-$(id -u)}:${SUDO_GID:-$(id -g)}"
-  fi
-  file="$(git_profile_write "$DIR/secrets/git" "$owner" "$GIT_PROVIDER" "$GIT_HOST" \
-    "$GIT_TOKEN" "$GIT_AUTHOR_NAME" "$GIT_AUTHOR_EMAIL")" ||
-    die "cannot write $DIR/secrets/git/profiles.json"
-  log "git repository access: $GIT_PROVIDER token written to $file"
-}
-
 # --- shared: write the deployment .env -------------------------------------
 set_env() {
   local key="$1" value="$2" file="$3" tmp
@@ -1347,7 +1502,7 @@ docker_apply() {
   set_env DSH_UID "${SUDO_UID:-$(id -u)}" "$DIR/.env"
   set_env DSH_GID "${SUDO_GID:-$(id -g)}" "$DIR/.env"
   write_git_identity
-  write_git_profile
+  write_git_manifest
   log "building the image (first build downloads DSH; a few minutes)"
   run docker compose build
   log "starting"
@@ -1470,6 +1625,9 @@ link_bins() {
   run ln -sf "$DIR/supervisor.mjs" /usr/local/bin/dsh-supervisor
   run ln -sf "$DIR/healthcheck.sh" /usr/local/bin/dsh-healthcheck
   run ln -sf "$DIR/updater.mjs" /usr/local/bin/dsh-updater.mjs
+  # The entrypoint runs this by absolute path. Without the link a native install
+  # boots with no git credentials at all (and warns once per start).
+  run ln -sf "$DIR/git-credentials.mjs" /usr/local/bin/dsh-git-credentials.mjs
   run ln -sf "$DIR/design/penpot.mjs" /usr/local/bin/penpot
 }
 
@@ -1536,7 +1694,7 @@ native_apply() {
   run chown root:"$SERVICE_USER" "$DIR/.env"
   run chmod 640 "$DIR/.env"
   write_git_identity
-  write_git_profile
+  write_git_manifest
 
   native_units
 

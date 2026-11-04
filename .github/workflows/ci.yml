@@ -35,8 +35,8 @@ jobs:
       - name: Update-path tests
         run: node --test update.test.mjs
 
-      - name: Git profile tests
-        run: node --test git-profile.test.mjs
+      - name: Git manifest tests
+        run: node --test git-manifest.test.mjs
 
       - name: Doctor and credential tests
         run: node --test repair.test.mjs

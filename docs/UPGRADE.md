@@ -27,7 +27,7 @@ and the connector tag are always identical.
 ## Which upgrades are allowed
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.6.5
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.7.0
 ```
 
 - **Compatible** (the default): same DSH part, same product major. Any newer
@@ -61,7 +61,7 @@ updater job).
 ```sh
 ./update.sh --self-check    # what a compatible upgrade would do; changes nothing
 ./update.sh --self          # do it, with the first prompt asking to confirm
-./update.sh --self-to v0.2.1-rc.5-0.6.5   # an exact target (what the updater uses)
+./update.sh --self-to v0.2.1-rc.5-0.7.0   # an exact target (what the updater uses)
 ```
 
 Use this for a broken bot, a first install of the updater, or a deliberate

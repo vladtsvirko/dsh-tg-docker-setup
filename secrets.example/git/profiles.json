@@ -8,5 +8,6 @@
       "email": "you@example.com"
     }
   },
+  "hosts": {},
   "projects": {}
 }

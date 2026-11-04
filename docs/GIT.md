@@ -9,11 +9,14 @@ credentials. There is no per-user isolation inside one container — see
 
 What you get:
 
-- a **default** profile for every workspace;
+- a **default** profile, or **host-scoped accounts** — one token or key per forge,
+  so a GitHub token is never offered to GitLab;
 - optional **per-workspace** overrides (keyed by the directory name under
   `/data/workspace`);
 - HTTPS tokens **or** SSH keys, for GitHub, GitLab, Gitea/Forgejo and any
   self-hosted host;
+- several accounts at once, added interactively by the installer and merged into
+  the manifest on a repair run;
 - per-profile commit identity (`user.name` / `user.email`).
 
 The configuration is generated from one JSON manifest into
@@ -38,15 +41,27 @@ volumes:
   - ./secrets:/run/secrets:ro
 ```
 
-The installer can write it for you: it asks for the git author and, optionally,
-for a provider and a token, and writes `secrets/git/profiles.json` (0600, owned by
-the runtime user) with that identity and token. Native installs keep the same file
-inside the deployment (`<dir>/secrets/git`) and point `DSH_GIT_SECRETS` at it.
+The installer writes it for you. It asks for the git author, then for as many
+accounts as you want:
 
-What the installer writes is deliberately the simple half: **one HTTPS `default`
-profile**. SSH keys, `token_file`, per-workspace profiles and custom hosts are
-manifest-only — write those by hand, the installer will not overwrite a manifest
-it did not generate with those fields.
+- the host (`github`, `gitlab`, `gitea`, `forgejo`, `self-hosted`);
+- HTTPS or SSH;
+- for HTTPS, a token — or, when `gh auth login` has run, the token the GitHub CLI
+  already stores;
+- for SSH, the key and `known_hosts` names under `secrets/git`, with an offer to
+  generate an ed25519 key and print its public half for the deploy-key page.
+
+One account is written as `default` (the historical shape); two or more become
+`hosts` entries. Re-running the installer **merges**: existing accounts and
+`projects` are kept, and an account for a host that is already configured
+replaces that host's entry. The file is `secrets/git/profiles.json` (0600, owned
+by the runtime user); native installs keep it inside the deployment
+(`<dir>/secrets/git`) and point `DSH_GIT_SECRETS` at it.
+
+Unattended: `GIT_PROFILES_FILE=/path/profiles.json` copies a ready manifest
+instead of prompting; the keys it references must be in `secrets/git/` (or at
+the absolute paths it names). `token_file`, per-workspace profiles and unusual
+usernames are still manifest-only; the installer leaves `projects` alone.
 
 Create it by hand instead, from the example:
 
@@ -74,6 +89,19 @@ After that, manifest changes need no rebuild — regenerate or restart (below).
     "auth": "https",
     "token": "github_pat_...",
     "identity": { "name": "Vlad", "email": "you@example.com" }
+  },
+  "hosts": {
+    "gitlab.com": {
+      "provider": "gitlab",
+      "auth": "https",
+      "token": "glpat-..."
+    },
+    "git.example.com": {
+      "provider": "gitea",
+      "auth": "ssh",
+      "key": "team_ed25519",
+      "known_hosts": "known_hosts"
+    }
   },
   "projects": {
     "web-app": {
@@ -117,6 +145,28 @@ After that, manifest changes need no rebuild — regenerate or restart (below).
 | `key` | SSH only | private key path |
 | `known_hosts` | SSH only | verified host keys; required |
 | `identity.name` / `identity.email` | no | commit author inside that workspace |
+
+### One account or several
+
+`default` is the fallback for every host. `hosts` holds one account per host,
+and is what the installer writes as soon as you add a second one:
+
+- **HTTPS host entries** get their own `[credential "https://<host>"]` section.
+  The empty `helper =` in that section clears the default helper for that host,
+  so the token files never cross.
+- **SSH host entries** cannot be expressed as one `core.sshCommand`, so the
+  generator writes `~/.dsh/git/ssh-wrapper.sh` and points `core.sshCommand` at
+  it. The wrapper reads the host out of Git's ssh arguments, picks that host's
+  key, and falls through to plain `ssh` (and therefore your own
+  `~/.ssh/config`) for anything not configured. It is `0700` and regenerated on
+  every boot.
+- A host in both `default` and `hosts` uses the `hosts` entry: it is more
+  specific and appears later in the generated config.
+- `projects` still wins over both for repositories under that workspace
+  directory, including its own SSH key.
+
+`hosts` keys are hostnames (`github.com`), not URLs; an entry may repeat its
+`host` field but it must match the key.
 
 ## Providers
 
@@ -255,13 +305,16 @@ requires an explicit `username`; SSH uses `git` unless you set one.
 
 ## How it is applied
 
-`/usr/local/bin/dsh-git-credentials` runs on every boot (and on `init` /
-`reset-plugin`) if `/run/secrets/git/profiles.json` exists. It writes:
+`dsh-git-credentials.mjs` runs on every boot (and on `init` / `reset-plugin`) if
+`/run/secrets/git/profiles.json` exists — the image exposes it as
+`/usr/local/bin/dsh-git-credentials`, a native install links the `.mjs` directly.
+It writes:
 
 ```text
 /data/home/.dsh/git/
-  gitconfig                       # default credential helper + includeIf blocks
+  gitconfig                       # default/host helpers, core.sshCommand, includeIf blocks
   credentials/*.credentials       # HTTPS store files, mode 600
+  ssh-wrapper.sh                  # picks the SSH key by host, mode 700
   projects/*.gitconfig            # per-workspace helper/ssh/identity
 ```
 
@@ -347,7 +400,7 @@ No image rebuild and no container restart are required for a credential change.
 | Symptom | Cause / fix |
 |---|---|
 | `git credentials: profile "x": ...` in boot logs | manifest validation failed; the message names the field |
-| `could not read Username for 'https://…'` | no helper for that host: project key does not match the workspace directory, or the profile is not under `default` |
+| `could not read Username for 'https://…'` | no helper for that host: project key does not match the workspace directory, and the profile is under neither `default` nor `hosts` for that host |
 | `Permission denied (publickey)` | key not added to the provider, wrong key, or a passphrase-protected key (BatchMode cannot prompt) |
 | `Host key verification failed` | `known_hosts` missing or stale; regenerate with `ssh-keyscan host > secrets/git/known_hosts` and regenerate |
 | `Repository not found` | token lacks access to that repo/org, or the SSH key is not a deploy key there |
@@ -371,6 +424,10 @@ set `SSH_AUTH_SOCK` yourself.
   keys where pushes are not needed.
 - Tokens belong in `secrets/`, not `.env`; environment variables are visible in
   `/proc` and easier to leak into logs.
+- A token is host-scoped: `hosts` entries write a `[credential "https://host"]`
+  section, so a GitHub token is never offered to GitLab. A `default` token is
+  stored in a host-specific credential file too, so it only answers for its own
+  host.
 - `secrets/` is gitignored. Back it up separately (encrypted) and never commit
   it; `data/` backups do not contain these files.
 - Host keys are verified (`StrictHostKeyChecking=yes`); do not disable it.

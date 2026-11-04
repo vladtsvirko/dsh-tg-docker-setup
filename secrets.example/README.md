@@ -11,5 +11,7 @@ $EDITOR secrets/git/profiles.json
 `secrets/` is gitignored and mounted read-only at `/run/secrets`; `git-credentials`
 regenerates git config from `secrets/git/profiles.json` on every boot.
 
-Never commit real tokens or keys. See `docs/GIT.md` for GitHub, GitLab, Gitea and
-self-hosted recipes.
+Never commit real tokens or keys. `default` is one account for every host;
+`hosts` holds host-scoped accounts (one per forge), and `projects` overrides
+both per workspace. See `docs/GIT.md` for GitHub, GitLab, Gitea, self-hosted,
+HTTPS and SSH recipes.

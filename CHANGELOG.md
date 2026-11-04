@@ -7,10 +7,22 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
-## 0.2.1-rc.5-0.6.5
+## 0.2.1-rc.5-0.7.0
 
-A fixes release: one security hole closed in the connector, and the installer
-now ends with a usable link instead of an origin that answers 401.
+A fixes release plus one feature: the installer can now hold several git
+accounts, and it ends with a usable link instead of an origin that answers 401.
+
+### Added
+
+- **Several git accounts from the installer.** It asks for a host, HTTPS or
+  SSH, and the credential (a PAT, the token `gh auth login` already stores, or
+  a key it can generate and print for the deploy-key page). One account is
+  written as `default`; two or more become host-scoped `hosts` entries, and a
+  re-run merges instead of replacing. `GIT_PROFILES_FILE` copies a ready
+  manifest for unattended installs. The generator learned `hosts`: HTTPS
+  accounts get a `[credential "https://<host>"]` section, SSH accounts are
+  picked by host through a generated wrapper, so keys no longer collide in one
+  global `core.sshCommand`.
 
 ### Fixed
 
@@ -25,6 +37,15 @@ now ends with a usable link instead of an origin that answers 401.
   and rewrote `data/home/.gitconfig` on every run. It now prefers the deployed
   config, then the `SUDO_USER`'s identity, so an ordinary re-run keeps the
   agent's commits as they were.
+- **The native generator actually runs.** Node resolves a symlinked entry point
+  to its real path, so the CLI check compared `/usr/local/bin/dsh-git-credentials.mjs`
+  with the checkout path, concluded "imported, not executed", and exited 0
+  without writing anything. It now compares real paths; a regression test runs
+  it through a symlink.
+- **Native installs link the git credential generator.** `link_bins` never
+  created `/usr/local/bin/dsh-git-credentials.mjs`, so on a native host the
+  entrypoint's call failed at every boot and no git credentials were applied,
+  even with a valid manifest.
 - **The sudo re-exec keeps the mode answer.** `MODE`, `TIER` and `DESIGN` are
   passed through, so a native install no longer re-asks the mode with the docker
   default after escalating.

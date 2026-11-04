@@ -47,6 +47,7 @@ session between the two. This page is the reference behind it.
 | `install.sh` | One-command installer for both modes: interactive, `--check` for a dry run, `--doctor [--fix]` to diagnose/repair |
 | `scripts/repair.sh` | The health check both `install.sh --doctor` and `update.sh --doctor` run; `--fix` repairs the safe subset |
 | `scripts/credentials.mjs` | Reads and reconciles `data/home/.credentials.yaml` without printing a secret |
+| `scripts/git-manifest.mjs` | Builds or merges `secrets/git/profiles.json` from the installer's accounts |
 | `design/` | Optional Penpot stack + the `penpot` CLI for design work (`--design docker`) |
 | `docs/DESIGN.md` | The design stack: install, token, the plugin and CLI, data, removal |
 | `docs/HOST.md` | Native (no-Docker) deployment: tiers, layout, updates, switching |
@@ -91,8 +92,11 @@ Run it as a normal user with `sudo` available, or as root. It:
 3. asks the same questions as a local install, then shows the plan and asks
    before changing anything: `Proceed? [Y/n]`,
 4. asks what the agent should commit as (git author name and email) and, optionally,
-   which git host it may clone and push from (github, gitlab, gitea, forgejo or a
-   self-hosted one) — the token is stored in `<dir>/secrets/git/profiles.json`, mode 0600,
+   for repository access: one or more git accounts (github, gitlab, gitea, forgejo
+   or self-hosted), each over an HTTPS token or an SSH key. A GitHub account can
+   reuse the token `gh auth login` already stores; an SSH account can generate a
+   key and print its public half. The manifest is
+   `<dir>/secrets/git/profiles.json`, mode 0600, and a re-run merges into it,
 5. installs git always, Docker when the mode or the design stack needs it, Node for
    native, then the runtime, then waits for the health check.
 
@@ -109,7 +113,7 @@ curl -fsSL …/install.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.6.5`. `--dir` moves where the one-liner checks the release out
+v0.2.1-rc.5-0.7.0`. `--dir` moves where the one-liner checks the release out
 (default `/opt/dsh-setup` as root, `~/dsh-setup` otherwise); in docker mode the
 deployment then runs from that checkout, so it is not a "data elsewhere" flag —
 native mode is the one with a separate `/srv/dsh` default. If Docker or Node is
@@ -358,7 +362,7 @@ container is disposable and disappears with the container.
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.6.5
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.7.0
          DSH part          product part
 ```
 
@@ -479,8 +483,10 @@ DSH_TELEGRAM_PUBLISHER_TOKENS=123:AAA...,456:BBB...
 
 ## Repository access (git)
 
-Private repositories get credentials from one JSON manifest, either globally or
-per workspace:
+Private repositories get credentials from one JSON manifest: a `default`
+account, host-scoped `hosts` (one per forge), and optional per-workspace
+`projects`. The installer fills it in — one account, or several — and a re-run
+merges new accounts instead of replacing the file. To do it by hand:
 
 ```sh
 cp -r secrets.example secrets
@@ -492,6 +498,10 @@ docker compose up -d
 ```json
 {
   "default": { "provider": "github", "auth": "https", "token": "github_pat_..." },
+  "hosts": {
+    "gitlab.com": { "provider": "gitlab", "auth": "https", "token": "glpat-..." },
+    "git.example.com": { "provider": "gitea", "auth": "ssh", "key": "gitea_deploy", "known_hosts": "known_hosts" }
+  },
   "projects": {
     "web-app": { "provider": "gitlab", "auth": "ssh", "key": "gitlab_deploy", "known_hosts": "known_hosts" }
   }
@@ -499,8 +509,13 @@ docker compose up -d
 ```
 
 Supported: GitHub, GitLab, Gitea/Forgejo and self-hosted, over HTTPS tokens or SSH
-keys, with a per-workspace commit identity. `secrets/` is mounted read-only at
+keys, with several accounts and a per-workspace commit identity. HTTPS accounts
+are host-scoped, so one forge's token is never offered to another; SSH keys are
+picked by host through a generated wrapper. `secrets/` is mounted read-only at
 `/run/secrets` and gitignored.
+
+Unattended installs can point `GIT_PROFILES_FILE` at a ready manifest instead of
+answering the prompts.
 
 Everyone allowed in the workspace shares these credentials — that is the trust
 model, not a bug. The agent can read `/run/secrets`; see

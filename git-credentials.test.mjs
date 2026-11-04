@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { test } from 'node:test'
+import { fileURLToPath } from 'node:url'
 import { apply } from './git-credentials.mjs'
+
+const here = dirname(fileURLToPath(import.meta.url))
 
 async function sandbox() {
   const root = await mkdtemp(join(tmpdir(), 'git-credentials-'))
@@ -143,4 +146,80 @@ test('rejects project paths that escape the workspace root', async () => {
     apply({ projects: { '../outside': { provider: 'github', token: 'x' } } }, box),
     /escapes the workspace root/,
   )
+})
+
+test('host profiles scope each token to its own host', async () => {
+  const box = await sandbox()
+  const manifest = {
+    default: { provider: 'github', auth: 'https', token: 'ghp_default' },
+    hosts: { 'gitlab.com': { provider: 'gitlab', auth: 'https', token: 'glpat_second' } },
+  }
+  const summary = await apply(manifest, box)
+  assert.deepEqual(summary, ['default=github/https', 'gitlab.com=gitlab/https'])
+  const config = await readFile(join(box.outputDir, 'gitconfig'), 'utf8')
+  assert.match(config, /\[credential "https:\/\/gitlab\.com"\]/)
+
+  const fill = (host) => execFileSync('git', ['credential', 'fill'], {
+    cwd: box.homeDir,
+    input: `protocol=https\nhost=${host}\n\n`,
+    env: { ...process.env, HOME: box.homeDir, GIT_TERMINAL_PROMPT: '0' },
+    encoding: 'utf8',
+  })
+  assert.match(fill('github.com'), /^password=ghp_default$/m)
+  assert.match(fill('gitlab.com'), /^password=glpat_second$/m)
+})
+
+test('ssh host profiles share one wrapper that picks the key by host', async () => {
+  const box = await sandbox()
+  await writeFile(join(box.secretsDir, 'github_ed25519'), 'key', { mode: 0o600 })
+  await writeFile(join(box.secretsDir, 'gitlab_ed25519'), 'key', { mode: 0o600 })
+  await writeFile(join(box.secretsDir, 'known_hosts'), 'github.com ssh-ed25519 AAAA\n')
+
+  const summary = await apply({
+    hosts: {
+      'github.com': { provider: 'github', auth: 'ssh', key: 'github_ed25519', known_hosts: 'known_hosts' },
+      'gitlab.com': { provider: 'gitlab', auth: 'ssh', key: 'gitlab_ed25519', known_hosts: 'known_hosts' },
+    },
+  }, box)
+  assert.deepEqual(summary, ['github.com=github/ssh', 'gitlab.com=gitlab/ssh'])
+
+  const config = await readFile(join(box.outputDir, 'gitconfig'), 'utf8')
+  assert.match(config, /sshCommand = .*ssh-wrapper\.sh/)
+
+  const wrapper = await readFile(join(box.outputDir, 'ssh-wrapper.sh'), 'utf8')
+  assert.match(wrapper, /github\.com\) exec ssh -i .*github_ed25519/)
+  assert.match(wrapper, /gitlab\.com\) exec ssh -i .*gitlab_ed25519/)
+  assert.match(wrapper, /\*\) exec ssh "\$@" ;;/)
+  assert.equal((await stat(join(box.outputDir, 'ssh-wrapper.sh'))).mode & 0o777, 0o700)
+})
+
+test('a host profile whose "host" disagrees with the key is refused', async () => {
+  const box = await sandbox()
+  await assert.rejects(
+    apply({
+      hosts: { 'github.com': { provider: 'github', host: 'gitlab.com', auth: 'https', token: 'x' } },
+    }, box),
+    /must match the hosts key/,
+  )
+})
+
+test('the CLI runs when invoked through a symlink (native install)', async () => {
+  const box = await sandbox()
+  await writeFile(join(box.secretsDir, 'profiles.json'), JSON.stringify({
+    default: { provider: 'github', auth: 'https', token: 'ghp_symlink' },
+  }))
+  const link = join(box.root, 'dsh-git-credentials.mjs')
+  await symlink(join(here, 'git-credentials.mjs'), link)
+
+  const output = execFileSync(process.execPath, [link], {
+    env: {
+      ...process.env,
+      HOME: box.homeDir,
+      DSH_GIT_SECRETS: box.secretsDir,
+      DSH_WORKSPACE: box.workspaceRoot,
+    },
+    encoding: 'utf8',
+  })
+  assert.match(output, /git credentials: default=github\/https/)
+  await stat(join(box.homeDir, '.dsh', 'git', 'gitconfig'))
 })
