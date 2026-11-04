@@ -41,7 +41,7 @@ await writeFile(join(shimDir, 'docker'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
 // is about the deployment, so the tests provide an "active" unit instead of
 // reading the machine they run on.
 await writeFile(join(shimDir, 'systemctl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
-const shimEnv = { PATH: `${shimDir}:${process.env.PATH ?? ''}` }
+const shimEnv = { PATH: `${shimDir}:${process.env.PATH ?? ''}`, SERVICE_USER: process.env.USER ?? 'runner' }
 
 async function run(args, { env = {}, cwd = here } = {}) {
   try {

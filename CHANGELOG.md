@@ -1,13 +1,45 @@
 # Changelog
 
 The setup repo ships in lockstep with `dsh-telegram-connector`: `VERSION` is the
-tag, the image tag and the connector tag at once. Connector-side changes are in
+tag and the connector tag at once. Connector-side changes are in
 that repository's changelog; this file records what the installer, the
 supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.8.2
+
+Fixes the 0.8.1 tag build and one installer gap it exposed.
+
+### Fixed
+
+- **`DSH_PUBLIC_URL` is an accepted installer answer and lands in `.env`.**
+  It was documented as a knob, but the installer neither accepted it in
+  `--config` nor wrote it, so a hostname/proxy/loopback deployment silently
+  advertised the wrong root. It is read from the environment or the answers
+  file, written when set, and removed when empty.
+- **The repair tests run as the invoking user.** A CI runner has no `dsh` user,
+  so the doctor's `data-owner` check compared the fixture against uid 0 and
+  failed every clean-deployment test.
+
 ## 0.2.1-rc.5-0.8.1
+
+Fixes the red 0.8.0 tag build; no user-facing behaviour change beyond the probe.
+
+### Fixed
+
+- **The health probe uses the configured bind.** `healthcheck.sh` still picked
+  the default-route address first, so a loopback deployment could be reported
+  unhealthy while it was serving. It probes `DSH_BIND_IP`, then the default
+  route, then `127.0.0.1`.
+- **The native smoke answers no longer carry `MODE`** (an unknown key now, which
+  aborted the install) and pin `DSH_BIND_IP`/`DSH_PUBLIC_URL` so the run is
+  deterministic.
+- **The repair tests shim `systemctl`.** A CI runner has the binary but no
+  running systemd; the doctor's service check read the machine instead of the
+  fixture and failed the suite.
+
+## 0.2.1-rc.5-0.8.0
 
 > **After updating from 0.7.0, run `sudo ./install.sh --yes` once.** This release
 > changes the systemd units (resource limits, `dsh-updater.service`

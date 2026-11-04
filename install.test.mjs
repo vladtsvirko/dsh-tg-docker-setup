@@ -660,6 +660,12 @@ test('docker is installed only when the design stack needs it', async (t) => {
   }
 })
 
+test('DSH_PUBLIC_URL is an accepted answer and is written to .env', async () => {
+  const source = await readFile(join(here, 'install.sh'), 'utf8')
+  assert.match(source, /CONFIG_KEYS="[^"]*DSH_PUBLIC_URL/)
+  assert.match(source, /set_env DSH_PUBLIC_URL "\$DSH_PUBLIC_URL"/)
+})
+
 test('the installer asks for a resource share and writes it to the unit', async () => {
   const source = await readFile(join(here, 'install.sh'), 'utf8')
   assert.match(source, /ask DSH_RESOURCE_PERCENT .*percent of this machine \(0 = unlimited\)" 30/)
