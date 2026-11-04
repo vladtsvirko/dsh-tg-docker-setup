@@ -7,6 +7,12 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.10.1
+
+Test-only fix for the 0.10.0 tag build: the CI runner already has Podman, so the
+installer plan says `podman present` instead of `installs podman`. The test now
+accepts both. No setup behaviour changed.
+
 ## 0.2.1-rc.5-0.10.0
 
 **Docker is gone.** The setup installs Podman instead: rootless for the agent,

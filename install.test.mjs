@@ -643,7 +643,7 @@ test('Podman is planned for the agent and skipped when containers are off', asyn
   try {
     const on = await install(['--check', '--yes', '--dir', join(root, 'a')])
     assert.equal(on.code, 0, on.out)
-    assert.match(on.out, /installs podman/)
+    assert.match(on.out, /· (installs podman|podman present)/)
 
     const off = await install(['--check', '--yes', '--containers', 'none', '--dir', join(root, 'b')])
     assert.equal(off.code, 0, off.out)
