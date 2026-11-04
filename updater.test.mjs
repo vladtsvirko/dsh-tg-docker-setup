@@ -214,7 +214,7 @@ test('components: the endpoint runs the real update.sh and wires the runtime', a
     await mkdir(join(repo, 'design'), { recursive: true })
     await copyFile(new URL('./design/.env.example', import.meta.url), join(repo, 'design', '.env.example'))
     await writeFile(join(repo, 'VERSION'), '0.2.1-rc.2-0.4.0\n')
-    await writeFile(join(repo, '.env'), 'MODE=docker\nDSH_BIND_IP=127.0.0.1\n')
+    await writeFile(join(repo, '.env'), 'DSH_BIND_IP=127.0.0.1\n')
 
     await mkdir(bins, { recursive: true })
     await writeFile(join(bins, 'docker'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
@@ -244,7 +244,7 @@ test('components: the endpoint runs the real update.sh and wires the runtime', a
       const mainEnv = await readFile(join(repo, '.env'), 'utf8')
       const designEnv = await readFile(join(repo, 'design', '.env'), 'utf8')
       assert.match(mainEnv, /DSH_DESIGN_ENABLED=1/)
-      assert.match(mainEnv, /PENPOT_API_URL=http:\/\/design-frontend:8080/)
+      assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:8092/)
       assert.match(designEnv, /DSH_DESIGN_PORT=8092/)
     } finally {
       server.close()
@@ -377,14 +377,8 @@ test('networkOf prints the network, not the host address', () => {
 const active = ['Status: active', 'To                         Action      From',
   '--                         ------      ----', '22/tcp                     ALLOW       192.168.2.0/24'].join('\n')
 
-test('docker mode is not applicable: ufw never sees a published port', () => {
-  const report = firewallPorts({ mode: 'docker', ports: [{ port: 4310, bind: '192.168.2.98' }], status: active })
-  assert.equal(report.applicable, false)
-  assert.match(report.reason, /published port/)
-})
-
 test('a blocked native port is reported with the derived network', () => {
-  const report = firewallPorts({ mode: 'native', ports: [{ port: 4310, bind: '192.168.2.98/24' }], status: active })
+  const report = firewallPorts({ ports: [{ port: 4310, bind: '192.168.2.98/24' }], status: active })
   assert.equal(report.applicable, true)
   assert.deepEqual(report.ports, [{ port: 4310, bind: '192.168.2.98/24', network: '192.168.2.0/24', allowed: false }])
 })
@@ -396,11 +390,11 @@ test('an allowed port is reported as allowed, and loopback binds are skipped', (
     status: `${active}\n4310/tcp                   ALLOW       192.168.2.0/24`,
   })
   assert.equal(allowed.ports[0].allowed, true)
-  const loopback = firewallPorts({ mode: 'native', ports: [{ port: 4310, bind: '127.0.0.1' }], status: active })
+  const loopback = firewallPorts({ ports: [{ port: 4310, bind: '127.0.0.1' }], status: active })
   assert.equal(loopback.applicable, false)
 })
 
 test('inactive ufw and a missing status are not applicable', () => {
-  assert.match(firewallPorts({ mode: 'native', ports: [{ port: 4310, bind: '192.168.2.98' }], status: 'Status: inactive' }).reason, /not active/)
-  assert.match(firewallPorts({ mode: 'native', ports: [{ port: 4310, bind: '192.168.2.98' }] }).reason, /not installed/)
+  assert.match(firewallPorts({ ports: [{ port: 4310, bind: '192.168.2.98' }], status: 'Status: inactive' }).reason, /not active/)
+  assert.match(firewallPorts({ ports: [{ port: 4310, bind: '192.168.2.98' }] }).reason, /not installed/)
 })

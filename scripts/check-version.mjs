@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** The setup tag, VERSION, image tags and hardcoded DSH/setup versions must agree. */
+/** The setup tag and VERSION must agree, and VERSION must carry a DSH part. */
 import { readFile } from 'node:fs/promises'
 
 const ref = process.env.GITHUB_REF_NAME ?? ''
@@ -17,24 +17,10 @@ const dsh = match[1]
 const version = (await readFile(new URL('../VERSION', import.meta.url), 'utf8')).trim()
 if (version !== tag) fail(`VERSION is ${version}, tag is ${tag}`)
 
-const env = (await readFile(new URL('../.env.example', import.meta.url), 'utf8'))
-if (/^DSH_VERSION=/m.test(env)) fail('.env.example still sets DSH_VERSION; it is hardcoded per release')
-
-/**
- * A whole line, not a substring.
- *
- * `includes('image: dsh-backend:0.7.4')` also matches `…:0.7.40` and would pass a
- * release whose image tag points at a different build; the check has to be
- * anchored to the end of the value.
- */
-const hasLine = (file, pattern) => new RegExp(`^${pattern}\\s*$`, 'm').test(file)
-const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-
-const compose = await readFile(new URL('../compose.yaml', import.meta.url), 'utf8')
-if (!hasLine(compose, `\\s*image:\\s*dsh-backend:${escape(tag)}`)) fail(`compose.yaml has no dsh-backend:${tag}`)
-if (!hasLine(compose, `\\s*image:\\s*dsh-updater:${escape(tag)}`)) fail(`compose.yaml has no dsh-updater:${tag}`)
-const dockerfile = await readFile(new URL('../Dockerfile', import.meta.url), 'utf8')
-if (!hasLine(dockerfile, `ARG DSH_VERSION=${escape(dsh)}`)) fail(`Dockerfile DSH_VERSION is not ${dsh}`)
-if (!hasLine(dockerfile, `ARG DSH_SETUP_VERSION=${escape(tag)}`)) fail(`Dockerfile DSH_SETUP_VERSION is not ${tag}`)
+// The runtime version is the DSH part of VERSION; install.sh derives it and
+// installs @deepseek-ai/dsh@$DSH_VERSION. A separate pin would be a second
+// source of truth, so its absence is part of the contract.
+const env = await readFile(new URL('../.env.example', import.meta.url), 'utf8')
+if (/^DSH_VERSION=/m.test(env)) fail('.env.example sets DSH_VERSION; it is derived from VERSION')
 
 console.log(`version check ok: setup ${tag} (DSH ${dsh}, connector derived from setup version)`)

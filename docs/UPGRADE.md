@@ -1,33 +1,32 @@
 # Upgrading, and rolling back
 
-An upgrade moves the setup checkout to a newer tag, rebuilds the runtime image,
-and starts it under a trial. Nothing is committed until the new runtime is
-healthy **and** someone confirms it; otherwise the supervisor restores the
-previous checkout, image and profile by itself.
+An upgrade moves the setup checkout to a newer tag and installs the matching
+DSH. A health gate decides the outcome: a healthy runtime keeps the new tag, and
+a failure restores the previous tag and the data snapshot automatically.
 
 Read this before the first upgrade you actually need, and run the drill once
 while nothing is at stake. To learn whether there is anything to upgrade to, and
-what it would cost, see [`UPSTREAM-WATCH.md`](UPSTREAM-WATCH.md) and the
-per-release plans in [`upgrades/`](upgrades/).
+what it would cost, see [`UPSTREAM-WATCH.md`](UPSTREAM-WATCH.md) and the version
+rules in [`VERSIONS.md`](VERSIONS.md).
 
 ## What an upgrade touches
 
 | Path | What happens |
 |---|---|
 | the checkout (`git` tag) | `git checkout --detach <target>`; the previous tag stays reachable |
-| the image | rebuilt as `dsh-backend:<target>`; the running image is kept as `dsh-backend:self-previous` |
-| `data/home`, `data/supervisor` | snapshotted to `backups/self-<stamp>.tgz` (mode `0600`, it holds git tokens) |
+| the installed DSH | `npm install -g @deepseek-ai/dsh@<DSH part>` when the DSH part changes |
+| `data/home`, `data/supervisor` | snapshotted to `backups/self-<stamp>.tgz` |
 | `.env` | `DSH_SETUP_VERSION` is rewritten so the entrypoint installs the matching connector tag |
 | `data/workspace` | untouched |
 
-`VERSION`, the image tag, the Dockerfile's `DSH_SETUP_VERSION` and the connector
-tag are one release: they only ever move together, which is why the setup tag
-and the connector tag are always identical.
+`VERSION` and the connector tag are one release: they only ever move together,
+which is why the setup tag and the connector tag are always identical. The DSH
+part is the prefix of `VERSION`; there is no separate DSH pin to edit.
 
 ## Which upgrades are allowed
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.7.0
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.8.0
 ```
 
 - **Compatible** (the default): same DSH part, same product major. Any newer
@@ -48,20 +47,21 @@ What happens, in order:
 1. The bot reports the drain and waits for every agent to go idle (a web UI turn
    counts too; `/system status` shows who is blocked).
 2. The updater runs `update.sh --self-to <latest compatible tag>` on the host.
-3. The runtime stops, the image builds, and the new one must pass the health
-   gate (container healthy **and** the published web port answering).
+3. The target tag is checked out and the matching DSH installed while the old
+   runtime runs; `dsh.service` is restarted, and the new runtime must pass the
+   health gate (the unit active **and** the web port answering).
 4. The updater reports the result in the chat: `✅ setup update finished: vA → vB`.
 
-If it fails, the report says so and the previous setup is running again. If the
-drain never finishes, `/system cancel` cancels it (it also cancels a running
-updater job).
+If it fails, the report says so and the previous tag and the data snapshot are
+back in place. If the drain never finishes, `/system cancel` cancels it (it also
+cancels a running updater job).
 
 ## Upgrading from the host
 
 ```sh
-./update.sh --self-check    # what a compatible upgrade would do; changes nothing
-./update.sh --self          # do it, with the first prompt asking to confirm
-./update.sh --self-to v0.2.1-rc.5-0.7.0   # an exact target (what the updater uses)
+sudo ./update.sh --self-check    # what a compatible upgrade would do; changes nothing
+sudo ./update.sh --self          # do it, with the first prompt asking to confirm
+sudo ./update.sh --self-to v0.2.1-rc.5-0.8.0   # an exact target (what the updater uses)
 ```
 
 Use this for a broken bot, a first install of the updater, or a deliberate
@@ -78,17 +78,18 @@ install — opens a supervisor **trial**. The bot posts a card with **Commit** a
 - `/system confirm` (or **Commit**) keeps the change and makes it the rollback
   point.
 - `/system rollback` (or **Roll back**) restores the previous profile state and
-  restarts. It does not move the image or the setup tag.
+  restarts. It does not move the setup tag.
 - Doing nothing until the deadline rolls back automatically.
 - A runtime that never comes up rolls back after `DSH_BOOT_GRACE_SECONDS`
   (120 s), or immediately if it exits.
 
-**An image upgrade** — `/system update all` or `./update.sh --self` — opens no
+**A setup upgrade** — `/system update all` or `./update.sh --self` — opens no
 trial and posts no Commit/Roll back card. It has a **health gate** instead: the
-new image must be healthy *and* answer on the published web port. If either
-fails, the updater restores the previous image, the snapshot and the previous
-tag checkout by itself, then reports the rollback in the chat. There is nothing
-to confirm and no deadline: success is final, failure is automatic.
+restarted service must be active **and** answer on the web port. If either
+fails, `update.sh` restores the snapshot, checks the previous tag out, rewrites
+the version and restarts by itself, then reports the rollback in the chat.
+There is nothing to confirm and no deadline: success is final, failure is
+automatic.
 
 ## The drill: prove the rollback works
 
@@ -107,13 +108,13 @@ Run this once, on a quiet deployment:
 ```
 
 That proves the supervisor, the bot and the trial card. It does **not** exercise
-the image rollback, which is the updater's health gate, not a trial: to drill
-that one, break a disposable deployment on purpose (a bad healthcheck, or a tag
-whose entrypoint exits) and watch `update.sh --self` restore the previous image
-and report `rolled back`; the apply path it exercises is
-[`SELF-UPDATE.md`](SELF-UPDATE.md) step 7. If the
-card never arrives, the supervisor or its token is misconfigured — fix that
-before you need a rollback for real (`/system status` reports both).
+the setup rollback, which is the updater's health gate, not a trial: to drill
+that one, break a disposable deployment on purpose (a target whose unit cannot
+start, or a web bind that does not answer) and watch `update.sh --self` restore
+the previous tag and snapshot and report `rolled back`; the apply path it
+exercises is [`SELF-UPDATE.md`](SELF-UPDATE.md). If the card never arrives, the
+supervisor or its token is misconfigured — fix that before you need a rollback
+for real (`/system status` reports both).
 
 `./update.sh --self-to <current tag>` is **not** a no-op drill: an exact-or-older
 target is refused on purpose, so the drill has to be the trial above.
@@ -136,20 +137,40 @@ Nothing has to be done by hand:
 |---|---|---|
 | Card says `⚠️ the supervisor is busy` | another operation held it | wait, then `/system rollback` again |
 | Card says `no trial is running` | it expired or was already committed | `/system status` shows the last event |
-| `Rollback failed (…)` | the profile could not be restored | the runtime restarted on the current files; `docker compose logs dsh`, and `backups/self-*.tgz` is the manual restore input |
-| Bot does not come back after an update | the automatic rollback ran, or the health gate never passed, and the runtime is unhealthy | `docker compose ps`, `docker compose logs dsh`; then check out the previous tag, retag `dsh-backend:self-previous` as that tag's image, set `DSH_SETUP_VERSION` back in `.env`, and `docker compose up -d dsh`. `--self-to` cannot do this: it refuses older tags on purpose |
-| Updater unreachable | token mismatch or the sidecar is down | `docker compose ps updater`, `docker compose logs updater` |
-| Half-applied checkout | stopped between build and start | `git -C <dir> checkout --detach v$(docker inspect --format '{{.Config.Image}}' dsh \| cut -d: -f2)` then `docker compose up -d dsh` |
+| `Rollback failed (…)` | the profile could not be restored | the runtime restarted on the current files; `journalctl -u dsh.service`, and `backups/self-*.tgz` is the manual restore input |
+| Bot does not come back after an update | the automatic rollback ran, or the health gate never passed, and the runtime is unhealthy | `systemctl status dsh.service`, `journalctl -u dsh.service -n 100`; then use [Manual recovery](#manual-recovery) below |
+| Updater unreachable | token mismatch or the service is down | `systemctl status dsh-updater.service`, `journalctl -u dsh-updater.service` |
+| Half-applied checkout | stopped between checkout and restart | [Manual recovery](#manual-recovery) below |
 
-Native mode has no image: the same steps apply, but the previous release is a
-tag, not `dsh-backend:self-previous`, and `journalctl -u dsh.service -f` replaces
-the container log.
+`--self-to` cannot go backwards: it refuses older tags on purpose, so a manual
+recovery is a host operation.
+
+### Manual recovery
+
+Use the tag you came from and the snapshot the failed update made:
+
+```sh
+cd /srv/dsh
+sudo systemctl stop dsh.service
+sudo git checkout --detach v<previous>
+sudo rm -rf data/home data/supervisor
+sudo tar xzf backups/self-<stamp>.tgz -C data
+sudo chown -R dsh:dsh data/home data/supervisor
+# set DSH_SETUP_VERSION=<previous version> in /srv/dsh/.env
+# if the upgrade crossed a DSH line, also:
+# sudo npm install -g @deepseek-ai/dsh@<previous DSH part>
+sudo systemctl start dsh.service
+```
+
+The `rm -rf` mirrors what the automatic rollback does: the snapshot replaces
+`data/home` and `data/supervisor`, so anything written there after the snapshot
+is gone. Then check `journalctl -u dsh.service -n 100` and `/system status`.
 
 ## Checklist
 
 - [ ] `/system status` shows the updater `ready` and the supervisor `present`
 - [ ] the drill above rolled back on its own
-- [ ] `backups/self-*.tgz` is `0600` and recent
+- [ ] `backups/self-*.tgz` is recent
 - [ ] after the upgrade: `/system status` shows `web: … answered 200`, `key: set`,
       and the new version in `/about`
 - [ ] after committing: `/system status` shows no open trial

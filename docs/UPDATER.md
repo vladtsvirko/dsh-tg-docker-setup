@@ -1,9 +1,9 @@
 # Setup updater
 
-`/system update all` drains all agents, then asks a privileged `updater`
-sidecar to move the setup to a release tag. The updater stops the runtime,
-snapshots state, starts the new image, and rolls back on failure. It reports
-the result to the control chat itself.
+`/system update all` drains all agents, then asks a privileged updater service
+to move the setup to a release tag. The updater snapshots state, checks out the
+tag, installs the matching DSH, restarts the runtime, and rolls back on failure.
+It reports the result to the control chat itself.
 
 This is the normal no-SSH path. Version rules are in
 [`VERSIONS.md`](VERSIONS.md); the full boundary of what this cannot fix is in
@@ -15,49 +15,36 @@ This is the normal no-SSH path. Version rules are in
 Telegram user
    │ /system update all
    ▼
-connector (dsh, uid 1000)
+connector (dsh.service, user dsh)
    ├─ UPDATING, blocks prompts
    ├─ waits agents.list() all idle (web UI + Telegram)
-   ├─ POST http://updater:8787/update   (ops network, bearer token)
+   ├─ POST http://127.0.0.1:8787/update   (bearer token)
    │     ← 202 {job, from, target}
    └─ may be stopped by the updater
           │
           ▼
-updater (DSH_UID + docker group, raw socket)
+dsh-updater.service (root, 127.0.0.1:8787)
    ├─ validate token/mode/target
    ├─ send "update started" via Bot API
    ├─ bash update.sh --self-to <target>
-   │    ├─ checkout target
-   │    ├─ build dsh while old runs
-   │    ├─ stop dsh (freeze)
    │    ├─ snapshot data/home + data/supervisor
-   │    ├─ start new dsh
+   │    ├─ checkout target
+   │    ├─ install @deepseek-ai/dsh@<DSH part> when it changes
+   │    ├─ prepare the profile as dsh
+   │    ├─ restart dsh.service
    │    ├─ health/verify
-   │    └─ on failure: restore snapshot + previous image
+   │    └─ on failure: restore snapshot + previous tag
    └─ send success/rollback + log tail
 ```
 
-Networks:
+The updater is a systemd unit. It binds `127.0.0.1:8787` only, so there is no
+published port. It runs with `DSH_UPDATER_TOKEN` from `.env`; an empty token
+makes it refuse every apply.
 
-```
-ops (internal): dsh, updater      endpoint :8787, token, no published port
-default:        dsh, updater      egress (Telegram, git, image pulls)
-```
-
-The updater runs from the mounted checkout (`node updater.mjs`), so a setup
-update changes its code on the next restart. After a completed stop/start it
-exits and Docker's restart policy brings it back with the new checkout. The
-first adoption of that layout needs one `docker compose build updater && docker
-compose up -d updater`.
-
-In **native mode** the same `updater.mjs` runs as `dsh-updater.service`, bound
-to `127.0.0.1` (no Docker socket, no `ops` network). The endpoint, the token and
-the drain behaviour are identical; only the apply path differs — the native
-branch of `update.sh` checks out the tag, prepares the profile and restarts the
-systemd service. See [HOST.md](HOST.md).
-
-The updater runs as `DSH_UID:DSH_GID` with `DSH_DOCKER_GID` added to its groups.
-It is not root, but the Docker socket makes it host-root-equivalent.
+It is root because restarting `dsh.service` requires it — that is the only
+reason. The runtime stays the unprivileged `dsh` user, and it never restarts
+itself. The updater runs from the checkout (`node updater.mjs`), so a setup
+update changes its code on its next start.
 
 ## Endpoint
 
@@ -71,20 +58,25 @@ Authorization: Bearer <DSH_UPDATER_TOKEN>
 
 202 {"job":"...","from":"...","target":"..."}
 400 bad body | 401 bad token | 409 busy/not on a tag
-422 no compatible target / unknown / older
+422 no compatible target / unknown / older / crossing without the flag
+503 updater disabled
 ```
 
 ```
 POST /target   {mode} -> 200 {from, target}   (resolve without applying)
 GET  /health   {ok, tag, canApply}
-GET  /status   {job: {id, state, from, target, exitCode?, logTail?}}
-GET  /components                      [{name,label,enabled,port}]
+GET  /status   {job: {id, state, from, target, exitCode?, logTail?},
+                elapsedSeconds, timeoutSeconds, cancellable}
+GET  /components                      {components: [{name,label,enabled,port}]}
 POST /components {name,action,port?}   enable|disable|configure -> 202 {job}
+POST /cancel                           stop the running job
+GET  /firewall                         ufw state for the ports this deployment serves
+POST /firewall {port}                  allow one served port from its network
 ```
 
 There is no result-polling requirement for the connector: the updater reports
 directly. The connector watches `/status` while it is still alive so a failure
-before the stop unblocks it.
+before the restart unblocks it.
 
 ## Modes and versions
 
@@ -100,12 +92,12 @@ bump is a break. The product part resets to `0.0.0` on a new DSH alignment.
   never an older one. The apply step (`update.sh --self-to`) additionally
   refuses a tag that is not a descendant of the running one.
 - `rollback` mode is deliberately not exposed. A failed health gate rolls back
-  automatically; a manual image rollback is a host operation.
+  automatically; a manual tag rollback is a host operation.
 
-The image tag, `VERSION`, the connector pin and the Dockerfile DSH version are
-all hardcoded in a setup release; CI checks they agree. The entrypoint installs
-the connector tag derived from `VERSION`, so the setup release and connector
-release move together — see [`VERSIONS.md`](VERSIONS.md).
+`VERSION` is the release: its prefix is the DSH part that `update.sh` installs
+globally, and the entrypoint derives the connector tag from
+`DSH_SETUP_VERSION`. CI checks that `VERSION` and the tag agree. The setup
+release and connector release move together — see [`VERSIONS.md`](VERSIONS.md).
 
 ## Drain
 
@@ -120,7 +112,7 @@ The connector first asks `/target` and posts one editable card in the control
 chat: `from → target`, live blocker count/list, and a **Cancel** button. While
 the card is still draining, Cancel deletes the update state and edits the card
 to “cancelled”. Once `/update` returns 202 the **button** is removed (the
-connector's restart is imminent), but the job remains cancellable: `/system
+runtime's restart is imminent), but the job remains cancellable: `/system
 cancel` calls the updater's `POST /cancel`, which stops the job with `SIGTERM`
 and `SIGKILL` after ten seconds. Older updaters without `/target` fall back to
 `/update` and update the card with the accepted target.
@@ -128,7 +120,7 @@ and `SIGKILL` after ten seconds. Older updaters without `/target` fall back to
 A running job also has a deadline, `DSH_UPDATE_TIMEOUT_SECONDS` (default 30
 minutes): on expiry it is stopped the same way and reported as timed out.
 `/system status` lists the sessions still running. A web turn can still start in
-the instant before the updater stops the container; that best-effort race is
+the instant before the updater restarts the service; that best-effort race is
 accepted.
 
 After a restart, the first Telegram update batch is treated as “arrived during
@@ -142,8 +134,11 @@ Plain text to the control chat (`controlChatId` from
 `DSH_TELEGRAM_BOT_TOKEN`:
 
 - `dsh is down — update in progress` when the stop phase begins
-- `update finished: target (DSH …)`
-- `update failed and rolled back to from` plus the last 20 log lines
+- `system update finished: from → target (DSH …)`
+- `system update failed and rolled back to from` plus the last 20 log lines
+- `system update failed (exit N)` / `cancelled` / `timed out` when the apply did
+  not reach a clean rollback
+- a ufw note when a port this deployment serves is blocked
 - Telegram token redaction is applied to the log tail.
 
 If the updater cannot post the report, it leaves `data/update/result.json`
@@ -152,17 +147,16 @@ result instead. The update card is closed with the same outcome.
 
 ## Rollback and data
 
-The updater keeps one previous image (`dsh-backend:self-previous`) and one
-`backups/self-*.tgz` (home + supervisor). On failed health, including a healthy
-container whose **published** web port does not answer:
+The updater keeps one `backups/self-*.tgz` (home + supervisor). On failed
+health, including an active unit whose **web port** does not answer:
 
 ```
-stop new dsh → restore snapshot → checkout previous tag
-→ retag previous image → start previous → verify → report
+restore snapshot → check out previous tag → rewrite DSH_SETUP_VERSION
+→ restart dsh.service → verify → report
 ```
 
-Rollback starts the previous image without requiring the published web port, so
-Telegram can return even when the old web bind is broken.
+Rollback restores the previous checkout and the snapshot; it does not undo
+changes to `data/workspace`.
 
 `data/workspace` is never snapshotted or restored. Data created under
 `data/home` or `data/supervisor` after the snapshot is lost if a rollback restores
@@ -174,11 +168,9 @@ deployment remain.
 ```sh
 # .env
 DSH_UPDATER_TOKEN=<random>
-DSH_DOCKER_GID=$(getent group docker | cut -d: -f3)
 
-docker compose build
-docker compose up -d
-docker compose logs -f updater
+systemctl status dsh-updater.service
+journalctl -u dsh-updater.service -f
 ```
 
 `/system update all` in the bot control chat. If the token is empty, the
@@ -186,7 +178,7 @@ connector prints the host commands instead of calling the updater.
 
 ## Test plan
 
-Unit (no Docker):
+Unit (no host changes):
 
 ```sh
 node --test updater.test.mjs
@@ -195,42 +187,43 @@ node --test updater.test.mjs
 Fake apply (no real dsh):
 
 - a temporary git repo with two tags and a fake `update.sh` that prints
-  `building/stopping/starting` and exits 0;
+  `snapshot/checkout/restart` and exits 0;
 - `POST /update`, then `GET /status` shows `done` and the log tail.
 
 Real stack, disposable setup:
 
-1. Set `DSH_UPDATER_TOKEN` and the correct `DSH_DOCKER_GID`.
-2. `docker compose build && up -d`; `GET /health` over the ops network.
+1. Set `DSH_UPDATER_TOKEN` (the installer writes one).
+2. `systemctl start dsh-updater.service`; check
+   `curl -H "Authorization: Bearer $DSH_UPDATER_TOKEN" http://127.0.0.1:8787/health`.
 3. `/system update all` with one idle session: it drains, reports started, the
-   container restarts, and the updater reports the new version.
-4. Break a target on purpose (bad healthcheck or startup) and verify:
-   stop, snapshot restore, previous image, “rolled back” report with log tail.
+   service restarts, and the updater reports the new version.
+4. Break a target on purpose (a service that cannot start, or a web bind that
+   does not answer) and verify: snapshot restore, previous tag checkout,
+   “rolled back” report with log tail.
 5. Send a message while `dsh` is down; after boot it is answered once and not
    executed.
 
 ## Security
 
-- No published updater port; bearer token on the internal `ops` network.
+- No published port; loopback only, bearer token.
 - Fixed action only: the request selects a tag/mode, never a command.
-- Raw Docker socket: compromising the updater compromises the host.
-- The connector never receives the socket.
-- `DSH_UPDATER_TOKEN` and `DSH_DOCKER_GID` are the only new operational secrets.
+- Root service: compromising the updater compromises the host.
+- The runtime cannot restart its own unit; only the updater may.
+- `DSH_UPDATER_TOKEN` is the only new operational secret.
 
 ## Limits
 
 - Best-effort drain race with a new web turn.
 - The job deadline and `/system cancel` stop the apply, but neither can undo a
-  half-applied checkout; the snapshot and `self-previous` image are the recovery
+  half-applied checkout; the snapshot and the previous checkout are the recovery
   inputs. A stuck session blocks the drain, not the apply.
-- The updater **code** reloads from the mounted checkout, but its **image** is not
-  rebuilt by `--self`. A change to `updater.Dockerfile`, Node, Docker CLI/compose,
-  git or curl needs a host `docker compose build updater && docker compose up -d
-  updater`.
+- The updater's **code** is the checkout it runs, but its **unit** is not
+  rewritten by `--self`. A change to the unit needs `sudo ./install.sh --yes`
+  (idempotent; it keeps `.env`), not an update.
 - A crash of the updater mid-apply is not automatically resumed. `result.json`,
-  the checkout, the images and the container state are the recovery inputs.
-- The updater cannot fix a dead Docker daemon, a corrupt checkout, a full disk,
-  a broken `.env`, or a runtime that cannot boot at all. Those need the host; see
+  the checkout and the snapshot are the recovery inputs.
+- The updater cannot fix a dead systemd, a corrupt checkout, a full disk, a
+  broken `.env`, or a runtime that cannot boot at all. Those need the host; see
   [`LIMITS.md`](LIMITS.md).
 - Telegram is the only normal control path. If the connector cannot load or
   cannot reach Telegram, the update card is unreachable even though the updater

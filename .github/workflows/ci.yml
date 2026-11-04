@@ -45,16 +45,17 @@ jobs:
         run: node --test penpot.test.mjs
 
       - name: Shell syntax
-        run: bash -n entrypoint.sh healthcheck.sh update.sh install.sh scripts/repair.sh host-install/setup-dsh-server.sh
+        run: bash -n entrypoint.sh healthcheck.sh update.sh install.sh scripts/repair.sh
 
-      - name: Compose configuration
+      - name: Scripts and design stack
         run: |
-          cp .env.example .env && docker compose config >/dev/null
           # The repair script must be executable in the checkout: the installer
           # runs it by path, and a mode bit lost in a release breaks --doctor.
           test -x scripts/repair.sh
           test -x scripts/credentials.mjs
-          cp design/.env.example design/.env && docker compose --project-directory design -f design/compose.yaml config >/dev/null
+          # The Penpot stack is the only compose file left.
+          cp design/.env.example design/.env
+          docker compose --project-directory design -f design/compose.yaml config >/dev/null
 
       - name: Validate release tag
         run: node scripts/check-version.mjs

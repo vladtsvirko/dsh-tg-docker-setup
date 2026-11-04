@@ -5,7 +5,7 @@ Two repositories ship one release:
 | Artifact | Repository | What it contains |
 |---|---|---|
 | connector | `dsh-telegram-connector` | The Cordis plugin installed into the DSH profile |
-| setup | `dsh-tg-docker-setup` | Compose file, Dockerfile, entrypoint, supervisor, updater, host scripts |
+| setup | `dsh-tg-docker-setup` | Installer, entrypoint, supervisor, updater, host scripts, docs |
 
 They always carry the **same tag and version**. A release is the pair, not one
 repository.
@@ -14,26 +14,25 @@ repository.
 
 ```
 <dsh-version>-<major>.<minor>.<patch>          tag: v<same>
-v0.2.1-rc.5-0.7.0
+v0.2.1-rc.5-0.8.0
 ```
 
 - **DSH part** (`0.2.1-rc.5`) is the exact DSH release the pair was built and
   tested against. Prerelease suffixes are part of the version.
-- **Product part** (`0.6.4`) is ours.
+- **Product part** (`0.8.0`) is ours.
   - It resets to `0.0.0` when the pair aligns to a new DSH line.
   - `0.x` is the compatible line. A patch is a fix, a minor is a compatible
     feature, and `1.0.0` (or any new major) marks an incompatible change.
   - Never ship a breaking change in the `0.x` line.
 - Tags are immutable. Do not move, delete, or reuse a released tag.
-- The tag, setup `VERSION`, the image tags and the Dockerfile build args must
-  agree; this repository's CI (`scripts/check-version.mjs`) checks exactly those
-  on a `v*` tag. The connector `package.json` must carry the same version, but
-  that half is checked by the connector's own CI: nothing in this repository
-  reads the connector, so the pair is a release-checklist rule, not a gate.
+- The tag and setup `VERSION` must agree; the DSH part is the prefix of
+  `VERSION` and `install.sh` installs `@deepseek-ai/dsh@<DSH part>`. There is no
+  image and no second DSH pin. This repository's CI checks the tag and
+  `VERSION`; the connector's CI checks its `package.json` and COMPATIBILITY row.
 
 ## Why the versions are coupled
 
-The setup image does not float the connector. `entrypoint.sh` derives
+The setup does not float the connector. `entrypoint.sh` derives
 
 ```
 DSH_TELEGRAM_PLUGIN=github:vladtsvirko/dsh-telegram-connector#v${DSH_SETUP_VERSION}
@@ -54,14 +53,14 @@ Consequences:
   boot pin remains the old setup tag.
 - `/system update connector` reinstalls the **pinned** connector. It repairs or
   reapplies that version; it does not choose a newer connector tag.
-- `/system update all` moves the setup tag, rebuilds the image, and the new
-  entrypoint installs the connector tag derived from it.
+- `/system update all` moves the setup tag, installs the matching DSH, and the
+  new entrypoint installs the connector tag derived from it.
 
 The `.env` variable `DSH_TELEGRAM_PLUGIN` exists for alternative connectors. The
 official connector ref is always rewritten to the setup tag.
 
-There is no `DSH_VERSION` environment knob any more. DSH is hardcoded in the
-setup release (`ARG DSH_VERSION` and the image tag).
+There is no `DSH_VERSION` environment knob. The DSH version is the prefix of
+`VERSION`; `install.sh` and `update.sh` install that exact version globally.
 
 ## What may jump
 
@@ -87,13 +86,13 @@ chat. `/system status` and the update card show the target before acceptance.
 | Mechanism | Changes | Rollback |
 |---|---|---|
 | `/system restart`, `/system update connector`, plugins | **profile** (`data/home/profiles/web`) | supervisor snapshot; Commit / Roll back / deadline |
-| `/system update all` | setup checkout, DSH image, connector pin, profile state snapshot | automatic on failed health gate; one previous image + one `self-*.tgz` |
+| `/system update all` | setup checkout, installed DSH, connector pin, profile state snapshot | automatic on failed health gate; one previous checkout + one `self-*.tgz` |
 | host `./update.sh --self` | same as `/system update all`, without draining agents | same |
-| `/system rollback` | profile only | does **not** move the image or the setup tag |
+| `/system rollback` | profile only | does **not** move the checkout or the setup tag |
 
-The image updater only moves forward. There is no Telegram command that says
-"run the previous image"; a failed update restores it automatically, and a manual
-image rollback is a host operation (`dsh-backend:self-previous`).
+The updater only moves forward. There is no Telegram command that says "check
+out the previous tag"; a failed update restores it automatically, and a manual
+rollback is a host operation (checkout + snapshot).
 
 ## Release checklist
 
@@ -103,16 +102,14 @@ image rollback is a host operation (`dsh-backend:self-previous`).
 2. Update connector `package.json` / `package-lock.json`, `COMPATIBILITY.md` and
    `CHANGELOG.md`.
 3. Run `npm run typecheck && npm test && npm run build` in the connector.
-4. Commit and tag the **connector first**; the setup image must be able to
-   resolve `v<version>` while it builds.
-5. Bump setup `VERSION`, all `image:` tags, `Dockerfile`'s `DSH_SETUP_VERSION`
-   (and `DSH_VERSION` only on a real DSH alignment), and the version examples in
-   `AGENTS.md`.
+4. Commit and tag the **connector first**; the setup's entrypoint must be able to
+   resolve `v<version>` on the next boot.
+5. Bump setup `VERSION`, the `AGENTS.md` example and any doc that names the
+   current tag (`docs/UAT.md`, `docs/SELF-UPDATE.md`, README examples).
 6. Run `node --test *.test.mjs`, `bash -n` on the shell entrypoints
-   (`update.sh install.sh entrypoint.sh healthcheck.sh`) and `docker compose
-   config` (host only: the runtime container has no Docker CLI).
-   Both modes ship in the same release; `install.sh` is the entry point for
-   each, and `docs/HOST.md` states what native mode costs.
-7. Commit and tag the setup. Both CI version checks must pass.
+   (`update.sh install.sh entrypoint.sh healthcheck.sh scripts/repair.sh`) and
+   `node scripts/check-version.mjs` with `GITHUB_REF_NAME=v<VERSION>`.
+7. Commit and tag the setup. Both CI version checks must pass, and the setup tag
+   build proves the connector tag exists.
 
 Do not tag only one repository. Do not tag a commit that is not on `main`.

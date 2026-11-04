@@ -7,12 +7,12 @@
 #   ./update.sh --doctor     full health check; --fix repairs what it can
 #   ./update.sh --self-check # latest compatible tag? change nothing
 #   ./update.sh --self [--i-know-versions-are-incompatible]
-#                            # jump to the latest compatible tag, build, health gate, rollback
+#                            # jump to the latest compatible tag, health gate, rollback
 #   ./update.sh --self-to <tag> [--i-know-versions-are-incompatible]
-#                            # exact target (used by the updater sidecar);
+#                            # exact target (used by the updater service);
 #                            # crossing a DSH line or a product major needs the flag
 #
-# Run it from this directory (next to compose.yaml and .env).
+# Run it from this directory (next to VERSION and .env).
 #
 # Sourced by update.test.mjs to exercise the helpers below without running the
 # CLI. Executed normally, nothing changes.
@@ -24,7 +24,6 @@ if [ "$UPDATE_SOURCED" = 0 ]; then
 fi
 
 ENV_FILE=.env
-COMPOSE=(docker compose)
 BACKUP_DIR=backups
 HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-180}
 
@@ -38,7 +37,7 @@ die()  {
 }
 
 if [ "$UPDATE_SOURCED" = 0 ]; then
-  [ -f "$ENV_FILE" ] || die "no $ENV_FILE here — run from the compose directory"
+  [ -f "$ENV_FILE" ] || die "no $ENV_FILE here — run from the deployment directory"
 fi
 
 env_get() { sed -n "s/^$1=//p" "$ENV_FILE" | head -1; }
@@ -110,7 +109,6 @@ lan_network() {
 # allow. Silent when ufw is absent or inactive.
 ufw_hints() {
   UFW_HINTED=0
-  [ "${MODE:-}" = native ] || return 0
   command -v ufw >/dev/null 2>&1 || return 0
   local status rules port bind net tunnel_port="" readable=1
   status="$(ufw_state | head -1)" || return 0
@@ -143,21 +141,6 @@ ufw_hints() {
   return 0
 }
 
-# --- deployment mode ------------------------------------------------------
-# install.sh records MODE in .env. Older deployments have no MODE and are
-# Docker; a native deploy is identified by its systemd unit.
-MODE="${DSH_MODE:-$(env_get MODE)}"
-if [ -z "$MODE" ]; then
-  if [ -f /etc/systemd/system/dsh.service ] && ! docker inspect dsh >/dev/null 2>&1; then
-    MODE=native
-  else
-    MODE=docker
-  fi
-fi
-case "$MODE" in
-  docker|native) ;;
-  *) die "MODE=$MODE in $ENV_FILE — expected docker or native" ;;
-esac
 SERVICE_USER="${SERVICE_USER:-dsh}"
 DEPLOY_DIR="$(pwd -P)"
 NATIVE_DATA="$DEPLOY_DIR/data"
@@ -328,19 +311,10 @@ native_apply() {
   log "done — $target is running (detached HEAD)"
 }
 
-container_health() {
-  local state
-  state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' dsh 2>/dev/null || true)"
-  echo "${state:-missing}"
-}
 
-# The URL this process can reach the runtime at.
-#
-# In docker mode the updater runs in its own container, so the host's
-# 127.0.0.1 is the updater itself: a host-only deployment (`DSH_BIND_IP=127.0.0.1`,
-# the documented private setup) used to probe nothing and fail the health gate,
-# rolling a perfectly good update back. Probe the compose service instead, and
-# use the published address only when it is a real one.
+# The URL this process can reach the runtime at: the public root when one is
+# configured, otherwise the bind address (127.0.0.1 is a real address here, not
+# a published-port indirection).
 web_probe_url() {
   local ip port public
   ip="$(env_get DSH_BIND_IP)"; port="$(env_get DSH_PORT)"; public="$(env_get DSH_PUBLIC_URL)"
@@ -349,16 +323,8 @@ web_probe_url() {
     printf '%s' "$public"
     return 0
   fi
-  if [ "${MODE:-docker}" = native ]; then
-    [ -n "$ip" ] || ip=127.0.0.1
-    printf 'http://%s:%s/' "$ip" "$port"
-    return 0
-  fi
-  if [ -n "$ip" ] && [ "$ip" != 127.0.0.1 ] && [ "$ip" != localhost ]; then
-    printf 'http://%s:%s/' "$ip" "$port"
-    return 0
-  fi
-  printf 'http://%s:%s/' "${DSH_WEB_SERVICE:-dsh}" "$port"
+  [ -n "$ip" ] || ip=127.0.0.1
+  printf 'http://%s:%s/' "$ip" "$port"
 }
 
 web_code() {
@@ -376,59 +342,14 @@ web_ready() {
   return 1
 }
 
-wait_healthy() {
-  local waited=0 state
-  if [ "$MODE" = native ]; then wait_native_healthy; return $?; fi
-  while [ "$waited" -lt "$HEALTH_TIMEOUT" ]; do
-    state="$(container_health)"
-    case "$state" in
-      healthy) return 0 ;;
-      unhealthy|exited|dead) warn "container is $state"; return 1 ;;
-    esac
-    sleep 3; waited=$((waited + 3))
-  done
-  warn "container did not become healthy within ${HEALTH_TIMEOUT}s"; return 1
-}
-
-# The container can report healthy on a TCP accept before the web app has
-# finished dispatching, so allow a short settle window instead of one probe.
-wait_web() {
-  local waited=0 limit=${WEB_READY_TIMEOUT:-30}
-  while [ "$waited" -lt "$limit" ]; do
-    if web_ready; then return 0; fi
-    sleep 2; waited=$((waited + 2))
-  done
-  return 1
-}
-
 
 # --- setup repo updates, tag by tag --------------------------------------
 # The setup repo is deployed at release tags, never off main. `--self` moves to
-# the immediate successor tag only: no skipping, no jumping branches. Rollback
-# restores both the checkout and the image that was running.
+# the latest compatible tag: skipping within the compatible line is allowed, a
+# branch or a tag that is not a descendant is not. Rollback restores the
+# previous checkout and the data snapshot.
 
-image_ref() {
-  printf 'dsh-backend:%s\n' "$(setup_version)"
-}
 
-start_and_wait() {
-  local recreate=${1:-}
-  local require_web=${2:-1}
-  local extra=()
-  [ "$recreate" = force ] && extra=(--force-recreate)
-  if "${COMPOSE[@]}" up --help 2>&1 | grep -q -- '--wait-timeout'; then
-    "${COMPOSE[@]}" up -d "${extra[@]}" --wait --wait-timeout "$HEALTH_TIMEOUT" dsh || return 1
-  else
-    "${COMPOSE[@]}" up -d "${extra[@]}" dsh || return 1
-    wait_healthy || return 1
-  fi
-  # The container can be healthy while the published port points at the wrong
-  # container interface. That is not a usable update.
-  if [ "$require_web" = 1 ] && ! wait_web; then
-    warn "container is healthy but the published web UI did not answer (code $(web_code))"
-    return 1
-  fi
-}
 
 # The tag checked out right now. A deploy box must be on a tag, not main.
 current_tag() {
@@ -519,34 +440,10 @@ self_check() {
   exit 2
 }
 
-snapshot_state() {
-  local stamp=$1
-  local file="$BACKUP_DIR/self-$stamp.tgz"
-  [ -d data/home ] || return 1
-  mkdir -p "$BACKUP_DIR"
-  local paths=(home)
-  [ -d data/supervisor ] && paths+=(supervisor)
-  tar czf "$file" -C data "${paths[@]}"
-  # the snapshot holds home/.dsh/git, i.e. live git tokens: never world-readable
-  chmod 600 "$file"
-  # one rollback snapshot is enough (portable: no xargs -r in busybox)
-  ls -1t "$BACKUP_DIR"/self-*.tgz 2>/dev/null | tail -n +2 | while IFS= read -r old; do rm -f "$old"; done
-  printf '%s\n' "$file"
-}
 
-restore_state() {
-  local file=$1 uid gid
-  [ -f "$file" ] || return 1
-  uid="$(env_get DSH_UID)"; uid="${uid:-1000}"
-  gid="$(env_get DSH_GID)"; gid="${gid:-1000}"
-  rm -rf data/home data/supervisor
-  tar xzf "$file" -C data
-  chown -R "$uid:$gid" data/home 2>/dev/null || true
-  [ -d data/supervisor ] && chown -R "$uid:$gid" data/supervisor 2>/dev/null || true
-}
 
 self_update() {
-  local allow=${1:-0} override=${2:-} override_allow=${3:-0} cur target all prev_image snapshot
+  local allow=${1:-0} override=${2:-} override_allow=${3:-0} cur target all
   [ -z "$(git status --porcelain)" ] || die "working tree is dirty — commit or stash first"
   git fetch --tags --quiet origin || die "git fetch failed"
   cur="$(current_tag)" || die "cannot determine the deployed tag — check out the tag that is running"
@@ -584,72 +481,7 @@ self_update() {
     [ "$answer" = y ] || { log "cancelled"; return 0; }
   fi
 
-  if [ "$MODE" = native ]; then
-    native_apply "$cur" "$target"
-    return $?
-  fi
-
-  prev_image="$(docker inspect --format '{{.Image}}' dsh 2>/dev/null || true)"
-  [ -n "$prev_image" ] || die "cannot find the running dsh container"
-  docker tag "$prev_image" dsh-backend:self-previous
-  log "saved current image as dsh-backend:self-previous"
-
-  log "checking out $target"
-  git -c advice.detachedHead=false checkout --detach "$target" || {
-    warn "checkout failed; still on $cur"
-    return 1
-  }
-
-  log "building dsh"
-  if ! "${COMPOSE[@]}" build dsh; then
-    warn "build failed — restoring $cur; the old container was not touched"
-    git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 || true
-    return 1
-  fi
-
-  log "stopping dsh (freeze)"
-  if ! "${COMPOSE[@]}" stop dsh; then
-    warn "could not stop dsh; restoring $cur"
-    git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 || true
-    return 1
-  fi
-
-  log "snapshotting data/home and data/supervisor"
-  if ! snapshot="$(snapshot_state "$(date +%Y%m%d-%H%M%S)")"; then
-    warn "snapshot failed; restarting the previous setup"
-    "${COMPOSE[@]}" stop dsh >/dev/null 2>&1 || true
-    git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 || true
-    docker tag dsh-backend:self-previous "$(image_ref)"
-    set_env DSH_SETUP_VERSION "${cur#v}" "$ENV_FILE"
-    start_and_wait force 0 || die "could not restart the previous setup"
-    die "snapshot failed; previous setup restored"
-  fi
-  log "snapshot: $snapshot"
-
-  # compose passes .env into the container, and an env_file value beats the
-  # image ENV: without this the entrypoint keeps installing the connector tag of
-  # the release we are leaving, so /system update all silently kept the old bot.
-  set_env DSH_SETUP_VERSION "${target#v}" "$ENV_FILE"
-
-  log "starting dsh"
-  if ! start_and_wait; then
-    warn "new tag did not become healthy; rolling back to $cur"
-    "${COMPOSE[@]}" stop dsh >/dev/null 2>&1 || true
-    restore_state "$snapshot" || warn "data restore failed — the snapshot is at $snapshot"
-    git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 || true
-    docker tag dsh-backend:self-previous "$(image_ref)"
-    set_env DSH_SETUP_VERSION "${cur#v}" "$ENV_FILE"
-    if start_and_wait force 0; then
-      verify || warn "rolled back, but verification complained — inspect: docker compose logs dsh"
-      warn "rolled back to $cur; the previous setup is running"
-      return 1
-    fi
-    die "rollback failed too — dsh-backend:self-previous and $snapshot remain for recovery"
-  fi
-
-  verify || warn "healthy, but verification complained — inspect: docker compose logs dsh"
-  repair_deployment || warn "the update is applied, but the health check found something — ./update.sh --doctor"
-  log "done — $target is running (detached HEAD)"
+  native_apply "$cur" "$target"
 }
 
 verify() {
@@ -660,16 +492,11 @@ verify() {
     *) warn "web did not answer (code $code)"; return 1 ;;
   esac
 
-  if [ "$MODE" = native ]; then
-    local since
-    since="$(systemctl show -p ActiveEnterTimestamp --value dsh.service 2>/dev/null || true)"
-    [ -n "$since" ] || since="-2 minutes"
-    plugin_warn="$(journalctl -u dsh.service --no-pager --since "$since" 2>/dev/null \
-      | grep -i 'incompatible with dsh\|did not activate\|Adapter install failed' || true)"
-  else
-    plugin_warn="$("${COMPOSE[@]}" logs --no-log-prefix --since 2m dsh 2>/dev/null \
-      | grep -i 'incompatible with dsh\|did not activate\|Adapter install failed' || true)"
-  fi
+  local since
+  since="$(systemctl show -p ActiveEnterTimestamp --value dsh.service 2>/dev/null || true)"
+  [ -n "$since" ] || since="-2 minutes"
+  plugin_warn="$(journalctl -u dsh.service --no-pager --since "$since" 2>/dev/null \
+    | grep -i 'incompatible with dsh\|did not activate\|Adapter install failed' || true)"
   if [ -n "$plugin_warn" ]; then
     warn "the harness reported a plugin problem:"
     printf '%s\n' "$plugin_warn" | sed 's/^/    /'
@@ -689,29 +516,24 @@ verify() {
 repair_deployment() {
   local script="$DEPLOY_DIR/scripts/repair.sh"
   [ -x "$script" ] || return 0
-  bash "$script" --dir "$DEPLOY_DIR" --mode "$MODE" --fix
+  bash "$script" --dir "$DEPLOY_DIR" --fix
 }
 
 status() {
-  printf '%-22s %s\n' "mode" "$MODE"
-  printf '%-22s %s\n' "setup version" "$(setup_version)"
-  printf '%-22s %s\n' "dsh version" "$(dsh_version)"
-  if [ "$MODE" = native ]; then
-    printf '%-22s %s\n' "service" "$(systemctl is-active dsh.service 2>/dev/null || echo missing)"
-    printf '%-22s %s\n' "updater" "$(systemctl is-active dsh-updater.service 2>/dev/null || echo missing)"
-  else
-    printf '%-22s %s\n' "container" "$(container_health)"
-  fi
-  printf '%-22s %s\n' "web" "$(web_code)"
-  if [ "$MODE" = native ]; then
-    printf '%-22s %s\n' "telegram adapter" "$(
-      node -p "require('$NATIVE_DATA/home/profiles/web/node_modules/dsh-telegram-connector/package.json').version" 2>/dev/null || echo 'not installed'
-    )"
-  else
-    printf '%-22s %s\n' "telegram adapter" "$(
-      "${COMPOSE[@]}" exec -T dsh node -p "require('/data/home/profiles/web/node_modules/dsh-telegram-connector/package.json').version" 2>/dev/null || echo 'not installed'
-    )"
-  fi
+  printf '%-22s %s
+' "setup version" "$(setup_version)"
+  printf '%-22s %s
+' "dsh version" "$(dsh_version)"
+  printf '%-22s %s
+' "service" "$(systemctl is-active dsh.service 2>/dev/null || echo missing)"
+  printf '%-22s %s
+' "updater" "$(systemctl is-active dsh-updater.service 2>/dev/null || echo missing)"
+  printf '%-22s %s
+' "web" "$(web_code)"
+  printf '%-22s %s
+' "telegram adapter" "$(
+    node -p "require('$NATIVE_DATA/home/profiles/web/node_modules/dsh-telegram-connector/package.json').version" 2>/dev/null || echo 'not installed'
+  )"
   ufw_hints "$(env_get DSH_PORT)" "$(env_get DSH_BIND_IP)"
 }
 
@@ -736,13 +558,7 @@ component_names() {
 }
 
 restart_runtime() {
-  if [ "$MODE" = native ]; then
-    systemctl restart dsh.service
-  else
-    # recreate, not restart: restart keeps the container environment that
-    # env_file produced at create time, so a changed port or token never lands
-    "${COMPOSE[@]}" up -d dsh
-  fi
+  systemctl restart dsh.service
 }
 
 component_running() {
@@ -830,9 +646,7 @@ component_apply() {
       local plugin_ref
       plugin_ref="$(node -e 'process.stdout.write(require("./components.json").components.design.plugin.ref)' 2>/dev/null || true)"
       if [ -n "$plugin_ref" ]; then set_env PENPOT_PLUGIN_REF "$plugin_ref" "$ENV_FILE"; fi
-      local api_url
-      if [ "$MODE" = docker ]; then api_url="http://design-frontend:8080"; else api_url="http://$bind:$port"; fi
-      set_env PENPOT_API_URL "$api_url" "$ENV_FILE"
+      set_env PENPOT_API_URL "http://$bind:$port" "$ENV_FILE"
       local token
       token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
       if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$ENV_FILE"; fi
@@ -853,16 +667,11 @@ component_apply() {
   local codes
   codes="$(component_field "$name" health.codes | tr ',' ' ')"
   if [ "$action" != disable ]; then
-    # In Docker mode the probe runs inside the updater container, which shares
-    # the design network: use the service name. On the host, use the published
-    # address. A failed probe is advisory — compose already reported the
-    # containers up, and a host firewall may block container-to-host traffic.
+    # The probe runs from the host against the published address. A failed
+    # probe is advisory — compose already reported the containers up, and a host
+    # firewall may block the path.
     local probe_url
-    if [ "$MODE" = docker ]; then
-      probe_url="http://design-frontend:8080/"
-    else
-      probe_url="$(printf '%s' "$(component_field "$name" health.url)" | sed -e "s/{bind}/$bind/" -e "s/{port}/$port/")"
-    fi
+    probe_url="$(printf '%s' "$(component_field "$name" health.url)" | sed -e "s/{bind}/$bind/" -e "s/{port}/$port/")"
     if component_health "$probe_url" "${codes:-200}"; then
       log "$name is up"
     else
@@ -883,9 +692,9 @@ case "${1:---status}" in
     elif [ -n "${2:-}" ]; then die "unknown option for --doctor: ${2}"; fi
     if [ ! -x "$DEPLOY_DIR/scripts/repair.sh" ]; then die "scripts/repair.sh is missing — reinstall with ./install.sh"; fi
     if [ "$doctor_fix" = 1 ]; then
-      exec bash "$DEPLOY_DIR/scripts/repair.sh" --dir "$DEPLOY_DIR" --mode "$MODE" --fix
+      exec bash "$DEPLOY_DIR/scripts/repair.sh" --dir "$DEPLOY_DIR" --fix
     fi
-    exec bash "$DEPLOY_DIR/scripts/repair.sh" --dir "$DEPLOY_DIR" --mode "$MODE"
+    exec bash "$DEPLOY_DIR/scripts/repair.sh" --dir "$DEPLOY_DIR"
     ;;
   --component)
     comp_name="${2:-}"; comp_action="${3:-enable}"; comp_port=""
@@ -902,17 +711,10 @@ case "${1:---status}" in
     ;;
   --plugin)
     log "re-resolving the Telegram adapter"
-    if [ "$MODE" = native ]; then
-      entry="$(entrypoint_bin)" || die "no entrypoint launcher found — reinstall with ./install.sh"
-      run_as_service "$entry" reset-plugin
-      systemctl restart dsh.service
-      wait_native_healthy && verify
-    else
-      "${COMPOSE[@]}" run --rm dsh reset-plugin
-      log "restarting"
-      "${COMPOSE[@]}" up -d dsh
-      wait_healthy && verify
-    fi
+    entry="$(entrypoint_bin)" || die "no entrypoint launcher found — reinstall with ./install.sh"
+    run_as_service "$entry" reset-plugin
+    systemctl restart dsh.service
+    wait_native_healthy && verify
     ;;
   --self-check)
     if [ "${2:-}" = "--i-know-versions-are-incompatible" ]; then self_check 1

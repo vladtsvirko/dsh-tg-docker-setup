@@ -8,21 +8,21 @@ recoverable".
 
 ```text
 Telegram → connector → dsh runtime / supervisor
-                    └→ updater sidecar → docker → host
+                    └→ dsh-updater.service → systemd → host
 ```
 
 Telegram is the **only** ordinary control path. There is no host shell exposed to
-the bot, and no Docker socket in the runtime container. In docker mode the bot
-container also has no systemd unit; in native mode it is a systemd service, but
-still with no shell or Docker socket for the bot (the updater service is the only
-privileged unit).
+the bot. The runtime is an unprivileged systemd service: it cannot restart its
+own unit, write outside its data directory, or modify the root-owned checkout.
+The updater service is the only privileged unit, and it exists to restart the
+runtime.
 
 ### Covered without a host shell
 
 - prompts, sessions, topics, `/sync`, model and timezone changes;
 - `/system restart`, trials, `/system confirm`, `/system rollback` (profile);
 - `/system update connector` (reinstall the pinned connector);
-- `/system update all` (drain, setup/image update, automatic rollback);
+- `/system update all` (drain, setup update, automatic rollback);
 - plugin install/enable/disable/remove through the approval flow;
 - `/about`, `/system status`, `/status` diagnostics;
 - Telegram reports for update success, failure and rollback.
@@ -31,55 +31,36 @@ privileged unit).
 
 These cannot be done through the bot, by design or by physics:
 
-- the deployment checkout: first install and editing `.env`;
-- running `docker compose`, image builds or `update.sh` from a workspace **inside
-  the runtime container** — that container has no Docker CLI or socket. Node/npm
-  tests and static checks do work there; image/Compose checks need a host
-  checkout;
-- rebuilding or changing the **updater image** or its dependencies
-  (`updater.Dockerfile`, Node, Docker CLI/compose, git, curl);
-- fixing Docker, the daemon, disk-full, bind mounts, file ownership outside the
-  container, or a host firewall;
-- recovering a wedged updater, a half-applied update, or a dsh image that cannot
+- the deployment checkout: first install, editing `.env`, changing the units;
+- running `update.sh` or `install.sh` from a workspace **inside the runtime** —
+  the service user cannot write the root-owned checkout or restart the unit.
+  Node/npm tests and static checks do work there;
+- changing the updater service's unit or the host packages it uses (Node, git,
+  curl);
+- fixing systemd, a full disk, ownership outside `data/`, or a host firewall;
+- recovering a wedged updater, a half-applied update, or a runtime that cannot
   start at all;
-- reading `docker compose logs` when the connector itself is down or cannot
+- reading `journalctl -u dsh.service` when the connector itself is down or cannot
   reach Telegram;
 - adding publisher bots to groups (a human must add them; the Bot API cannot);
 - creating a group or enabling Topics (Telegram only allows a human to do this);
-- changing `DSH_BIND_IP`, the port, UID/GID, memory/CPU limits, or the compose
-  file;
+- changing `DSH_BIND_IP`, the port, the resource share, the tier, or the unit
+  files;
 - retrieving the web token if the browser cookie is gone and the runtime logs
   are unreachable;
-- rolling the **image** back manually. `/system rollback` restores the profile,
-  not the image.
+- rolling the setup tag back manually. `/system rollback` restores the profile,
+  not the checkout or the tag.
 
 If SSH is removed, those cases have no remote recovery path. Keep a break-glass
 option (physical console, out-of-band management, or a documented SSH key) if
-the deployment matters. The update gate reduces the chance of a bad image, but it
-cannot repair a dead bot, a dead updater, or a dead Docker daemon.
-
-## Native mode (no Docker)
-
-`install.sh --mode native` trades the container boundary for a plain systemd
-service. What changes for the operator:
-
-- the agent can read the service user's files and reach the host network;
-- there is no image, so no image rollback: a failed update restores the previous
-  tag checkout and the profile snapshot instead;
-- `/system update all` still works from Telegram (the updater runs on
-  127.0.0.1), but the updater service is root because it restarts
-  `dsh.service`;
-- `/system update connector` and the supervisor trials behave the same;
-- root is not a supported runtime user — pick `privileged` (Docker group) or a
-  VM instead.
-
-See [HOST.md](HOST.md) for the layout, tiers and switching.
+the deployment matters. The update gate reduces the chance of a bad release, but
+it cannot repair a dead bot, a dead updater, or a dead systemd.
 
 ## Update restrictions
 
 - `/system update all` drains **all** agents, including sessions owned by a web
-  UI tab. A web turn can still start in the instant before the updater stops the
-  container; that race is best-effort and accepted.
+  UI tab. A web turn can still start in the instant before the updater restarts
+  the service; that race is best-effort and accepted.
 - The updater stops a job that runs longer than `DSH_UPDATE_TIMEOUT_SECONDS`
   (default 30 minutes) and `/system cancel` cancels a running one: the job gets
   `SIGTERM`, then `SIGKILL` after ten seconds. A cancelled or timed-out update is
@@ -91,20 +72,19 @@ See [HOST.md](HOST.md) for the layout, tiers and switching.
 - Compatible means same DSH part and same product major. Crossing either needs
   `--i-know-versions-are-incompatible`; `/system` never crosses without it.
 - The updater refuses older targets. It only moves forward.
-- The updater updates the **dsh** service, not its own image. Its mounted
-  `updater.mjs` reloads, but a change to `updater.Dockerfile` or its OS packages
-  needs a host rebuild.
+- The updater updates the **dsh** service; it does not rewrite its own unit. Its
+  code is the checkout it runs, so a unit change needs
+  `sudo ./install.sh --yes`, not an update.
 - A crash of the updater during apply is not automatically resumed. The persisted
-  `data/update/result.json`, the checkout, the images and the container state are
-  the recovery inputs.
-- If the health gate fails, the updater restores the previous image and the
-  snapshot, then reports the last log lines. Verification includes the
-  **published** web port, not only the container healthcheck.
+  `data/update/result.json`, the checkout and the snapshot are the recovery
+  inputs.
+- If the health gate fails, the updater restores the snapshot and the previous
+  tag, then reports the last log lines. Verification includes the **web port**,
+  not only the unit being active.
 
 ## Rollback and data
 
-- One previous image is kept (`dsh-backend:self-previous`) and one
-  `backups/self-*.tgz` (home + supervisor). There is no history.
+- One `backups/self-*.tgz` (home + supervisor) is kept. There is no history.
 - `data/workspace` is never snapshotted or restored. Files created there after
   the snapshot survive a profile rollback, but a failed deployment's own changes
   to the workspace are not undone.
@@ -112,27 +92,32 @@ See [HOST.md](HOST.md) for the layout, tiers and switching.
   written after that snapshot is lost if a rollback restores it.
 - A profile trial (supervisor) covers `data/home/profiles/web` only. Sessions,
   bindings, the workspace and the setup checkout are outside it.
-- A direct edit under `data/home` while the container is stopped is outside every
+- A direct edit under `data/home` while the service is stopped is outside every
   trial.
-- `/system rollback` does not move the image or the setup tag. Image rollback is
-  automatic on a failed health gate; manual image rollback is a host operation.
+- `/system rollback` does not move the setup tag. A failed health gate rolls the
+  tag back automatically; a manual tag rollback is a host operation (checkout
+  plus snapshot).
 
 ## Security boundaries
 
-- The runtime container is the sandbox. It runs with
-  `DSH_PERMISSION_MODE=danger-full-access`, a read-only rootfs, `cap_drop: ALL`,
-  `no-new-privileges`, and no Docker socket. Everything mounted under `/data` is
+- The runtime is an unprivileged systemd service running as `dsh`. The unit
+  narrows writes, but it is not a filesystem sandbox: the agent can read what
+  that user can read. It runs with `DSH_PERMISSION_MODE=danger-full-access`,
+  `ProtectSystem=strict`, `ProtectHome=yes`, `NoNewPrivileges`, `PrivateTmp`,
+  and writes only under `<dir>/data`. Everything under `/srv/dsh/data` is
   reachable by the agent.
-- The **updater** is the exception: it mounts the Docker socket and is therefore
-  host-root-equivalent. It has no published port and is reachable only on the
-  internal `ops` network with `DSH_UPDATER_TOKEN`. Treat that token as a root
-  credential.
+- The **updater** is the exception: it runs as root because restarting
+  `dsh.service` requires it. It binds `127.0.0.1:8787` only and is reachable
+  only with `DSH_UPDATER_TOKEN`. Treat that token as a root credential.
+- The agent and the connector share the `dsh` uid, so the agent can read
+  `.env`, including `DSH_UPDATER_TOKEN`. A prompt-injected agent can trigger a
+  release update (a fixed action), not arbitrary root commands.
 - `DSH_UPDATER_TOKEN` empty disables apply; `/system update all` degrades to
   diagnostics/host instructions.
 - `DSH_BIND_IP` publishes the web UI on one host interface. Never use `0.0.0.0`;
   the UI drives a shell. `127.0.0.1` means host-only, normally via an SSH tunnel,
   and requires `DSH_PUBLIC_URL=http://127.0.0.1:<port>/` as well — without it the
-  UI advertises the container's own address and reconnects forever.
+  UI advertises the bind address and reconnects forever.
 - `ALLOWED_USER_IDS` is the only Telegram authorization gate. Empty refuses
   everyone, including the owner.
 - The web URL token and its signed cookie are credentials. Do not paste them into
@@ -162,8 +147,8 @@ See [HOST.md](HOST.md) for the layout, tiers and switching.
   threads inside topics.
 - The web UI is plain HTTP on the LAN unless a proxy provides TLS. The token and
   cookie cross that LAN in clear text.
-- TLS is a proxy's job: the image ships no certificate mount, and the entrypoint
-  does not pass `--tls-cert`/`--tls-key`. Terminate TLS in front, set
+- TLS is a proxy's job: the entrypoint does not pass `--tls-cert`/`--tls-key`,
+  and the setup does not terminate TLS. Terminate TLS in front, set
   `DSH_PUBLIC_URL` to the **https** root, and keep one authority: the entrypoint
   derives the single trusted host from `DSH_PUBLIC_URL`, so a second proxy
   hostname answers 403 until it is the configured one.

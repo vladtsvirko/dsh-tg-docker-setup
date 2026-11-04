@@ -5,7 +5,7 @@ Telegram **and** a browser, and then keep running. It assumes no prior knowledge
 of DSH; the [README](../README.md) is the reference, and [UAT.md](UAT.md) is the
 exhaustive acceptance run.
 
-Budget ~20 minutes, most of it the first image build.
+Budget ~20 minutes, most of it installing Node and the first boot.
 
 ## What you are installing
 
@@ -13,8 +13,8 @@ One runtime, two clients:
 
 ```
 browser ──► http://<host>:4310 ──┐
-                                 ├──► dsh (one agent runtime, one session store)
-Telegram ─► api.telegram.org ────┘        └── ./data (home + workspace)
+                                 ├──► dsh (systemd service, user dsh)
+Telegram ─► api.telegram.org ────┘        └── /srv/dsh/data (home + workspace)
 ```
 
 Telegram and the web UI are views of the same runtime — not two installations.
@@ -26,7 +26,7 @@ Have these ready; the installer asks for them:
 
 | You need | Why |
 |---|---|
-| A Linux host (Ubuntu 24.04 / Debian 12 tested) with `sudo` | the installer adds Docker (or Node + systemd for native mode) |
+| A Linux host (Ubuntu 24.04 / Debian 12 tested) with `sudo` | the installer adds Node 22 and the systemd units (Docker only for the optional Penpot stack) |
 | A provider API key | the agent cannot answer without one |
 | A Telegram bot token | from [@BotFather](https://t.me/BotFather) → `/newbot` |
 | Privacy mode **off** for that bot | BotFather → `/setprivacy` → Disable, or it never sees plain messages in topics |
@@ -44,7 +44,9 @@ wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main
 
 Run it as your normal user (with `sudo` available) or as root. It fetches the
 newest release, asks the questions above, shows a plan, and only then changes
-anything.
+anything. One of its questions is a CPU/RAM share for the runtime (default 30%
+of the machine, `0` = unlimited); it becomes `MemoryMax`/`CPUQuota`/`TasksMax`
+on `dsh.service`.
 
 Want to see the plan without touching the host?
 
@@ -54,19 +56,20 @@ wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main
 
 Or from a checkout: `git clone … && cd dsh-tg-docker-setup && ./install.sh`.
 
-What it sets up that a hand-rolled `docker compose` does not: the updater token
+What it sets up that a hand-rolled `dsh` service does not: the updater token
 (`/system update all` needs it), the agent's git author, the profile repair pass,
-and the mode switch. Prefer it over copying `.env.example` by hand.
+and the wiring between the runtime and the updater. Prefer it over copying
+`.env.example` by hand.
 
 You can leave the bot token blank and get a **web-only** deployment. The adapter
-is simply not installed; add the token to `.env` later and recreate the
-container (`docker compose up -d dsh`), and that boot installs it. The same
+is simply not installed; add the token to `.env` later and restart the service
+(`sudo systemctl restart dsh.service`), and that boot installs it. The same
 works in reverse: empty the token (or set `DSH_TELEGRAM_ENABLED=off`) to go back
 to web-only without deleting anything.
 
 At the end it prints the bare web origin and a health summary. If the health
 check fails it stops there — and a failed install is **not** rolled back, so the
-deployment may be partially applied. The logs are the next step, not a re-run:
+deployment may be partially applied. The journal is the next step, not a re-run:
 see [If something is wrong](#if-something-is-wrong).
 
 ## 2. Open the web UI
@@ -77,8 +80,7 @@ origin instead (it could not read the log), that origin answers **401 on
 purpose**; the signed link is in the runtime log:
 
 ```sh
-docker compose logs dsh | grep 'dsh web:'      # docker
-journalctl -u dsh.service | grep 'dsh web:'    # native
+journalctl -u dsh.service | grep 'dsh web:'
 ```
 
 Open the signed URL. Two things to know:
@@ -150,8 +152,8 @@ app is populated for the chat you are in.
 ## 6. Day two, over SSH
 
 The normal control path is Telegram. SSH is for the things a bot cannot do:
-editing `.env`, changing the port or bind address, and recovering from a dead
-runtime. [LIMITS.md](LIMITS.md) is the exact boundary.
+editing `.env`, changing the port or bind address, changing the resource share,
+and recovering from a dead runtime. [LIMITS.md](LIMITS.md) is the exact boundary.
 
 ```sh
 # what is installed, and is it healthy
@@ -160,35 +162,48 @@ runtime. [LIMITS.md](LIMITS.md) is the exact boundary.
 
 # update the whole setup (the bot does this too, via /system update all)
 ./update.sh --self-check         # what would change
-./update.sh --self               # build, health gate, automatic rollback
+sudo ./update.sh --self          # check out, install, health gate, automatic rollback
 
-# change a setting: edit .env, then recreate (a plain restart keeps the old env)
-docker compose up -d dsh         # native: systemctl restart dsh.service
+# change a setting: edit .env, then restart (the unit re-reads it on start)
+sudo systemctl restart dsh.service
 ```
+
+`update.sh --self` needs root (`sudo ./update.sh --self`); it writes the
+root-owned checkout and restarts `dsh.service`.
 
 **Add a project.** Create the workspace (`/workspace new <name>`), then clone
-into it *from inside the runtime*, where the git credentials apply:
+into it *as the service user*, where the generated git credentials apply:
 
 ```sh
-docker compose exec dsh git clone git@github.com:you/private-repo.git /data/workspace/<name>
+sudo -u dsh env HOME=/srv/dsh/data/home \
+  git clone git@github.com:you/private-repo.git /srv/dsh/data/workspace/<name>
 ```
 
-Private repositories need a token or SSH key in `secrets/git/profiles.json`;
-[docs/GIT.md](GIT.md) has the manifest and the SSH recipe.
+The same works from the agent's bash tool inside the runtime. Private
+repositories need a token or SSH key in `secrets/git/profiles.json`; [GIT.md](GIT.md)
+has the manifest and the SSH recipe.
 
 **Add a plugin.** Prefer `/plugin add <spec>` in the bot chat: it inspects the
-package, asks for confirmation, and opens a rollback window. On the host the
-same thing is `docker compose exec dsh dsh plugin --profile web add <spec>`,
-followed by `/system restart` (or `docker compose up -d dsh`) — and pnpm may
-block a git package's build script, which `/plugin approve` handles in the chat.
+package, asks for confirmation, and opens a rollback window. On the host, run
+the same command as the service user, then restart:
+
+```sh
+cd /srv/dsh/data/workspace
+sudo -u dsh env HOME=/srv/dsh/data/home DSH_HOME=/srv/dsh/data/home \
+  DSH_WORKSPACE=/srv/dsh/data/workspace dsh plugin --profile web add <spec>
+```
+
+`/system restart` (or `sudo systemctl restart dsh.service`) applies it — and pnpm
+may block a git package's build script, which `/plugin approve` handles in the
+chat.
 
 ## If something is wrong
 
 | Symptom | First thing to run |
 |---|---|
-| install ended before the summary | `docker compose logs dsh` (native: `journalctl -u dsh.service -n 100`) |
-| web UI loads but reconnects forever | set `DSH_PUBLIC_URL` to the URL you actually open, then `docker compose up -d dsh` |
-| bot silent | check `ALLOWED_USER_IDS`, privacy mode, and `docker compose logs dsh \| grep -i telegram` |
+| install ended before the summary | `journalctl -u dsh.service -n 100` |
+| web UI loads but reconnects forever | set `DSH_PUBLIC_URL` to the URL you actually open, then `sudo systemctl restart dsh.service` |
+| bot silent | check `ALLOWED_USER_IDS`, privacy mode, and `journalctl -u dsh.service \| grep -i telegram` |
 | model calls fail | `./install.sh --doctor` (a key saved in the web UI can outrank `.env`) |
 | an update went wrong | `/system status`, then [UPGRADE.md](UPGRADE.md) |
 
@@ -197,5 +212,5 @@ block a git package's build script, which `/plugin approve` handles in the chat.
 - [README.md](../README.md) — every knob and the operating reference.
 - [UPGRADE.md](UPGRADE.md) — upgrades, the health gate, and the rollback drill.
 - [GIT.md](GIT.md) — repository access for the agent.
-- [HOST.md](HOST.md) — native (no-Docker) mode, tiers, switching modes.
+- [HOST.md](HOST.md) — the host deployment: units, tiers, resource limits, update authority.
 - [LIMITS.md](LIMITS.md) — what still needs a host shell, and why.

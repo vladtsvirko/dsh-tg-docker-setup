@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# First-boot setup + launch for the DeepSeek Harness container.
+# First-boot setup + launch for the DeepSeek Harness runtime.
 #
 #   serve         (default)  prepare the profile, then run the web UI (+ Telegram if configured)
 #   init                     prepare the profile and exit
@@ -11,8 +11,8 @@
 #   * Telegram         — DSH_TELEGRAM_BOT_TOKEN, on exactly when the token is set
 set -euo pipefail
 
-DSH_HOME="${DSH_HOME:-/data/home}"
-DSH_WORKSPACE="${DSH_WORKSPACE:-/data/workspace}"
+DSH_HOME="${DSH_HOME:-/srv/dsh/data/home}"
+DSH_WORKSPACE="${DSH_WORKSPACE:-/srv/dsh/data/workspace}"
 DSH_PORT="${DSH_PORT:-4310}"
 SETUP_VERSION="${DSH_SETUP_VERSION:-0.0.0}"
 PLUGIN_REF="${DSH_TELEGRAM_PLUGIN:-github:vladtsvirko/dsh-telegram-connector#v${SETUP_VERSION}}"
@@ -65,7 +65,7 @@ PATCH="$PROFILE_DIR/cordis.patch.yml"
 
 # --- supervisor -----------------------------------------------------------
 # The supervisor owns restarts and the rollback snapshot. Its control socket is
-# loopback-only and needs a bearer token; a fresh one per container start is
+# loopback-only and needs a bearer token; a fresh one per start is
 # enough, because the connector reads it from this same environment.
 SUPERVISOR_TOKEN="${DSH_SUPERVISOR_TOKEN:-}"
 if [ -z "$SUPERVISOR_TOKEN" ]; then
@@ -77,7 +77,7 @@ export DSH_SUPERVISOR_TOKEN="$SUPERVISOR_TOKEN"
 export DSH_SUPERVISOR_URL="${DSH_SUPERVISOR_URL:-http://127.0.0.1:8469}"
 export DSH_SUPERVISOR_PORT="${DSH_SUPERVISOR_PORT:-8469}"
 export DSH_SUPERVISOR_PROFILE="$PROFILE_DIR"
-export DSH_SUPERVISOR_STATE="${DSH_SUPERVISOR_STATE:-/data/supervisor}"
+export DSH_SUPERVISOR_STATE="${DSH_SUPERVISOR_STATE:-/srv/dsh/data/supervisor}"
 
 log()  { printf '  [dsh] %s\n' "$*"; }
 warn() { printf '  [dsh] WARNING: %s\n' "$*" >&2; }
@@ -98,26 +98,26 @@ telegram_mode() {
 }
 
 prepare_dirs() {
-  # Docker creates a missing bind-mount source as root:root, so a first run on a
-  # fresh checkout lands here with an unwritable /data. Fail with the fix rather
-  # than looping on "mkdir: cannot create directory".
+  # A first run on a fresh checkout can land here with a data directory that a
+  # root install left root-owned. Fail with the fix rather than looping on
+  # "mkdir: cannot create directory".
   if ! mkdir -p "$DSH_HOME" "$DSH_WORKSPACE" 2>/dev/null ||
      ! : > "$DSH_HOME/.write-test" 2>/dev/null; then
-    warn "/data is not writable by uid $(id -u):$(id -g)"
-    warn "the bind-mounted ./data directory is probably owned by root — fix it on the host:"
-    warn "  sudo chown -R $(id -u):$(id -g) ./data"
-    warn "  docker compose restart dsh"
+    warn "$DSH_HOME is not writable by uid $(id -u):$(id -g)"
+    warn "the data directory is probably owned by root — fix it on the host:"
+    warn "  sudo chown -R $(id -u):$(id -g) ${DSH_HOME%/home}/"
+    warn "  sudo systemctl restart dsh.service"
     exit 1
   fi
   rm -f "$DSH_HOME/.write-test"
-  # native addon cache must live on an exec-capable filesystem, not /tmp
-  mkdir -p "${NARB_NATIVE_CACHE_DIR:-/data/.cache/native}" 2>/dev/null || true
+  # the addon cache must live on an exec-capable filesystem, not /tmp
+  mkdir -p "${NARB_NATIVE_CACHE_DIR:-${DSH_HOME%/home}/.cache/native}" 2>/dev/null || true
   chmod 0750 "$DSH_HOME" "$DSH_WORKSPACE" 2>/dev/null || true
 }
 
 # --- one runtime per data directory ---------------------------------------
-# Two runtimes over the same /data (a native service left running beside the
-# Docker stack, a second container from another checkout) corrupt the session
+# Two runtimes over the same data directory (two services from different
+# checkouts, or a hand-started runtime beside the service) corrupt the session
 # store, fight over the Telegram long poll, and each holds the other's session
 # write handles. That last one is what the user sees: the web UI of one runtime
 # shows a stale workspace list while the other's Telegram says "this session is
@@ -154,7 +154,7 @@ acquire_instance() {
       holder="$(instance_holder)"
       warn "another dsh runtime already uses $DATA_ROOT${holder:+ — its marker says $holder}"
       warn "two runtimes on one data directory corrupt sessions and hold each other's write handles;"
-      warn "stop the other one first:  docker compose down  ·  sudo systemctl stop dsh.service"
+      warn "stop the other one first:  sudo systemctl stop dsh.service"
     fi
     [ "$waited" -ge "$wait_s" ] && return 1
     sleep 1
@@ -168,7 +168,7 @@ acquire_instance() {
   # Every value goes through %s so a missing one can never produce invalid JSON:
   # the plugin parses this file and must never crash on it.
   printf '{"id":"%s","mode":"%s","pid":%s,"version":"%s","startedAt":"%s"}\n' \
-    "$INSTANCE_ID" "${MODE:-docker}" "$$" "$SETUP_VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$INSTANCE_FILE.tmp" 2>/dev/null &&
+    "$INSTANCE_ID" "native" "$$" "$SETUP_VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$INSTANCE_FILE.tmp" 2>/dev/null &&
     mv "$INSTANCE_FILE.tmp" "$INSTANCE_FILE" 2>/dev/null || true
   return 0
 }
@@ -302,7 +302,7 @@ install_plugin() {
     rm -rf "$PROFILE_DIR/node_modules/$PLUGIN_PKG"
   fi
   command -v pnpm >/dev/null 2>&1 ||
-    warn "pnpm is not on PATH — the adapter's build step will fail (see Dockerfile)"
+    warn "pnpm is not on PATH — the adapter's build step will fail; install pnpm"
   log "installing the Telegram adapter (needs network)"
   local out attempt
   for attempt in 1 2 3 4; do
@@ -394,8 +394,8 @@ ensure_compat() {
 }
 
 setup_git_credentials() {
-  # Docker mounts ./secrets at /run/secrets; a native install keeps it inside the
-  # deployment and points DSH_GIT_SECRETS there.
+  # The manifest lives inside the deployment; the unit points DSH_GIT_SECRETS
+  # at it. /run/secrets remains the fallback for a manual run.
   local base="${DSH_GIT_SECRETS:-/run/secrets/git}"
   local manifest="$base/profiles.json"
   [ -f "$manifest" ] || return 0
@@ -415,7 +415,7 @@ install_penpot() {
     return 0
   fi
   command -v pnpm >/dev/null 2>&1 ||
-    warn "pnpm is not on PATH — the plugin's build step will fail (see Dockerfile)"
+    warn "pnpm is not on PATH — the plugin's build step will fail; install pnpm"
   log "installing the Penpot plugin (needs network)"
   local out attempt key
   for attempt in 1 2 3; do
@@ -522,27 +522,11 @@ prepare() {
   fi
 }
 
-# The address Docker publishes the port to: the container's default-network
-# interface. `hostname -I` lists every network in arbitrary order, so a
-# recreate can put the internal `ops` address first and the web UI then binds
-# where the published port never forwards. The default route uniquely names
-# the right interface (`ops` is internal and has no default route).
+# The runtime binds the configured address directly. 127.0.0.1 is a real
+# host-only bind (dsh rejects wildcards), so a loopback install must not be
+# translated to a LAN address here.
 web_bind_ip() {
-  # Native mode runs on the host, so DSH_BIND_IP is the real bind address and a
-  # host-only install must stay off the LAN. Inside the container the bind has
-  # to be the container's own address (dsh rejects wildcards) and the published
-  # port decides reachability, so the host-side value is not usable there.
-  if [ "${MODE:-docker}" = native ] && [ -n "${DSH_BIND_IP:-}" ]; then
-    printf '%s\n' "$DSH_BIND_IP"
-    return 0
-  fi
-  local ip=""
-  if command -v ip >/dev/null 2>&1; then
-    ip="$(ip -4 route get 1.1.1.1 2>/dev/null \
-      | awk '{ for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }')"
-  fi
-  [ -n "$ip" ] || ip="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | head -n1)"
-  printf '%s\n' "${ip:-127.0.0.1}"
+  printf '%s\n' "${DSH_BIND_IP:-127.0.0.1}"
 }
 
 serve() {
@@ -555,15 +539,11 @@ serve() {
     # container's policy ignores the code anyway; the wait above bounds both.
     exit 0
   fi
-  # dsh rejects wildcard binds, so bind the container's own (non-loopback)
-  # address; that is what the published port forwards to.
   bind="$(web_bind_ip)"
 
-  # The advertised root is what the browser is told to dial — for the UI's API and
-  # WebSocket, not just the printed link. Left to itself the container advertises
-  # its own address (172.x), which the browser cannot reach through a published
-  # port, so the UI loads and then reconnects forever. DSH_BIND_IP is the host
-  # side of that mapping (compose passes it through via env_file).
+  # The advertised root is what the browser is told to dial — for the UI's API
+  # and WebSocket, not just the printed link. A loopback bind needs it set
+  # explicitly, or the runtime advertises an address the browser cannot use.
   public="${DSH_PUBLIC_URL:-}"
   if [ -z "$public" ] && [ -n "${DSH_BIND_IP:-}" ] && [ "${DSH_BIND_IP}" != "127.0.0.1" ]; then
     public="http://${DSH_BIND_IP}:${DSH_PORT}/"

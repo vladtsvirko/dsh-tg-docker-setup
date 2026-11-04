@@ -56,7 +56,6 @@ async function fixture(mode = 'docker', env = {}) {
   const dir = await mkdtemp(join(tmpdir(), `repair-${mode}-`))
   const port = String(45000 + Math.floor(Math.random() * 1000))
   const values = {
-    MODE: mode,
     DSH_PORT: port,
     DSH_BIND_IP: '127.0.0.1',
     DSH_PROVIDER: 'opencode-go',
@@ -66,11 +65,6 @@ async function fixture(mode = 'docker', env = {}) {
     DSH_TELEGRAM_ENABLED: 'auto',
     DSH_UPDATER_TOKEN: 'updater-token-for-the-test',
     DSH_SETUP_VERSION: (await readFile(join(here, 'VERSION'), 'utf8')).trim(),
-    // The installer writes the *invoking* user's ids, and the doctor compares
-    // them with the data directory it just created. A CI runner is uid 1001,
-    // not 1000, so the fixture must not guess.
-    DSH_UID: String(typeof process.getuid === 'function' ? process.getuid() : 1000),
-    DSH_GID: String(typeof process.getgid === 'function' ? process.getgid() : 1000),
     ...env,
   }
   const body = Object.entries(values)
@@ -215,25 +209,6 @@ test('a duplicated managed block in cordis.patch.yml is removed, keeping the fir
   }
 })
 
-test('a live marker from another mode is a failure; the same mode is fine', async () => {
-  const dir = await fixture('docker')
-  const marker = join(dir, 'data', '.runtime.json')
-  try {
-    // This test process stands in for a running runtime: it is alive.
-    await writeFile(marker, `${JSON.stringify({ mode: 'native', pid: process.pid, startedAt: '2026-01-01T00:00:00Z' })}\n`)
-    const other = await run(['--dir', dir, '--mode', 'docker'])
-    assert.equal(other.code, 1)
-    assert.match(other.out, /fail\s+instance\s+a native runtime is using/)
-
-    await writeFile(marker, `${JSON.stringify({ mode: 'docker', pid: process.pid, startedAt: '2026-01-01T00:00:00Z' })}\n`)
-    const same = await run(['--dir', dir, '--mode', 'docker'])
-    assert.equal(same.code, 0, same.out)
-    assert.match(same.out, /ok\s+instance\s+the docker runtime owns/)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
 test('a stale marker from a dead pid is not a failure', async () => {
   const dir = await fixture('docker')
   try {
@@ -254,7 +229,7 @@ test('install.sh --doctor runs the doctor instead of installing', async () => {
       timeout: 20000,
       env: { ...process.env, ...shimEnv },
     })
-    assert.match(stdout, /checking docker deployment/)
+    assert.match(stdout, /checking deployment in/)
     assert.match(stdout, /provider-key/)
     assert.doesNotMatch(stdout, /==> plan/)
   } finally {
@@ -386,10 +361,9 @@ test('a data directory owned by another user is a failure, not a warning', async
   // The installer writes the invoking user's ids; a deployment whose data is
   // owned by someone else cannot write its sessions, and the runtime then fails
   // at the first turn rather than at boot.
-  const mismatch = typeof process.getuid === 'function' ? (process.getuid() === 0 ? 1 : 0) : 1
-  const dir = await fixture('docker', { DSH_UID: String(mismatch), DSH_GID: String(mismatch) })
+  const dir = await fixture()
   try {
-    const { code, out } = await run(['--dir', dir, '--mode', 'docker'])
+    const { code, out } = await run(['--dir', dir], { env: { SERVICE_USER: 'root' } })
     assert.equal(code, 1)
     assert.match(out, /fail\s+data-owner\s+.*is owned by .*, not /)
   } finally {
@@ -437,7 +411,6 @@ async function entrypointFixture() {
     DSH_PORT: '45999',
     DSH_SETUP_VERSION: '0.0.0-test',
     NARB_NATIVE_CACHE_DIR: join(dir, '.cache', 'native'),
-    MODE: 'native',
     PENPOT_ENABLED: '0',
     DSH_TELEGRAM_ENABLED: 'off',
     DSH_TELEGRAM_BOT_TOKEN: '',
@@ -456,6 +429,17 @@ test('entrypoint serve writes a parseable instance marker with this pid and id',
     assert.equal(marker.version, '0.0.0-test')
     assert.ok(Number.isInteger(marker.pid) && (marker.pid ?? 0) > 0, `pid must be a positive integer, got ${String(marker.pid)}`)
     assert.match(marker.id ?? '', /^0\.0\.0-test-\d+-\d+$/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('the runtime binds DSH_BIND_IP directly, loopback included', async () => {
+  const { dir, env } = await entrypointFixture()
+  try {
+    const { code, out } = await runEntrypoint({ ...env, DSH_BIND_IP: '127.0.0.1', DSH_PORT: '45998' })
+    assert.equal(code, 0, out)
+    assert.match(out, /listening on 127\.0\.0\.1:45998/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

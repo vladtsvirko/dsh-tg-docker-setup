@@ -7,6 +7,49 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.8.0
+
+> **After updating from 0.7.0, run `sudo ./install.sh --yes` once.** This release
+> changes the systemd units (resource limits, `dsh-updater.service`
+> `Restart=always`), and `update.sh` updates the checkout and the runtime but
+> does not rewrite units.
+
+**The Docker deployment mode is gone.** The setup now installs one thing: a
+systemd service on this host. Docker is still installed and used for the
+optional Penpot design stack, and nothing else. There is no migration path for
+an old Docker deployment because there are none left; data is the same directory
+tree, so pointing `--dir` at it is enough if one ever reappears.
+
+### Added
+
+- **A CPU/RAM share for the runtime.** The installer asks for a percent of the
+  machine (default 30, `0` = unlimited) and writes `MemoryMax`, `CPUQuota` and
+  `TasksMax=512` to `dsh.service`. A repair keeps `DSH_RESOURCE_PERCENT`.
+- `install.sh --yes` is documented as the unattended path; `--mode` is gone.
+
+### Changed
+
+- `update.sh --self` is the only apply path: snapshot, checkout, install the
+  matching DSH globally, prepare as the service user, restart, health gate,
+  rollback by checkout + snapshot. No image build, no `self-previous`, no
+  compose.
+- `scripts/repair.sh` no longer has a Docker branch; it still accepts `--mode`
+  for a 0.7.x caller and ignores it.
+- `scripts/check-version.mjs` validates `VERSION` and the tag only; the DSH part
+  is derived, so there is no Dockerfile or image tag to keep in step.
+- `dsh-updater.service` uses `Restart=always`: after a successful apply the
+  updater exits 0 to load the checkout it just installed, and `on-failure`
+  left it dead until the next boot.
+- The entrypoint's defaults and messages use `/srv/dsh/data` paths; the instance
+  marker records `native`.
+- Docs are written for the one deployment shape; `docs/PARITY.md` is gone.
+
+### Fixed
+
+- The updater reloads after an apply on a native host (see `Restart=always`).
+- `install.sh` no longer asks for a deployment mode, and a `--check` run no
+  longer reads or writes a container's UID/GID.
+
 ## 0.2.1-rc.5-0.7.0
 
 A fixes release plus one feature: the installer can now hold several git

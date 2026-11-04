@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 #
-# Check — and with --fix, repair — a deployed DSH setup, in either mode.
+# Check — and with --fix, repair — a deployed DSH setup.
 #
 # This is the one implementation of "is this deployment healthy, and what is
 # still wrong with it". install.sh runs it at the end of every install/repair,
 # update.sh runs it after every successful self-update, and both expose it as
-# `--doctor`. Keeping it out of both scripts is what makes a native deployment
-# and a Docker deployment answer the same questions in the same words.
+# `--doctor`. Keeping it out of both scripts is what makes an install, a repair
+# and an update answer the same questions in the same words.
 #
 # What it checks, and why each one has bitten a real deployment:
 #
 #   env-file          a key written twice, a CRLF line or a world-readable file
-#                     is invisible until compose/systemd disagree about a value.
+#                     is invisible until systemd and the runtime disagree.
 #   provider-key      an empty or malformed key boots fine and fails every model
 #                     call with an error that names the variable, not the cause.
 #   credential-store  the runtime's .credentials.yaml outranks the process
@@ -25,7 +25,7 @@
 #                     surfaces as "this session is held by another client".
 #   version           .env records the setup release that wrote it; a stale one
 #                     makes an update believe it is somewhere it is not.
-#   service           the unit/container is the deployment, not the checkout.
+#   service           the unit is the deployment, not the checkout.
 #   web               the port the operator will open, actually listening.
 #   data-owner        a root-owned data directory after a `sudo ./install.sh`
 #                     run is the classic "cannot write to /data" first boot.
@@ -34,7 +34,7 @@
 # enough to assert on and readable enough to paste into a chat.
 #
 # Usage:
-#   scripts/repair.sh [--mode docker|native] [--dir PATH] [--fix] [--quiet]
+#   scripts/repair.sh [--dir PATH] [--fix] [--quiet]
 #
 # Exit: 0 when nothing is wrong (warnings included), 1 when a failure remains.
 #
@@ -52,8 +52,10 @@ FIX=0
 QUIET=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --mode) MODE="${2:?--mode needs a value}"; shift 2 ;;
-    --mode=*) MODE="${1#*=}"; shift ;;
+    # Accepted for compatibility with a 0.7.x caller; the deployment has one
+    # shape now, so the value is ignored.
+    --mode) shift 2 ;;
+    --mode=*) shift ;;
     --dir) DIR="${2:?--dir needs a value}"; shift 2 ;;
     --dir=*) DIR="${1#*=}"; shift ;;
     --fix) FIX=1; shift ;;
@@ -70,13 +72,11 @@ ENV_FILE="$DIR/.env"
 [ -f "$ENV_FILE" ] || die "no $ENV_FILE in $DIR — pass --dir with the deployment directory"
 
 env_get() { sed -n "s/^$1=//p" "$ENV_FILE" | head -1; }
-# The last assignment wins for systemd, compose and Node's own .env loader, so
+# The last assignment wins for systemd and Node's own .env loader, so
 # that is the value the runtime actually sees.
 env_last() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -1; }
 
-[ -n "$MODE" ] || MODE="$(env_get MODE)"
-[ -n "$MODE" ] || MODE=docker
-case "$MODE" in docker|native) ;; *) die "MODE=$MODE in $ENV_FILE — expected docker or native" ;; esac
+MODE=native
 SERVICE_USER="${SERVICE_USER:-dsh}"
 PROBLEMS=0
 WARNINGS=0
@@ -125,15 +125,11 @@ normalize_env() {
 
 check_env_file() {
   [ -r "$ENV_FILE" ] || { fails env-file "$ENV_FILE is not readable"; return; }
-  local mode_dupes cr_keys dupes keys
-  mode_dupes="$(grep -c '^MODE=' "$ENV_FILE" 2>/dev/null || true)"
+  local cr_keys dupes keys
   dupes="$(awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/ { n[$1]++ } END { for (k in n) if (n[k] > 1) print k " x" n[k] }' "$ENV_FILE")"
   cr_keys="$(grep -c $'\r' "$ENV_FILE" 2>/dev/null || true)"
   local mode_bits
   mode_bits="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || echo '')"
-  if [ "${mode_dupes:-0}" -gt 1 ]; then
-    fails env-file "MODE is assigned ${mode_dupes} times — the deployment's mode is ambiguous"
-  fi
   if [ -n "$dupes" ] || [ "${cr_keys:-0}" -gt 0 ]; then
     if [ "$FIX" = 1 ]; then
       normalize_env
@@ -152,11 +148,9 @@ check_env_file() {
     4??|6??|7??) fails env-file ".env is mode $mode_bits — it holds the bot token, the provider key and the updater token" ;;
     *) warns env-file ".env is mode $mode_bits; 600 is the intended one" ;;
   esac
-  if [ "$FIX" = 1 ] && [ "$MODE" = native ]; then
+  if [ "$FIX" = 1 ]; then
     chown "root:$SERVICE_USER" "$ENV_FILE" 2>/dev/null || true
     chmod 640 "$ENV_FILE" 2>/dev/null || true
-  elif [ "$FIX" = 1 ]; then
-    chmod 600 "$ENV_FILE" 2>/dev/null || true
   fi
 }
 
@@ -372,36 +366,18 @@ check_version() {
 }
 
 check_service() {
-  if [ "$MODE" = native ]; then
-    if ! command -v systemctl >/dev/null 2>&1; then
-      warns service "systemctl is missing on this host"; return
-    fi
-    if systemctl is-active --quiet dsh.service 2>/dev/null; then
-      ok service "dsh.service is active"
-    else
-      fails service "dsh.service is not active — journalctl -u dsh.service -n 40"
-    fi
-    if systemctl is-active --quiet dsh-updater.service 2>/dev/null; then
-      ok service "dsh-updater.service is active"
-    else
-      warns service "dsh-updater.service is not active — /system update all will be unavailable"
-    fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    warns service "systemctl is missing on this host"; return
+  fi
+  if systemctl is-active --quiet dsh.service 2>/dev/null; then
+    ok service "dsh.service is active"
   else
-    if ! command -v docker >/dev/null 2>&1; then
-      warns service "docker is not installed on this host"; return
-    fi
-    if ! docker info >/dev/null 2>&1; then
-      # A user outside the docker group cannot query the daemon; reporting the
-      # container as stopped would be a lie about a deployment that is running.
-      warns service "cannot query the docker daemon (is this user in the docker group?)"; return
-    fi
-    local running
-    running="$(cd "$DIR" && docker compose ps -q dsh 2>/dev/null | head -1)"
-    if [ -n "$running" ]; then
-      ok service "the dsh container is running"
-    else
-      fails service "the dsh container is not running — docker compose up -d"
-    fi
+    fails service "dsh.service is not active — journalctl -u dsh.service -n 40"
+  fi
+  if systemctl is-active --quiet dsh-updater.service 2>/dev/null; then
+    ok service "dsh-updater.service is active"
+  else
+    warns service "dsh-updater.service is not active — /system update all will be unavailable"
   fi
 }
 
@@ -440,14 +416,9 @@ main() {
   DATA_DIR="$DIR/data"
   # `sudo ./install.sh` runs this as root; the files it touches belong to the
   # runtime user, so every repair is chowned afterwards.
-  if [ "$MODE" = native ]; then
-    RUNTIME_UID="$(id -u "$SERVICE_USER" 2>/dev/null || echo 0)"
-    RUNTIME_GID="$(id -g "$SERVICE_USER" 2>/dev/null || echo 0)"
-  else
-    RUNTIME_UID="$(env_last DSH_UID)"; RUNTIME_UID="${RUNTIME_UID:-1000}"
-    RUNTIME_GID="$(env_last DSH_GID)"; RUNTIME_GID="${RUNTIME_GID:-1000}"
-  fi
-  log "checking $MODE deployment in $DIR"
+  RUNTIME_UID="$(id -u "$SERVICE_USER" 2>/dev/null || echo 0)"
+  RUNTIME_GID="$(id -g "$SERVICE_USER" 2>/dev/null || echo 0)"
+  log "checking deployment in $DIR"
   check_env_file
   check_provider_key
   check_credential_store

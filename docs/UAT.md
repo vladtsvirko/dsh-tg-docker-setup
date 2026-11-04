@@ -1,80 +1,87 @@
-# Acceptance run: Docker host and native VM
+# Acceptance run: the native install
 
-These steps were written for `v0.2.1-rc.5-0.7.0`; if you are accepting a later
+These steps were written for `v0.2.1-rc.5-0.8.0`; if you are accepting a later
 tag, substitute it everywhere below.
 
-Two runs, one per mode. Each takes ~20 minutes. The point is not to see it work
-once, but to see the **recovery** paths work: a trial that commits, a trial that
-rolls back by itself, an update that can be cancelled, and an uninstall that
-leaves nothing running.
+One run, ~20 minutes. The point is not to see it work once, but to see the
+**recovery** paths work: a trial that commits, a trial that rolls back by
+itself, an update that can be cancelled, and an uninstall that leaves nothing
+running.
 
 Write down the step number with anything unexpected, and keep the output of
-`/system status`, `docker compose logs dsh --tail=100` (or
-`journalctl -u dsh.service -n 100`) and the terminal transcript.
+`/system status`, `journalctl -u dsh.service -n 100` and the terminal
+transcript.
 
 ---
 
-## A. Docker mode (the machine you already run)
+## 0. Before you start
 
-### A0. Before you start
+Use a fresh Debian/Ubuntu VM (2 CPU, 4 GB). Root access, network, nothing else.
+Docker is not needed for this run unless you exercise the optional design stack
+in step 7.
 
-- [ ] `./install.sh --check` prints a plan and stops.
-- [ ] the plan shows `mode: docker`, the right port, and your admin id
-- [ ] `docker compose ps` in the current deployment shows `dsh` healthy
+- [ ] Node **not** installed: the installer must install 22 from NodeSource
+      itself and say so in the plan (`deps: installs Node 22 …`)
+- [ ] `git` available: the `--check` bootstrap needs it to fetch the preview
+      (the real install would add it)
+- [ ] a **new** bot token (separate from any existing deployment, so they never
+      poll the same token), its group with Topics + the bot as admin, your user
+      id, your provider key, a free port (e.g. 4320)
 
-### A1. Install from the new tag
+## 1. Install
 
-`compose.yaml` pins `name: dsh` and `container_name: dsh`, so a second checkout
-on the same host **replaces** the running deployment rather than sitting beside
-it. Do this run on a spare VM, or accept that the current stack is replaced (and
-can be brought back with its own `install.sh --dir`). Install the way a stranger
-would — one downloaded file:
+Install the way a stranger would — one downloaded file:
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.7.0/install.sh | bash -s -- --check --dir /tmp/uat-docker
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.7.0/install.sh | bash -s -- --dir /tmp/uat-docker
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.8.0/install.sh | sudo bash -s -- --check --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.8.0/install.sh | sudo bash -s -- --dir /srv/dsh
 ```
+
+All `./install.sh` and `./update.sh` checks below run from `/srv/dsh`.
 
 - [ ] the first line prints what it will fetch, then the full plan, and changes
       nothing
+- [ ] the plan shows `tier: sandbox`, `user: dsh`, `data: /srv/dsh/data/home`,
+      the updater on `127.0.0.1` and `resources: 30%`
 - [ ] the second asks the questions, shows the plan again and asks
       `Proceed? [Y/n]`
-- [ ] it says either `docker present` or that it is installing
-      `docker.io + docker-compose-v2`
-- [ ] on a host without Docker, it installs it before the build (this is the
-      point of the run)
-
-Answers to have ready: a **new** bot token (a second bot, so the two deployments
-never poll the same token), its group with Topics + the bot as admin, your user
-id, your provider key, a free port (e.g. 4320).
-
-- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.7.0 (docker mode)`
-- [ ] the self-check that follows reports `clean` (a stopped container is a
-      failure, so run it while the stack is up)
+- [ ] it installs Node 22 (and says so), then `dsh` and `pnpm`; a missing Docker
+      daemon is not an error for this run
+- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.8.0`
+- [ ] the self-check that follows reports `clean`: `service`, `web` and
+      `data-owner` all ok
+- [ ] `sudo ./install.sh --doctor` (no `--fix`) exits 0 and names the deployed
+      `OPENCODE_GO_API_KEY` without printing it
 - [ ] `./install.sh --doctor --fix` is idempotent: a second run changes nothing
+- [ ] a repair run (`sudo ./install.sh`, Enter at every prompt) does not ask for
+      the provider key again and restarts the service once
 - [ ] re-running `./install.sh` with the same answers keeps
       `OPENCODE_GO_API_KEY` byte-for-byte (`grep ^OPENCODE_GO_API_KEY= .env`
       before and after) and leaves exactly one such line
 - [ ] the summary prints `web: http://<ip>:<port>/?token=…` (read back from the
       runtime log), and `bot: configured` when a token was given
-- [ ] the key line says either `set` or how to add it
 - [ ] it warns about web UI exposure when binding a LAN address
 - [ ] re-running `./install.sh` keeps the deployed git author as the prompt
       default (`git -C . config --file data/home/.gitconfig user.name` before
       and after)
+- [ ] `systemctl status dsh.service` is `active (running)`
+- [ ] `systemctl status dsh-updater.service` is `active (running)`
+- [ ] `journalctl -u dsh.service -n 30` shows the runtime listening and the
+      connector connected
 
-### A2. First contact in Telegram
+## 2. First contact in Telegram
 
 - [ ] send `/start` to the new bot: it answers with the help index
 - [ ] `/workspace new uat` prints a `?startgroup=` link
 - [ ] tap it, add the bot to a new group with Topics enabled: the group gets a
       dashboard
 - [ ] `/new` in the group creates a topic; a message in it gets a streamed answer
-- [ ] `/system status` shows: version `0.6.4`, the admin line, `web: 127.0.0.1:<port> answered …`,
-      `key: set`, `registry: 1 workspace(s) in the runtime · 1 bound to Telegram`,
-      `data: … this runtime (docker)`, `last agent error: none`
+- [ ] `/system status` shows: version `0.2.1-rc.5-0.8.0`, the admin line,
+      `web: 127.0.0.1:<port> answered …`, `key: set`,
+      `registry: 1 workspace(s) in the runtime · 1 bound to Telegram`,
+      `data: … this runtime`, `last agent error: none`
 
-### A3. The two surfaces, both directions
+## 3. The two surfaces, both directions
 
 - [ ] send `/web` in the bot chat: a signed link, and the text says it is a
       credential
@@ -90,115 +97,67 @@ id, your provider key, a free port (e.g. 4320).
 - [ ] tap **Take over**: the runtime restarts, the queued message is delivered,
       and the session answers again in Telegram
 
-### A4. A trial that commits
+## 4. A trial that commits
 
 - [ ] `/system restart` → the card has **Commit** and **Roll back**, and a
       deadline
 - [ ] `/system confirm` → the card closes; `/system status` shows no open trial
 - [ ] the bot answered a message after the restart (nothing was lost)
 
-### A5. A trial that rolls back by itself
+## 5. A trial that rolls back by itself
 
 - [ ] `/system restart` → **do not confirm**
 - [ ] at the deadline the chat says `Rolled back to the last committed state: no
       confirmation within N minutes.`
 - [ ] `/system status` shows no trial and `last event: rollback`
 
-### A6. An update, and a cancel
+## 6. An update, and a cancel
 
 - [ ] `/system update all` → drains, then either finishes (`✅ setup update
-      finished`) or reports why not. On this tag there is no newer compatible
-      release, so `no compatible tag after …` is the correct answer
+      finished`) or reports why not. When this is the newest compatible tag,
+      `no compatible tag after …` is the correct answer
 - [ ] start `/system update all` again and press **✖ Cancel** during the drain:
       the card closes and normal messages work immediately after
 - [ ] `/system cancel` in the chat does the same thing as the button
 
-### A7. Component control (only if you installed the design stack)
+## 7. Component control (only if you installed the design stack)
 
 - [ ] `/system manage` lists the components with their state
 - [ ] change the Penpot port: the card reports done, the stack answers on the new
       port, and `/system status` still shows the runtime healthy
 - [ ] disable it: the stack stops, the runtime keeps working
 
-### A8. Uninstall
-
-```sh
-./install.sh --uninstall --check     # what it will stop and what it keeps
-./install.sh --uninstall             # asks for confirmation
-```
-
-- [ ] the compose stack is gone (`docker compose ps` is empty)
-- [ ] `data/`, `.env` and `backups/` are still there
-- [ ] the last lines say which user and directory remain, and how to remove them
-- [ ] `./install.sh --uninstall --purge` on the *uat* directory removes those too
-
----
-
-## B. Native mode (the spare VM)
-
-Use a fresh Debian/Ubuntu VM (2 CPU, 4 GB). Root access, network, nothing else.
-
-### B0. Prerequisites
-
-- [ ] Node **not** installed: the installer must install 22 from NodeSource
-      itself and say so in the plan (`deps: installs Node 22 …`)
-- [ ] a third bot token, and its group with Topics + the bot as admin
-
-### B1. Install
-
-```sh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.7.0/install.sh | sudo bash -s -- --check --mode native --dir /srv/dsh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.7.0/install.sh | sudo bash -s -- --mode native --dir /srv/dsh
-```
-
-- [ ] `--check` shows `tier: sandbox`, `user: dsh`, `data: /srv/dsh/data`
-- [ ] the installer installs `dsh` **and** `pnpm` (it says so)
-- [ ] it ends with `==> installed: 0.2.1-rc.5-0.7.0 (native mode)`
-- [ ] the self-check reports `clean`: `service`, `web` and `data-owner` all ok
-- [ ] `sudo ./install.sh --doctor` (no `--fix`) exits 0 and names the deployed
-      `OPENCODE_GO_API_KEY` without printing it
-- [ ] `sudo ./install.sh` (repair run, press Enter at every prompt) does not ask
-      for the provider key again and restarts the service once
-- [ ] `systemctl status dsh.service` is `active (running)`
-- [ ] `journalctl -u dsh.service -n 30` shows the runtime listening and the
-      connector connected
-
-### B2. The same acceptance, shorter
-
-- [ ] `/system status` in the bot chat: version, admin, `web`, `key`, supervisor
-- [ ] `/web` gives a link to the VM's address, and it opens from your laptop
-- [ ] a prompt in a topic gets a streamed answer
-- [ ] a prompt from the browser mirrors into the topic (echo, then answer)
-
-### B2b. The restart the user reported
+## 8. The restart the user reported
 
 - [ ] create a workspace + session in the web UI, make no successful call, then
       `sudo systemctl restart dsh.service`
 - [ ] the web UI still lists that workspace and its session
 - [ ] `/system status` reports the same workspace count as the web UI
 - [ ] a prompt in the Telegram topic works (no "held by another client")
-- [ ] with the Docker stack started from the same directory, the native unit
-      refuses to start and names the holder (`data/.runtime.json`)
-
-### B3. Update and rollback in native mode
-
-This is the mode whose update path was broken before this release.
-
-- [ ] `/system restart` → confirm → no trial left
-- [ ] `/system restart` → roll back → `Rolled back to the last committed state`
-- [ ] `/system update connector` → the connector reinstalls and the bot returns
 - [ ] after the restart, `journalctl -u dsh.service -n 50` has no
       `already owned by an active write handle`
 
-### B4. Uninstall
+## 9. Connector update
+
+- [ ] `/system update connector` → the connector reinstalls and the bot returns
+- [ ] `/system status` still reports the runtime and the adapter
+
+## 10. Uninstall
+
+From the deployment checkout:
 
 ```sh
-sudo ./install.sh --uninstall --dir /srv/dsh
+cd /srv/dsh
+sudo ./install.sh --uninstall --check     # what it will stop and what it keeps
+sudo ./install.sh --uninstall             # asks for confirmation
 ```
 
 - [ ] `systemctl status dsh.service` says it does not exist
 - [ ] `/usr/local/bin/dsh-*` launchers are gone
-- [ ] `/srv/dsh/data` is still there; `--purge` removes it
+- [ ] `data/`, `.env` and `backups/` are still there
+- [ ] the last lines say which user and directory remain, and how to remove them
+- [ ] `sudo ./install.sh --uninstall --purge` removes `data/`, `.env` and
+      `backups/` too
 
 ---
 
@@ -208,7 +167,7 @@ For each failed checkbox: the step, what you expected, what happened, and:
 
 ```sh
 ./update.sh --status
-docker compose logs --tail=100 dsh     # or: journalctl -u dsh.service -n 100
+journalctl -u dsh.service -n 100
 ```
 
 Do not paste `.env`. `/system status` and the logs never include the bot token or

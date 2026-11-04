@@ -53,7 +53,7 @@ const needsExec = (name, fn) => (execAllowed
   : test(name, (t) => t.skip(`temp directory ${tmpRoot} is mounted noexec; set DSH_TEST_TMPDIR`)))
 
 /** Make a throwaway deployment directory and stub binaries for it. */
-async function deployment({ env = 'MODE=docker\nDSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n', bins = {} } = {}) {
+async function deployment({ env = 'DSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n', bins = {} } = {}) {
   const dir = await mkdtemp(join(tmpRoot, 'update-lib-'))
   await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.5.0\n')
   await writeFile(join(dir, '.env'), env)
@@ -84,25 +84,14 @@ needsExec('sourcing defines the helpers and runs no command', async () => {
   const dir = await deployment()
   try {
     // --status would print a report and exit if the CLI ran.
-    assert.equal(await source(dir, 'printf "%s" "$MODE"'), 'docker')
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-needsExec('the docker health probe uses the compose service when the bind is loopback', async () => {
-  // The updater container's own 127.0.0.1 is not the runtime: probing it made a
-  // healthy host-only update fail its health gate and roll back.
-  const dir = await deployment({ env: 'MODE=docker\nDSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n' })
-  try {
-    assert.equal(await source(dir, 'web_probe_url'), 'http://dsh:4310/')
+    assert.equal(await source(dir, 'printf "%s" "$SERVICE_USER"'), 'dsh')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
 })
 
 needsExec('the docker probe uses a published LAN address when there is one', async () => {
-  const dir = await deployment({ env: 'MODE=docker\nDSH_PORT=4310\nDSH_BIND_IP=192.0.2.10\n' })
+  const dir = await deployment({ env: 'DSH_PORT=4310\nDSH_BIND_IP=192.0.2.10\n' })
   try {
     assert.equal(await source(dir, 'web_probe_url'), 'http://192.0.2.10:4310/')
   } finally {
@@ -112,7 +101,7 @@ needsExec('the docker probe uses a published LAN address when there is one', asy
 
 needsExec('DSH_PUBLIC_URL wins over both', async () => {
   const dir = await deployment({
-    env: 'MODE=docker\nDSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\nDSH_PUBLIC_URL=https://dsh.example.test/\n',
+    env: 'DSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\nDSH_PUBLIC_URL=https://dsh.example.test/\n',
   })
   try {
     assert.equal(await source(dir, 'web_probe_url'), 'https://dsh.example.test/')
@@ -122,7 +111,7 @@ needsExec('DSH_PUBLIC_URL wins over both', async () => {
 })
 
 needsExec('native mode probes the address the runtime actually bound', async () => {
-  const dir = await deployment({ env: 'MODE=native\nDSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n' })
+  const dir = await deployment({ env: 'DSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n' })
   try {
     assert.equal(await source(dir, 'web_probe_url'), 'http://127.0.0.1:4310/')
   } finally {
@@ -197,50 +186,19 @@ needsExec('the tag split keeps the DSH part intact', async () => {
   }
 })
 
-/**
- * The docker update path end to end, with Docker stubbed.
- *
- * This is the test that was missing when `/system update all` reported success
- * and kept the old connector: it asserts the deployed `.env` carries the new
- * version (env_file beats the image ENV), that the runtime is recreated, and
- * that a failed health gate restores both.
- */
-async function dockerDeployment({ healthy = true } = {}) {
-  const dir = await mkdtemp(join(tmpRoot, 'update-docker-'))
-  const bin = join(dir, 'bin')
-  await mkdir(bin, { recursive: true })
-  const calls = join(dir, 'calls.log')
+/** A tagged checkout, for the update-policy tests that stop before apply. */
+async function taggedDeployment() {
+  const dir = await mkdtemp(join(tmpRoot, 'update-tags-'))
   await copyFile(join(here, 'update.sh'), join(dir, 'update.sh'))
   await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.4.11\n')
   await writeFile(join(dir, '.env'), [
-    'MODE=docker',
     'DSH_PORT=4310',
     'DSH_BIND_IP=127.0.0.1',
     'DSH_SETUP_VERSION=0.2.1-rc.2-0.4.11',
     '',
   ].join('\n'))
-  await writeFile(join(dir, 'compose.yaml'), 'services:\n  dsh:\n    image: dsh-backend:test\n')
-  await writeFile(join(bin, 'docker'), [
-    '#!/bin/sh',
-    `echo "docker $*" >> "${calls}"`,
-    'case "$*" in',
-    '  *"inspect --format"*)',
-    '    case "$*" in',
-    `      *Health*) echo "${healthy ? 'healthy' : 'unhealthy'}" ;;`,
-    '      *) echo sha256:previous ;;',
-    '    esac ;;',
-    '  *"ps -q"*) echo abc123 ;;',
-    'esac',
-    'exit 0',
-    '',
-  ].join('\n'))
-  await writeFile(join(bin, 'curl'), '#!/bin/sh\nprintf 401\n')
-  await chmod(join(bin, 'docker'), 0o755)
-  // A real deployment has data/home to snapshot; without it the update aborts
-  // before it can be tested.
   await mkdir(join(dir, 'data', 'home'), { recursive: true })
   await writeFile(join(dir, 'data', 'home', 'profile.txt'), 'stable\n')
-  await chmod(join(bin, 'curl'), 0o755)
 
   const git = (...args) => exec('git', ['-C', dir, ...args])
   await git('init', '-q')
@@ -255,32 +213,11 @@ async function dockerDeployment({ healthy = true } = {}) {
   await git('commit', '-qm', 'release 50')
   await git('tag', 'v0.2.1-rc.2-0.5.0')
   await git('checkout', '-q', '--detach', 'v0.2.1-rc.2-0.4.11')
-  return { dir, bin, calls }
+  return { dir }
 }
 
-needsExec('a docker update rewrites the deployed version before starting', async () => {
-  const { dir, bin, calls } = await dockerDeployment()
-  try {
-    await exec('bash', [join(dir, 'update.sh'), '--self-to', 'v0.2.1-rc.2-0.5.0'], {
-      cwd: dir,
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ASSUME_YES: '1', HEALTH_TIMEOUT: '2', WEB_READY_TIMEOUT: '2' },
-      timeout: 30000,
-    })
-    const env = await readFile(join(dir, '.env'), 'utf8')
-    // Without this the entrypoint keeps installing connector#v0.4.11: compose's
-    // env_file overrides the new image's ENV.
-    assert.match(env, /^DSH_SETUP_VERSION=0\.2\.1-rc\.2-0\.5\.0$/m)
-    const log = await readFile(calls, 'utf8')
-    assert.match(log, /compose build dsh/)
-    assert.match(log, /compose stop dsh/)
-    assert.match(log, /compose up -d dsh/)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
 needsExec('--self-to refuses a cross-major target without the incompatibility flag', async () => {
-  const { dir } = await dockerDeployment()
+  const { dir } = await taggedDeployment()
   try {
     const git = (...args) => exec('git', ['-C', dir, ...args])
     await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-1.0.0\n')
@@ -302,52 +239,13 @@ needsExec('--self-to refuses a cross-major target without the incompatibility fl
   }
 })
 
-needsExec('--self-to accepts a cross-major target with the flag, like --self', async () => {
-  const { dir, bin } = await dockerDeployment()
-  try {
-    const git = (...args) => exec('git', ['-C', dir, ...args])
-    await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-1.0.0\n')
-    await git('add', '-A')
-    await git('commit', '-qm', 'major release')
-    await git('tag', 'v0.2.1-rc.2-1.0.0')
-    await git('checkout', '-q', '--detach', 'v0.2.1-rc.2-0.4.11')
-
-    await exec('bash', [join(dir, 'update.sh'), '--self-to', 'v0.2.1-rc.2-1.0.0', '--i-know-versions-are-incompatible'], {
-      cwd: dir,
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ASSUME_YES: '1', HEALTH_TIMEOUT: '2', WEB_READY_TIMEOUT: '2' },
-      timeout: 30000,
-    })
-    const env = await readFile(join(dir, '.env'), 'utf8')
-    assert.match(env, /^DSH_SETUP_VERSION=0\.2\.1-rc\.2-1\.0\.0$/m)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-needsExec('a docker update that fails its health gate restores the old version', async () => {
-  const { dir, bin, calls } = await dockerDeployment({ healthy: false })
-  try {
-    await exec('bash', [join(dir, 'update.sh'), '--self-to', 'v0.2.1-rc.2-0.5.0'], {
-      cwd: dir,
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ASSUME_YES: '1', HEALTH_TIMEOUT: '2', WEB_READY_TIMEOUT: '2' },
-      timeout: 30000,
-    }).catch(() => undefined)
-    const env = await readFile(join(dir, '.env'), 'utf8')
-    assert.match(env, /^DSH_SETUP_VERSION=0\.2\.1-rc\.2-0\.4\.11$/m)
-    const log = await readFile(calls, 'utf8')
-    assert.match(log, /docker tag sha256:previous/)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
 needsExec('the native entrypoint runs from the workspace directory', async () => {
   // `dsh` loads the .env of its working directory and refuses launch-only keys
   // there. Running prepare from the deployment directory — where .env lives, and
   // where the documented `./update.sh --self` is executed — made every native
   // update fail with "DSH_BIND_IP … export it instead".
   const dir = await deployment({
-    env: 'MODE=native\nDSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n',
+    env: 'DSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n',
     bins: { runuser: 'while [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"' },
   })
   try {
@@ -367,7 +265,7 @@ test('verify only reads the log of the current start', () => {
   const verify = source.slice(source.indexOf('verify() {'), source.indexOf('\n}\n', source.indexOf('verify() {')))
   assert.match(verify, /systemctl show -p ActiveEnterTimestamp/)
   assert.match(verify, /journalctl -u dsh\.service --no-pager --since "\$since"/)
-  assert.match(verify, /logs --no-log-prefix --since 2m dsh/)
+  assert.doesNotMatch(verify, /docker compose/)
   assert.doesNotMatch(verify, /-n 200/)
 })
 
@@ -378,7 +276,7 @@ test('verify only reads the log of the current start', () => {
 
 needsExec('ufw_hints names the rule when ufw is active and the port is closed', async () => {
   const dir = await deployment({
-    env: 'MODE=native\nDSH_PORT=4310\nDSH_BIND_IP=192.168.2.98\n',
+    env: 'DSH_PORT=4310\nDSH_BIND_IP=192.168.2.98\n',
     bins: {
       ufw: "echo 'Status: active'; echo '22/tcp   ALLOW   192.168.2.0/24'",
       sudo: 'shift; exec "$@"',
@@ -402,7 +300,7 @@ needsExec('ufw_hints stays quiet when the rule exists, ufw is inactive or the bi
   ]
   for (const c of cases) {
     const dir = await deployment({
-      env: 'MODE=native\nDSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n',
+      env: 'DSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n',
       bins: { sudo: 'shift; exec "$@"', ...c.bins },
     })
     try {

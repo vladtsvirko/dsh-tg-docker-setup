@@ -77,14 +77,10 @@ export function networkOf(cidr) {
 }
 
 /**
- * What a native deployment's firewall looks like, from values the caller read:
- * no I/O here, so the shape is testable without a host that has ufw.
- *
- * Docker mode reports `applicable: false`: a published port is DNATed in
- * nat/FORWARD before ufw's INPUT chain sees it, so a rule there changes nothing.
+ * What the deployment's firewall looks like, from values the caller read: no
+ * I/O here, so the shape is testable without a host that has ufw.
  */
-export function firewallPorts({ mode, ports = [], status = '' } = {}) {
-  if (mode !== 'native') return { applicable: false, reason: 'docker mode: ufw does not gate a published port' }
+export function firewallPorts({ ports = [], status = '' } = {}) {
   const served = ports.filter((entry) => Number.isInteger(entry.port) && typeof entry.bind === 'string'
     && !/^(127\.|localhost$|::1$)/.test(entry.bind))
   if (served.length === 0) return { applicable: false, reason: 'no LAN-facing ports' }
@@ -257,9 +253,9 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
   const stripAnsi = (value) => value.replace(/\x1b\[[0-9;]*m/g, '')
 
   const reload = () => {
-    // Docker's restart policy brings the container back with the new mounted
-    // updater.mjs. Only do this once the runtime was actually stopped; a
-    // build failure before the stop must keep the current process for /status.
+    // The unit restarts the updater (Restart=always) with the checkout that was
+    // just applied. Only do this once the runtime was actually stopped; a
+    // failure before the stop must keep the current process for /status.
     setTimeout(() => {
       console.log('updater: exiting to reload the checkout')
       exit(0)
@@ -464,7 +460,6 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
   }
 
   const firewall = async () => firewallPorts({
-    mode: (await readFlag('MODE') ?? '').trim(),
     ports: await servedPorts(),
     status: await ufwStatus(),
   })

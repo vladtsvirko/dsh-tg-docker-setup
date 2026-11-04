@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
 #
-# One-command installer for the DSH setup, in either mode.
+# One-command installer for the DSH setup.
 #
 #   ./install.sh                        interactive: asks for the few values
 #                                        that are easy to get wrong
 #   ./install.sh --check                print the plan, change nothing
-#   ./install.sh --mode native --yes    unattended, native (no Docker)
+#   ./install.sh --yes                  unattended, all defaults
 #   ./install.sh --config answers.env   answers from a file (see install.example.env)
 #
-# docker mode  compose.yaml: init + dsh + the privileged updater sidecar.
-#              The container is the security boundary; the agent cannot reach
-#              the host, so the web UI and Telegram are the only control paths.
-# native mode  a systemd service on this host, no Docker at all. The agent runs
-#              as an unprivileged user and can reach the host's files; the
-#              updater runs as root because only it may restart the service.
-#              Read docs/HOST.md before choosing it.
+# The deployment is a systemd service on this host: the agent runs as an
+# unprivileged user and can read the host's files; the updater runs as root
+# because only it may restart the service. Read docs/HOST.md first.
 #
 # Everything the installer decides is printed as a plan first. With --check the
 # plan is all that happens, which is what the test suite exercises.
@@ -37,8 +33,8 @@ fi
 #
 #   wget -qO- https://raw.githubusercontent.com/…/install.sh | bash -s -- --yes
 #
-# The installer needs VERSION, compose.yaml, the Dockerfile and the entrypoint
-# beside it, so a lone copy fetches a release checkout and re-runs the copy
+# The installer needs VERSION and the entrypoint beside it, so a lone copy
+# fetches a release checkout and re-runs the copy
 # inside it. Everything here is about getting that checkout; the installer
 # proper starts below.
 # ===========================================================================
@@ -56,17 +52,17 @@ Options (bootstrap):
   --dir PATH             where to put the checkout (default: /opt/dsh-setup as
                          root, ~/dsh-setup otherwise)
   --check                show what would be fetched and installed, change nothing
-  --no-deps              do not install Docker or Node (they must already exist)
+  --no-deps              do not install Node or git (they must already exist)
   -h, --help             this text
 
-Everything else is passed to the installer inside the checkout: --mode, --yes,
+Everything else is passed to the installer inside the checkout: --yes,
 --config, --design, --tier, --uninstall. Run --help after the checkout for the
 full list.
 EOF
 }
 
 in_bootstrap() {
-  [ -f "$SRC_DIR/VERSION" ] && [ -f "$SRC_DIR/compose.yaml" ] && return 1
+  [ -f "$SRC_DIR/VERSION" ] && [ -f "$SRC_DIR/entrypoint.sh" ] && return 1
   return 0
 }
 
@@ -196,13 +192,14 @@ cd "$SRC_DIR"
 SETUP_VERSION="$(tr -d '\n' < "$SRC_DIR/VERSION")"
 DSH_VERSION="$(printf '%s' "$SETUP_VERSION" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+$//')"
 
-MODE="" TIER="" DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0 DEPS=1 CLEAN_SOURCE=0
+TIER="" DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0 DEPS=1 CLEAN_SOURCE=0
 DOCTOR=0 FIX=0 ROTATE_KEY=0
 SERVICE_USER="${SERVICE_USER:-dsh}"
 DSH_PORT="${DSH_PORT:-}"
 DSH_BIND_IP="${DSH_BIND_IP:-}"
 DSH_PROVIDER="${DSH_PROVIDER:-}"
 DSH_MODEL="${DSH_MODEL:-}"
+DSH_RESOURCE_PERCENT="${DSH_RESOURCE_PERCENT:-}"
 DSH_TELEGRAM_BOT_TOKEN="${DSH_TELEGRAM_BOT_TOKEN:-}"
 ALLOWED_USER_IDS="${ALLOWED_USER_IDS:-}"
 DSH_ADMIN_USER_ID="${DSH_ADMIN_USER_ID:-}"
@@ -232,25 +229,25 @@ Install the DSH setup in one command.
 
   ./install.sh                        interactive
   ./install.sh --check                print the plan, change nothing
-  ./install.sh --mode native --yes    unattended, native (no Docker)
+  ./install.sh --yes                  unattended, all defaults
   ./install.sh --config answers.env   answers from a file
 
-Without a checkout — one small file fetches the release, then installs
-everything the chosen mode needs, Docker included:
+Without a checkout — one small file fetches the release, then installs Node,
+git and the systemd units:
 
   wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash -s -- --yes
 
 Options:
-  --mode docker|native   deployment mode (default: ask, else docker)
   --tier sandbox|privileged
-                         native only: sandbox (default) or add the docker group
-  --dir PATH             deployment directory (default: this checkout / /srv/dsh)
+                         sandbox (default) or add the docker group (for the
+                         Penpot design stack and Docker access)
+  --dir PATH             deployment directory (default: /srv/dsh)
   --design none|docker   optional Penpot design stack (default: ask, else none)
   --ref REF              git ref for the native checkout (default: v<VERSION>)
   --config FILE          read answers from FILE (KEY=VALUE, no shell)
-  --no-deps              do not install Docker or Node; they must already exist
-  --clean-source         remove the downloaded checkout once installed (native)
+  --no-deps              do not install Node or git; they must already exist
+  --clean-source         remove the downloaded checkout once installed
   --yes, -y              accept defaults, never prompt
   --check                print the plan and change nothing
   --doctor, --status     check this deployment and report; change nothing
@@ -265,7 +262,7 @@ EOF
 
 # --- answers from a file ---------------------------------------------------
 # Strict KEY=VALUE parsing: no sourcing, so a config file cannot execute code.
-CONFIG_KEYS="MODE TIER DIR SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL
+CONFIG_KEYS="TIER DIR SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL DSH_RESOURCE_PERCENT
 DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT PROVIDER_KEY
 DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN GIT_HOST
 GIT_AUTH GIT_KEY GIT_KNOWN_HOSTS GIT_PROFILES_FILE"
@@ -299,8 +296,6 @@ set -- "${ARGS[@]}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --mode)   MODE="${2:?--mode needs a value}"; shift 2 ;;
-    --mode=*) MODE="${1#*=}"; shift ;;
     --tier)   TIER="${2:?--tier needs a value}"; shift 2 ;;
     --tier=*) TIER="${1#*=}"; shift ;;
     --design) DESIGN="${2:?--design needs a value}"; shift 2 ;;
@@ -498,9 +493,6 @@ ask_git_accounts() {
       ask GIT_KNOWN_HOSTS "known_hosts (name under secrets/git, or absolute path)" "known_hosts"
       key="$(git_secret_path "$GIT_KEY")"
       known="$(git_secret_path "$GIT_KNOWN_HOSTS")"
-      case "$GIT_KEY" in /*)
-        [ "$MODE" = docker ] && warn "an absolute key path is outside /run/secrets and will not be visible in the container"
-      ;; esac
       if [ ! -f "$key" ] && command -v ssh-keygen >/dev/null 2>&1; then
         ask GIT_GENERATE "No key at $key — generate an ed25519 key now? (y/N)" n
         case "$GIT_GENERATE" in
@@ -564,19 +556,14 @@ write_git_manifest() {
   else
     return 0
   fi
-  if [ "$MODE" = native ]; then
-    owner="$SERVICE_USER:$SERVICE_USER"
-  else
-    owner="${SUDO_UID:-$(id -u)}:${SUDO_GID:-$(id -g)}"
-  fi
+  owner="$SERVICE_USER:$SERVICE_USER"
   chown -R "$owner" "$DIR/secrets" 2>/dev/null || true
 }
 
-# --- firewall advisory (native only) ---------------------------------------
-# ufw gates a systemd service through its INPUT chain. It does not gate a
-# published Docker port: Docker DNATs it in nat/FORWARD before INPUT is ever
-# consulted, so a docker-mode deployment neither needs a rule nor is protected
-# by one. This is native-only by construction, not by choice.
+# --- firewall advisory ------------------------------------------------------
+# ufw gates the systemd service through its INPUT chain. It cannot be applied
+# from the runtime: the installer only warns, and /firewall (native) explains
+# the rule. A rule outlives --uninstall, so it is never added silently.
 #
 # It warns and never acts. The installer cannot know whether a port should be
 # LAN-only, VPN-only or tunnel-only, and a ufw rule outlives --uninstall.
@@ -637,7 +624,6 @@ lan_network() {
 # nothing about firewalling gets nothing from us.
 ufw_hints() {
   UFW_HINTED=0
-  [ "${MODE:-}" = native ] || return 0
   command -v ufw >/dev/null 2>&1 || return 0
   local status rules port bind net tunnel_port="" readable=1
   status="$(ufw_state | head -1)" || return 0
@@ -688,6 +674,12 @@ provider_key_env() {
   esac
 }
 
+# CPUs systemd's CPUQuota is measured against: 100% is one core, so a share of
+# the machine is percent * cores.
+cpu_count() {
+  nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1
+}
+
 # Re-running must keep what the deployment already answered; only fill blanks.
 # The provider key is read after the loop: it belongs to whichever provider the
 # file names, and a repair must never ask for it again (a second answer is how a
@@ -695,12 +687,12 @@ provider_key_env() {
 read_existing_env() {
   local key value provider key_var
   [ -f "$DIR/.env" ] || return 0
-  for key in DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL DSH_TELEGRAM_BOT_TOKEN \
+  for key in DSH_PORT DSH_BIND_IP DSH_PROVIDER DSH_MODEL DSH_RESOURCE_PERCENT DSH_TELEGRAM_BOT_TOKEN \
              ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT \
              DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN \
              DSH_PROVIDER_API_KEY_ENV; do
-    # The last assignment is what the runtime reads (systemd, compose and
-    # Node's .env loader all agree), so the installer agrees too.
+    # The last assignment is what the runtime reads (systemd's EnvironmentFile
+    # and Node's .env loader agree), so the installer agrees too.
     value="$(sed -n "s/^${key}=//p" "$DIR/.env" | tail -1)"
     if [ -n "${!key:-}" ]; then
       # An exported variable silently winning over the deployed value is how a
@@ -722,28 +714,13 @@ read_existing_env() {
   return 0
 }
 
-# A repair run keeps the mode the deployment chose. Without this, `./install.sh`
-# or `./install.sh --yes` on a native host defaults to docker and converts (or
-# silently disables) the running install.
-if [ -z "$MODE" ]; then
-  for candidate in "${DIR:+$DIR/.env}" "$SRC_DIR/.env" /srv/dsh/.env; do
-    [ -f "$candidate" ] || continue
-    MODE="$(sed -n 's/^MODE=//p' "$candidate" | head -1)"
-    [ -n "$MODE" ] && break
-  done
-fi
-
 # --- uninstall -------------------------------------------------------------
-# Removing a deployment is a first-class operation: stopping stray containers by
+# Removing a deployment is a first-class operation: stopping a stray runtime by
 # hand is how a second poller survives. Data is kept unless --purge is passed,
 # and the checkout is never deleted — the last line says what to remove.
 uninstall_plan() {
-  printf '    mode:      %s\n' "$MODE"
   printf '    directory: %s\n' "$DIR"
-  case "$MODE" in
-    docker) printf '    removes:   the compose stack (dsh, updater and the design stack if present)\n' ;;
-    native) printf '    removes:   dsh.service, dsh-updater.service and the /usr/local/bin launchers\n' ;;
-  esac
+  printf '    removes:   dsh.service, dsh-updater.service and the /usr/local/bin launchers\n'
   if [ "$PURGE" = 1 ]; then
     printf '    deletes:   %s/data, %s/.env, %s/backups\n' "$DIR" "$DIR" "$DIR"
   else
@@ -752,26 +729,12 @@ uninstall_plan() {
 }
 
 uninstall_run() {
-  if [ "$MODE" = docker ]; then
-    if command -v docker >/dev/null 2>&1 && [ -f "$DIR/compose.yaml" ]; then
-      log "stopping the compose stack"
-      run bash -c "cd '$DIR' && docker compose down --remove-orphans" || warn "compose down failed; check docker compose ps"
-      if [ "$PURGE" = 1 ]; then
-        log "removing the images built for this deployment"
-        docker rmi "dsh-backend:$SETUP_VERSION" dsh-backend:self-previous \
-          "dsh-updater:$SETUP_VERSION" >/dev/null 2>&1 || true
-      fi
-    else
-      warn "no compose.yaml in $DIR — nothing to stop"
-    fi
-  else
-    if [ -f /etc/systemd/system/dsh.service ]; then
+  if [ -f /etc/systemd/system/dsh.service ]; then
       log "stopping and disabling the systemd units"
       run systemctl disable --now dsh-updater.service 2>/dev/null || true
       run systemctl disable --now dsh.service 2>/dev/null || true
       run rm -f /etc/systemd/system/dsh.service /etc/systemd/system/dsh-updater.service
       run systemctl daemon-reload
-    fi
     local launcher
     for launcher in dsh-entrypoint dsh-supervisor dsh-healthcheck dsh-updater.mjs penpot; do
       [ -L "/usr/local/bin/$launcher" ] && run rm -f "/usr/local/bin/$launcher"
@@ -792,7 +755,7 @@ uninstall_run() {
   fi
 
   echo
-  log "uninstalled ($MODE mode)"
+  log "uninstalled"
   if [ "$PURGE" != 1 ]; then
     printf '    kept:    %s/data, %s/.env, %s/backups\n' "$DIR" "$DIR" "$DIR"
   fi
@@ -817,10 +780,10 @@ node_ready() {
 }
 
 # --- root, before the questions --------------------------------------------
-# Installing Docker (or the systemd units) needs root. Re-running here, before
-# the first question, is the difference between answering once and answering
-# twice — and `</dev/tty` keeps the prompts working when this script arrived
-# through a pipe.
+# Installing the systemd units needs root. Re-running here, before the first
+# question, is the difference between answering once and answering twice — and
+# `</dev/tty` keeps the prompts working when this script arrived through a
+# pipe.
 rerun_as_root() {
   log "this install needs root — re-running with sudo"
   # -E is refused by some sudoers policies (Ubuntu prints "preserving the entire
@@ -828,7 +791,7 @@ rerun_as_root() {
   local -a keep=() pair
   while IFS= read -r pair; do
     case "$pair" in
-      DSH_*=*|PROVIDER_KEY=*|ALLOWED_USER_IDS=*|SERVICE_USER=*|MODE=*|TIER=*|DESIGN=*) keep+=("$pair") ;;
+      DSH_*=*|PROVIDER_KEY=*|ALLOWED_USER_IDS=*|SERVICE_USER=*|TIER=*|DESIGN=*) keep+=("$pair") ;;
     esac
   done < <(env 2>/dev/null || true)
   # Remember where the download lives, so the installer can say it is not the
@@ -837,38 +800,8 @@ rerun_as_root() {
 }
 
 if [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$DOCTOR" = 0 ] && [ "$(id -u)" != 0 ]; then
-  # Without a usable Docker, docker mode needs root as much as native does; with
-  # one, a docker-group user may proceed, so the mode question comes first.
-  if [ -n "$MODE" ] && [ "$MODE" = native ] || ! docker_usable; then
-    if command -v sudo >/dev/null 2>&1; then rerun_as_root; fi
-    die "this needs root — re-run with sudo, or install Docker and join the docker group"
-  fi
-fi
-
-# --- decide ----------------------------------------------------------------
-if [ -z "$MODE" ] && can_ask; then
-  echo
-  echo "Which deployment do you want?"
-  echo "  1) docker  — container boundary, no host access for the agent (recommended)"
-  echo "  2) native  — systemd on this host, no Docker; the agent can read the host"
-  printf 'Mode [1]: ' >&2
-  mode_answer="$(read_from_terminal)"
-  case "${mode_answer:-1}" in
-    1|docker|Docker) MODE=docker ;;
-    2|native|Native) MODE=native ;;
-    *) die "unknown mode: $mode_answer" ;;
-  esac
-fi
-[ -n "$MODE" ] || MODE=docker
-case "$MODE" in docker|native) ;; *) die "--mode must be docker or native" ;; esac
-
-# Both modes need root for what comes next: Docker's daemon, or the systemd
-# units. Re-run under sudo here, before a single question is asked, so nobody
-# answers everything twice.
-# A docker-group user who picked native above: the mode is known only now.
-if [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$DOCTOR" = 0 ] && [ "$(id -u)" != 0 ] && [ "$MODE" = native ]; then
   if command -v sudo >/dev/null 2>&1; then rerun_as_root; fi
-  die "native mode installs a systemd service — run with sudo"
+  die "this installs a systemd service — run with sudo"
 fi
 
 case "${DESIGN:-}" in
@@ -876,25 +809,20 @@ case "${DESIGN:-}" in
   *) die "--design must be none or docker" ;;
 esac
 
-if [ "$MODE" = native ]; then
-  [ -n "$TIER" ] || TIER=sandbox
-  case "$TIER" in sandbox|privileged) ;; *) die "--tier must be sandbox or privileged" ;; esac
-  [ -n "$DIR" ] || DIR=/srv/dsh
-else
-  [ -z "$TIER" ] || [ "$TIER" = sandbox ] || die "--tier only applies to native mode"
-  [ -n "$DIR" ] || DIR="$SRC_DIR"
-fi
+[ -n "$TIER" ] || TIER=sandbox
+case "$TIER" in sandbox|privileged) ;; *) die "--tier must be sandbox or privileged" ;; esac
+[ -n "$DIR" ] || DIR=/srv/dsh
 
 read_existing_env
 
 # --- doctor ----------------------------------------------------------------
-# One health check, shared with update.sh, so a native host and a Docker host
-# answer the same questions in the same words. It never installs anything and
+# One health check, shared with update.sh, so an install and a repair answer
+# the same questions in the same words. It never installs anything and
 # works on a stopped deployment; --fix repairs the safe subset (duplicate .env
 # keys, the provider key shadowed by a stored copy, duplicated patch blocks).
 if [ "$DOCTOR" = 1 ] || [ "$FIX" = 1 ]; then
   [ -x "$SRC_DIR/scripts/repair.sh" ] || die "scripts/repair.sh is missing — run this from a release checkout"
-  repair_args=(--dir "$DIR" --mode "$MODE")
+  repair_args=(--dir "$DIR")
   [ "$FIX" = 1 ] && repair_args+=(--fix)
   exec bash "$SRC_DIR/scripts/repair.sh" "${repair_args[@]}"
 fi
@@ -921,8 +849,8 @@ if [ "$UNINSTALL" = 1 ]; then
     log "check only — nothing was changed"
     exit 0
   fi
-  if [ "$MODE" = native ] && [ "$(id -u)" != 0 ]; then
-    die "native mode removes systemd units — run with sudo"
+  if [ "$(id -u)" != 0 ]; then
+    die "removing the systemd units needs root — run with sudo"
   fi
   if [ "$YES" != 1 ]; then
     can_ask || die "refusing to uninstall without a terminal — add --yes to confirm"
@@ -999,17 +927,28 @@ if [ "$CHECK" != 1 ]; then
   if [ "$DESIGN" = docker ]; then
     ask DSH_DESIGN_PORT "Penpot port" 8090
   fi
+  ask DSH_RESOURCE_PERCENT "CPU/RAM limit for the runtime, percent of this machine (0 = unlimited)" 30
   if [ -z "$DSH_UPDATER_TOKEN" ]; then
     DSH_UPDATER_TOKEN="$(random_token)"
     log "generated an updater token (stored in the deployment .env)"
   fi
 fi
+[ -n "$DSH_RESOURCE_PERCENT" ] || DSH_RESOURCE_PERCENT=30
+case "$DSH_RESOURCE_PERCENT" in
+  unlimited|Unlimited|none|None) DSH_RESOURCE_PERCENT=0 ;;
+esac
+case "$DSH_RESOURCE_PERCENT" in
+  ''|*[!0-9]*) die "DSH_RESOURCE_PERCENT must be 0-100 (0 = unlimited)" ;;
+esac
+[ "$DSH_RESOURCE_PERCENT" -le 100 ] || die "DSH_RESOURCE_PERCENT must be 0-100 (0 = unlimited)"
+
 if [ "$ROTATE_KEY" = 1 ] && [ -z "${PROVIDER_KEY:-}" ] && [ "$CHECK" != 1 ]; then
   die "--rotate-key needs a terminal (drop --yes) or PROVIDER_KEY in the environment / --config"
 fi
 
 # Unattended runs never asked, so derive both from the provider that applies.
 [ -n "$DSH_PROVIDER" ] || DSH_PROVIDER=opencode-go
+[ -n "$DSH_RESOURCE_PERCENT" ] || DSH_RESOURCE_PERCENT=30
 [ -n "$DSH_MODEL" ] || DSH_MODEL="$(model_default "$DSH_PROVIDER")"
 
 [ -n "$DSH_BIND_IP" ] || DSH_BIND_IP="$(detect_lan_ip)"
@@ -1017,22 +956,18 @@ fi
 DATA_HOME="$DIR/data/home"
 DATA_WORKSPACE="$DIR/data/workspace"
 SUPERVISOR_STATE="$DIR/data/supervisor"
-UPDATER_URL_NATIVE="http://127.0.0.1:8787"
-UPDATER_URL_DOCKER="http://updater:8787"
-UPDATER_URL="$UPDATER_URL_NATIVE"
-[ "$MODE" = docker ] && UPDATER_URL="$UPDATER_URL_DOCKER"
+UPDATER_URL="http://127.0.0.1:8787"
 
 [ -n "$REF" ] || REF="v$SETUP_VERSION"
-# Reaching here as a non-root native install means --check, or a sudo that was
-# refused: the re-exec above normally handles it.
-[ "$MODE" = native ] && [ "$CHECK" != 1 ] && [ "$(id -u)" != 0 ] \
-  && die "native mode installs a systemd service — run with sudo"
+# Reaching here as non-root means --check, or a sudo that was refused: the
+# re-exec above normally handles it.
+[ "$CHECK" != 1 ] && [ "$(id -u)" != 0 ] \
+  && die "this installs a systemd service — run with sudo"
 
-# Docker is required by docker mode and by the design stack, and merely useful
-# otherwise: a native host runs the agent without it, but the Penpot stack is a
-# set of containers.
+# Docker is needed only by the optional Penpot design stack: the runtime itself
+# is a systemd service on the host.
 DOCKER_REQUIRED=0
-if [ "$MODE" = docker ] || [ "$DESIGN" = docker ]; then DOCKER_REQUIRED=1; fi
+[ "$DESIGN" = docker ] && DOCKER_REQUIRED=1
 
 if [ "$DEPS" = 0 ]; then
   DEPS_PLAN="skipped (--no-deps)"
@@ -1043,13 +978,11 @@ else
     if docker_ready; then DEPS_PLAN="$DEPS_PLAN · docker present"
     else DEPS_PLAN="$DEPS_PLAN · installs docker.io + docker-compose-v2 (needs root)"; fi
   elif ! docker_ready; then
-    DEPS_PLAN="$DEPS_PLAN · docker absent (optional here)"
+    DEPS_PLAN="$DEPS_PLAN · docker absent (only the Penpot stack needs it)"
   else
     DEPS_PLAN="$DEPS_PLAN · docker present"
   fi
-  if [ "$MODE" = native ]; then
-    if node_ready; then DEPS_PLAN="$DEPS_PLAN · node present"; else DEPS_PLAN="$DEPS_PLAN · installs Node 22 (NodeSource)"; fi
-  fi
+  if node_ready; then DEPS_PLAN="$DEPS_PLAN · node present"; else DEPS_PLAN="$DEPS_PLAN · installs Node 22 (NodeSource)"; fi
 fi
 
 # --- plan ------------------------------------------------------------------
@@ -1058,12 +991,11 @@ fi
 if [ -f "$DIR/.env" ] && [ -x "$SRC_DIR/scripts/repair.sh" ]; then
   echo
   log "existing deployment"
-  bash "$SRC_DIR/scripts/repair.sh" --dir "$DIR" --mode "$MODE" || true
+  bash "$SRC_DIR/scripts/repair.sh" --dir "$DIR" || true
 fi
 
 echo
 log "plan"
-printf '    mode:      %s\n' "$MODE"
 printf '    directory: %s\n' "$DIR"
 printf '    version:   %s (DSH %s)\n' "$SETUP_VERSION" "$DSH_VERSION"
 printf '    web:       http://%s:%s/\n' "$DSH_BIND_IP" "$DSH_PORT"
@@ -1080,14 +1012,16 @@ if [ "$DESIGN" = docker ]; then
 else
   printf '    design:    none (re-run with --design docker to add it later)\n'
 fi
-if [ "$MODE" = native ]; then
-  printf '    tier:      %s\n' "$TIER"
-  printf '    user:      %s\n' "$SERVICE_USER"
-  printf '    data:      %s\n' "$DATA_HOME"
-  printf '    updater:   %s (127.0.0.1 only, root)\n' "$UPDATER_URL"
+printf '    tier:      %s\n' "$TIER"
+printf '    user:      %s\n' "$SERVICE_USER"
+printf '    data:      %s\n' "$DATA_HOME"
+printf '    updater:   %s (127.0.0.1 only, root)\n' "$UPDATER_URL"
+if [ "$DSH_RESOURCE_PERCENT" = 0 ]; then
+  printf '    resources: unlimited\n'
 else
-  printf '    data:      %s (bind-mounted at /data)\n' "$DIR/data"
-  printf '    updater:   sidecar on the internal ops network\n'
+  printf '    resources: %s%% of this machine (memory %s%%, cpu %s%% of %s cores)\n' \
+    "$DSH_RESOURCE_PERCENT" "$DSH_RESOURCE_PERCENT" \
+    "$((DSH_RESOURCE_PERCENT * $(cpu_count)))" "$(cpu_count)"
 fi
 
 printf '    deps:      %s\n' "$DEPS_PLAN"
@@ -1123,8 +1057,8 @@ if [ "$CHECK" = 1 ]; then
   exit 0
 fi
 
-# One confirmation for everything the plan above describes, so the apt and the
-# container work do not start while someone is still reading it.
+# One confirmation for everything the plan above describes, so apt and the unit
+# work do not start while someone is still reading it.
 if can_ask; then
   printf 'Proceed? [Y/n] ' >&2
   answer="$(read_from_terminal)"
@@ -1222,26 +1156,17 @@ if [ "$DEPS" = 1 ]; then
   # The agent commits through git in both modes, so it is not optional and not
   # worth a question.
   ensure_git
-  if [ "$MODE" = native ]; then ensure_node; fi
+  ensure_node
   if [ "$DOCKER_REQUIRED" = 1 ]; then
-    # Chosen explicitly (docker mode, or the design stack): install it without
-    # asking, because the request already said so.
+    # Chosen explicitly (the design stack): install it without asking, because
+    # the request already said so. Nothing else uses Docker.
     ensure_docker
-  elif ! docker_ready && can_ask; then
-    printf 'Docker is not installed. It is optional here (the Penpot design stack would use it).\n' >&2
-    printf 'Install it anyway? [y/N] ' >&2
-    docker_answer="$(read_from_terminal)"
-    case "$docker_answer" in
-      y|Y|yes|Yes) INSTALL_DOCKER=1 ;;
-      *) INSTALL_DOCKER=0 ;;
-    esac
-    [ "$INSTALL_DOCKER" = 1 ] && ensure_docker
   fi
 fi
 
 # --- git: identity and repository access ------------------------------------
 # The identity goes into the runtime's own home, because that is the user that
-# commits: /data/home inside the container, /srv/dsh/data/home natively.
+# commits: <dir>/data/home.
 write_git_identity() {
   [ -n "$GIT_AUTHOR_NAME" ] && [ -n "$GIT_AUTHOR_EMAIL" ] || return 0
   local file="$DATA_HOME/.gitconfig"
@@ -1249,11 +1174,7 @@ write_git_identity() {
   git config --file "$file" user.name "$GIT_AUTHOR_NAME" || return 0
   git config --file "$file" user.email "$GIT_AUTHOR_EMAIL" || return 0
   git config --file "$file" init.defaultBranch main || true
-  if [ "$MODE" = native ]; then
-    chown "$SERVICE_USER:$SERVICE_USER" "$file" 2>/dev/null || true
-  else
-    chown "${SUDO_UID:-$(id -u)}:${SUDO_GID:-$(id -g)}" "$file" 2>/dev/null || true
-  fi
+  chown "$SERVICE_USER:$SERVICE_USER" "$file" 2>/dev/null || true
   log "git identity: $GIT_AUTHOR_NAME <$GIT_AUTHOR_EMAIL>"
 }
 
@@ -1308,7 +1229,7 @@ sync_stored_credential() {
     ""|absent|match) return 0 ;;
   esac
   if DSH_VALUE="$key" node "$SRC_DIR/scripts/credentials.mjs" sync --home "$home" --ref "$key_var" >/dev/null 2>&1; then
-    if [ "$MODE" = native ]; then owner="$SERVICE_USER:$SERVICE_USER"; else owner="${SUDO_UID:-$(id -u)}:${SUDO_GID:-$(id -g)}"; fi
+    owner="$SERVICE_USER:$SERVICE_USER"
     chown "$owner" "$store" "$store.bak" 2>/dev/null || true
     log "reconciled the stored $key_var with $file (backup: $store.bak)"
   else
@@ -1318,22 +1239,20 @@ sync_stored_credential() {
 
 write_env() {
   local file="$1"
-  if [ ! -f "$file" ]; then
-    if [ "$MODE" = docker ] && [ -f "$SRC_DIR/.env.example" ]; then
-      # Keep the documentation, drop the sample assignments. A copied
-      # `OPENCODE_GO_API_KEY=` line beside the managed one is the duplicate
-      # that makes a hand edit "do nothing": the runtime reads the last
-      # assignment, which is not the line the file invites you to edit.
-      grep -vE '^[A-Za-z_][A-Za-z0-9_]*=' "$SRC_DIR/.env.example" > "$file" || :
-    else
-      : > "$file"
-    fi
-  fi
-  set_env MODE "$MODE" "$file"
+  [ -f "$file" ] || : > "$file"
+  # Values that belonged to the removed container deployment: drop them so a
+  # repaired .env describes one deployment shape only.
+  del_env MODE "$file"
+  del_env DSH_UID "$file"
+  del_env DSH_GID "$file"
+  del_env DSH_DOCKER_GID "$file"
+  del_env DSH_MEM_LIMIT "$file"
+  del_env DSH_CPUS "$file"
   set_env DSH_PORT "$DSH_PORT" "$file"
   set_env DSH_BIND_IP "$DSH_BIND_IP" "$file"
   set_env DSH_PROVIDER "$DSH_PROVIDER" "$file"
   set_env DSH_MODEL "$DSH_MODEL" "$file"
+  set_env DSH_RESOURCE_PERCENT "$DSH_RESOURCE_PERCENT" "$file"
   PROVIDER_KEY_ENV="${PROVIDER_KEY_ENV:-$(provider_key_env "$DSH_PROVIDER")}"
   if [ -n "${PROVIDER_KEY:-}" ]; then
     # One route, one key variable: switching provider drops the other key, so a
@@ -1361,11 +1280,7 @@ write_env() {
     local plugin_ref=""
     [ -f "$comp" ] && plugin_ref="$(node -e 'process.stdout.write(require(process.argv[1]).components.design.plugin.ref)' "$comp" 2>/dev/null || true)"
     if [ -n "$plugin_ref" ]; then set_env PENPOT_PLUGIN_REF "$plugin_ref" "$file"; fi
-    if [ "$MODE" = docker ]; then
-      set_env PENPOT_API_URL "http://design-frontend:8080" "$file"
-    else
-      set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$file"
-    fi
+    set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$file"
   else
     set_env DSH_DESIGN_ENABLED 0 "$file"
     set_env PENPOT_ENABLED 0 "$file"
@@ -1380,11 +1295,7 @@ write_env() {
 # from the runtime's own log so a fresh install ends with something clickable.
 web_url() {
   local logs
-  if [ "$MODE" = docker ]; then
-    logs="$(docker compose logs dsh 2>/dev/null || true)"
-  else
-    logs="$(journalctl -u dsh.service --no-pager -o cat 2>/dev/null || true)"
-  fi
+  logs="$(journalctl -u dsh.service --no-pager -o cat 2>/dev/null || true)"
   printf '%s\n' "$logs" | grep -oE 'https?://[^[:space:]]*[?&]token=[^[:space:]]*' | tail -1
 }
 
@@ -1425,20 +1336,12 @@ design_apply() {
   fi
   set_env DSH_BIND_IP "$DSH_BIND_IP" "$env_file"
   set_env DSH_DESIGN_PORT "$DSH_DESIGN_PORT" "$env_file"
-  if [ "$MODE" = docker ]; then
-    set_env PENPOT_API_URL "http://design-frontend:8080" "$DIR/.env"
-  else
-    set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$DIR/.env"
-  fi
+  set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$DIR/.env"
   local token
   token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
   if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$DIR/.env"; fi
   log "restarting the runtime so the Penpot plugin loads"
-  if [ "$MODE" = native ]; then
-    run systemctl restart dsh.service
-  else
-    run docker compose --project-directory "$DIR" -f "$DIR/compose.yaml" restart dsh
-  fi
+  run systemctl restart dsh.service
 
   log "starting Penpot (the first start pulls the images)"
   if ! docker network inspect dsh-design >/dev/null 2>&1; then
@@ -1463,59 +1366,17 @@ design_apply() {
   warn "and put the token in $env_file as PENPOT_ACCESS_TOKEN=... to enable the design tools"
 }
 
-# Stop the other deployment mode before this one starts: two runtimes sharing a
-# bot token fight over the update queue, and two pollers drop messages.
-stop_other_mode() {
-  if [ "$MODE" = native ]; then
-    # The docker deployment may live anywhere: the default docker dir is the
-    # checkout and the default native dir is /srv/dsh, so probing only $DIR
-    # left a running stack holding the port and the Telegram poller.
-    if command -v docker >/dev/null 2>&1; then
-      local candidate
-      for candidate in "$DIR" "$SRC_DIR" /srv/dsh /opt/dsh "$HOME/dsh"; do
-        [ -f "$candidate/compose.yaml" ] || continue
-        if ( cd "$candidate" && docker compose ps -q dsh 2>/dev/null | grep -q . ); then
-          log "stopping the docker deployment in $candidate"
-          run bash -c "cd '$candidate' && docker compose down --remove-orphans"
-        fi
-      done
-    fi
-  else
-    if [ -f /etc/systemd/system/dsh.service ]; then
-      log "stopping the native deployment"
-      run systemctl disable --now dsh-updater.service 2>/dev/null || true
-      run systemctl disable --now dsh.service 2>/dev/null || true
-    fi
+# A running deployment is stopped before the units are rewritten: two runtimes
+# over one data directory fight over the lock, the bot token and the port.
+stop_runtime() {
+  if [ -f /etc/systemd/system/dsh.service ]; then
+    log "stopping the running deployment"
+    run systemctl disable --now dsh-updater.service 2>/dev/null || true
+    run systemctl disable --now dsh.service 2>/dev/null || true
   fi
 }
 
-# --- docker mode -----------------------------------------------------------
-docker_apply() {
-  command -v docker >/dev/null 2>&1 || die "docker not found — install Docker, or use --mode native"
-  [ -f "$DIR/compose.yaml" ] || die "no compose.yaml in $DIR — run ./install.sh from the checkout"
-  stop_other_mode
-  mkdir -p "$DIR/data"
-  cd "$DIR"
-  log "writing $DIR/.env"
-  write_env "$DIR/.env"
-  # The data directory must be owned by the invoking user, not by root.
-  set_env DSH_UID "${SUDO_UID:-$(id -u)}" "$DIR/.env"
-  set_env DSH_GID "${SUDO_GID:-$(id -g)}" "$DIR/.env"
-  write_git_identity
-  write_git_manifest
-  log "building the image (first build downloads DSH; a few minutes)"
-  run docker compose build
-  log "starting"
-  run docker compose up -d
-  log "waiting for health"
-  if ! wait_health 300; then
-    docker compose logs --tail=40 dsh 2>/dev/null || true
-    die "dsh did not become healthy — inspect: docker compose logs dsh"
-  fi
-  design_apply
-}
-
-# --- native mode -----------------------------------------------------------
+# --- deployment ------------------------------------------------------------
 ensure_user() {
   if id "$SERVICE_USER" >/dev/null 2>&1; then
     log "user $SERVICE_USER already exists"
@@ -1530,6 +1391,16 @@ native_units() {
   local node_bin node_dir
   node_bin="$(command -v node || echo /usr/local/bin/node)"
   node_dir="$(dirname "$node_bin")"
+  # CPU/RAM share chosen at install time. MemoryMax takes a percentage of RAM;
+  # CPUQuota is measured against one core, so a share of the machine is
+  # percent * cores. 0 means unlimited: no lines at all.
+  local limit_lines=""
+  if [ "${DSH_RESOURCE_PERCENT:-0}" != 0 ]; then
+    limit_lines="# CPU/RAM share chosen at install (DSH_RESOURCE_PERCENT=$DSH_RESOURCE_PERCENT; 0 = unlimited)
+MemoryMax=${DSH_RESOURCE_PERCENT}%
+CPUQuota=$((DSH_RESOURCE_PERCENT * $(cpu_count)))%
+TasksMax=512"
+  fi
   local sandbox_lines=""
   if [ "$TIER" = sandbox ]; then
     sandbox_lines="$(cat <<'EOF'
@@ -1583,6 +1454,7 @@ KillMode=mixed
 TimeoutStopSec=30
 StandardOutput=journal
 StandardError=journal
+$limit_lines
 $sandbox_lines
 
 [Install]
@@ -1605,11 +1477,12 @@ EnvironmentFile=-$env_file
 Environment=HOME=/root
 Environment=DSH_REPO_DIR=$DIR
 Environment=DSH_DATA_DIR=$DIR/data
-Environment=DSH_MODE=native
 Environment=DSH_UPDATER_PORT=8787
 Environment=DSH_UPDATER_HOST=127.0.0.1
 ExecStart=$node_bin /usr/local/bin/dsh-updater.mjs
-Restart=on-failure
+# Always, not on-failure: after a successful apply the updater exits 0 to pick
+# up the checkout it just installed, and only a restart brings it back.
+Restart=always
 RestartSec=5
 
 [Install]
@@ -1637,7 +1510,7 @@ native_apply() {
   node_major="$(node -p 'process.versions.node.split(".")[0]')"
   [ "$node_major" -ge 22 ] || die "Node >= 22.19 is required (found $(node --version))"
 
-  stop_other_mode
+  stop_runtime
   ensure_user
   log "creating the data layout under $DIR"
   run mkdir -p "$DATA_HOME" "$DATA_WORKSPACE" "$SUPERVISOR_STATE" "$DIR/data/.cache/tmp" "$DIR/backups"
@@ -1689,8 +1562,6 @@ native_apply() {
 
   log "writing $DIR/.env"
   write_env "$DIR/.env"
-  set_env DSH_UID "$(id -u "$SERVICE_USER")" "$DIR/.env"
-  set_env DSH_GID "$(id -g "$SERVICE_USER")" "$DIR/.env"
   run chown root:"$SERVICE_USER" "$DIR/.env"
   run chmod 640 "$DIR/.env"
   write_git_identity
@@ -1726,10 +1597,10 @@ native_apply() {
   if [ "$UFW_HINTED" = 0 ]; then ufw_hints "$DSH_PORT" "$DSH_BIND_IP"; fi
 }
 
-if [ "$MODE" = docker ]; then docker_apply; else native_apply; fi
+native_apply
 
 echo
-log "installed: $SETUP_VERSION ($MODE mode)"
+log "installed: $SETUP_VERSION"
 signed_url="$(web_url)"
 if [ -n "$signed_url" ]; then
   printf '    web:     %s\n' "$signed_url"
@@ -1741,26 +1612,18 @@ if [ -n "$DSH_TELEGRAM_BOT_TOKEN" ]; then
 else
   printf '    bot:     not configured (web-only) — add DSH_TELEGRAM_BOT_TOKEN to %s/.env, then restart\n' "$DIR"
 fi
-case "$MODE" in
-  docker) printf '    logs:    docker compose logs -f dsh\n' ;;
-  native) printf '    logs:    journalctl -u dsh.service -f\n' ;;
-esac
+printf '    logs:    journalctl -u dsh.service -f\n'
 if [ -z "$(grep -E '^(OPENCODE_GO_API_KEY|DEEPSEEK_API_KEY)=.+' "$DIR/.env" 2>/dev/null || true)" ]; then
-  case "$MODE" in
-    native) printf '    key:     none yet — add %s to %s/.env, then systemctl restart dsh\n' "$(provider_key_env "$DSH_PROVIDER")" "$DIR" ;;
-    docker) printf '    key:     none yet — add %s to %s/.env, then docker compose up -d dsh\n' "$(provider_key_env "$DSH_PROVIDER")" "$DIR" ;;
-  esac
+  printf '    key:     none yet — add %s to %s/.env, then systemctl restart dsh\n' "$(provider_key_env "$DSH_PROVIDER")" "$DIR"
 fi
 printf '    update:  /system update all (Telegram) or ./update.sh --self (host)\n'
-printf '    switch:  ./install.sh --mode %s (stops the other mode; data is not moved, see docs/HOST.md)\n' \
-  "$([ "$MODE" = docker ] && echo native || echo docker)"
 
 # Self-check after every install, with the summary already printed: the two
 # failures this catches ("model calls stopped working") are only confusing when
 # they appear before the operator has read what was installed.
 echo
 if [ -x "$SRC_DIR/scripts/repair.sh" ]; then
-  bash "$SRC_DIR/scripts/repair.sh" --dir "$DIR" --mode "$MODE" --fix \
+  bash "$SRC_DIR/scripts/repair.sh" --dir "$DIR" --fix \
     || warn "the health check found something above — ./install.sh --doctor"
 fi
 

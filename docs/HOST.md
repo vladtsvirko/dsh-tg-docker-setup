@@ -1,47 +1,20 @@
-# Native (no-Docker) deployment
+# The host deployment
 
-The setup ships two deployment modes from one release. `install.sh` picks one:
+`install.sh` turns this machine into a DSH host: two systemd units, an
+unprivileged service user, a root-owned checkout, and the data directory that
+survives everything else. This page is the reference for that layout, the
+isolation it does and does not give, and the update authority.
 
-| Mode | Runtime | Boundary |
+## Units
+
+| Unit | User | What it does |
 |---|---|---|
-| `docker` | compose: `init` + `dsh` + `updater` | the container |
-| `native` | systemd: `dsh.service` + `dsh-updater.service` | the Unix user |
+| `dsh.service` | `dsh` (the service user) | `entrypoint.sh serve` → `supervisor.mjs` → `dsh` |
+| `dsh-updater.service` | `root` | `updater.mjs` on `127.0.0.1:8787`, bearer token; runs `update.sh --self-to` |
 
-Both modes run the same supervisor, the same entrypoint preparation and the same
-`update.sh` tag policy. They differ in what the agent can reach and in who holds
-the update authority. Read this page before choosing native.
-
-## What native mode is
-
-- One systemd service, `dsh.service`, running `dsh-entrypoint serve` as the
-  service user. `entrypoint → supervisor → dsh`, exactly as in the container.
-- A second service, `dsh-updater.service`, running the same `updater.mjs` that
-  the container runs as a sidecar, bound to **127.0.0.1 only** and authenticated
-  with `DSH_UPDATER_TOKEN`. It exists so `/system update all` behaves the same
-  from Telegram in both modes.
-- No Docker, no image, no Docker socket anywhere — the runtime is a systemd
-  unit. Docker is installed only when you also choose the Penpot design stack,
-  which is a set of containers and needs it.
-
-## What native mode is not
-
-- **It is not a sandbox.** The agent runs with
-  `DSH_PERMISSION_MODE=danger-full-access` and can read anything the service
-  user can read: other projects under `/srv`, the host's world-readable files,
-  the network. The container is the only mode where that is not true.
-- **Root is not an option.** The installer offers `sandbox` (default) and
-  `privileged` (adds the `docker` group, i.e. root-equivalent through Docker).
-  "Run as root" is what a throwaway VM is for; it is deliberately not a flag.
-- **There is no image rollback.** A failed update is rolled back by checking the
-  previous tag out again and restoring the profile snapshot; there is no
-  `self-previous` image to return to.
-
-## Tiers
-
-| Tier | What it adds | Trade |
-|---|---|---|
-| `sandbox` | systemd hardening (`ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp`, `NoNewPrivileges`, `ReadWritePaths=<dir>/data`) | no `apt`, no Docker, no writes outside the data directory |
-| `privileged` | `SupplementaryGroups=docker` | Docker access = root-equivalent by design |
+The runtime is unprivileged. The updater is root because restarting
+`dsh.service` requires it — that is the only reason. The updater has no
+published port: only the loopback interface, only with the token from `.env`.
 
 ## Layout
 
@@ -51,61 +24,75 @@ the update authority. Read this page before choosing native.
 /srv/dsh/data/workspace  the agent's working directory
 /srv/dsh/data/supervisor supervisor state and the stable profile snapshot
 /srv/dsh/data/.cache     HOME caches (pnpm, npm, native addons)
-/srv/dsh/.env            mode, port, model route, tokens — 0640 root:dsh
+/srv/dsh/.env            port, tokens, resource share — 0640 root:dsh
+/srv/dsh/secrets/git     repository credentials — 0700, 0600 files
 /usr/local/bin/dsh-*     symlinks into the checkout (entrypoint, supervisor,
-                         healthcheck, updater)
+                         healthcheck, updater, git credentials, penpot)
 ```
 
-`/srv/dsh` is root-owned; the data directory is owned by the service user. That
-is why an update can be a `git checkout` without leaving root-owned profile
-files behind.
+`/srv/dsh` is root-owned; the data directory is owned by the service user. An
+update can therefore be a `git checkout` without leaving root-owned profile
+files behind, and the runtime cannot rewrite the code that starts it.
 
-## Install
+## Tiers
+
+| Tier | What it adds | Trade |
+|---|---|---|
+| `sandbox` (default) | `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp`, `NoNewPrivileges`, `ReadWritePaths=<dir>/data` | no writes outside the data directory |
+| `privileged` | `SupplementaryGroups=docker` | Docker access = root-equivalent by design |
+
+The tier is a unit setting, not a sandbox inside the harness: DSH itself runs
+with `DSH_PERMISSION_MODE=danger-full-access` in both cases (a nested
+bwrap/Landlock sandbox fails closed and breaks the bash tool). What the agent
+can read is what the service user can read; the tier only narrows writes and
+decides whether the agent can talk to Docker.
+
+## Resource limits
+
+The installer asks for a CPU/RAM share and proposes **30% of the machine**
+(`0` = unlimited). It becomes:
+
+```ini
+MemoryMax=30%
+CPUQuota=<percent × cores>%
+TasksMax=512
+```
+
+`MemoryMax` is a percentage of RAM; `CPUQuota` is measured against one core, so
+a share of the machine is `percent × nproc`. Unlimited writes none of the three.
+The value is stored as `DSH_RESOURCE_PERCENT` in `.env`, so a repair keeps it;
+change it there and re-run `./install.sh` (the unit is rewritten) or edit the
+unit and `systemctl daemon-reload`.
+
+## Install and repair
 
 ```sh
-./install.sh                 # asks for the mode and the few values that matter
-./install.sh --check         # print the plan, change nothing
-./install.sh --mode native --yes
-./install.sh --config answers.env   # MODE, DIR, DSH_PORT, tokens, ...
-./install.sh --ref <git ref>        # install a specific ref (default: the release tag)
+./install.sh                 # asks the questions, writes units, starts
+./install.sh --check         # the plan, nothing changed
+./install.sh --tier privileged --yes
+./install.sh --config answers.env
+./install.sh --ref <git ref>
 ```
 
-Or with nothing but a URL, on a fresh host:
+A native install run as a normal user re-executes itself under `sudo`, and the
+mode/answers already given are kept. `--dir` moves the deployment directory
+(default `/srv/dsh`). The installer is idempotent: a re-run repairs the units,
+the symlinks and `.env`, keeps the deployed values (including the provider key
+and the resource share), and does not move data. A failed re-run is not rolled
+back — the files are written before the health check.
 
-```sh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh \
-  | sudo bash -s -- --mode native
-```
-
-That fetches the newest release into `/opt/dsh-setup` (as root), installs Node 22
-from NodeSource when the host has none, and then continues with the questions
-below. `--no-deps` keeps the installer away from apt when Node is managed
-elsewhere; `--check` shows the whole plan, including what it would install.
-
-The installer is idempotent: re-running repairs the units, the symlinks and the
-`.env`, and keeps the deployed values — including the provider key, which is
-`--rotate-key` away from being replaced, and the git author, which is read from
-the deployed `.gitconfig` as the prompt default. A failed re-run is still not
-rolled back: the files are written before the health check. It refuses to clobber the other mode silently — switching is
-explicit (see below). A native install run as a normal user re-executes itself
-under `sudo`, and the mode answer does not survive that re-exec: pass
-`--mode native` (or `MODE=native` in `--config`) instead of relying on the
-prompt.
-
-`./install.sh --doctor` (and `./update.sh --doctor`) check the same things in
-both modes; `--fix` repairs the safe subset: duplicate or CRLF `.env` lines, a
-provider key the web UI's stored copy shadows, a duplicated managed block in the
-profile patch, wrong ownership. Every install and every successful self-update
-runs it with `--fix`, so a damaged file is repaired rather than reported next
-time.
+`./install.sh --doctor` (and `./update.sh --doctor`) check the same things;
+`--fix` repairs the safe subset: duplicate or CRLF `.env` lines, a provider key
+the web UI's stored copy shadows, a duplicated managed block in the profile
+patch, wrong ownership. Every install and every successful self-update runs it
+with `--fix`.
 
 Only one runtime may own a data directory. The entrypoint takes a kernel lock
-and writes `data/.runtime.json`; a second runtime over the same `data` (a
-native service beside a Docker stack, or two containers from two checkouts)
-waits 20 s and refuses to start, naming the holder. That state is the one a
-restart cannot clear: both processes hold each other's session write handles,
-the web UIs disagree about the workspace list, and Telegram answers "this
-session is held by another client".
+and writes `data/.runtime.json`; a second runtime over the same `data` waits 20 s
+and refuses to start, naming the holder. Both processes would hold each other's
+session write handles, the web UIs would disagree about the workspace list, and
+Telegram would answer "this session is held by another client". `--doctor`
+reports a live marker from a different checkout.
 
 ## Updates
 
@@ -117,56 +104,27 @@ Both paths end in the same script and the same tag policy.
 | Host `./update.sh --self` | `update.sh --self` (root) |
 | Telegram `/system update connector` | supervisor → `entrypoint reset-plugin`, profile only |
 
-The native apply path:
+The apply path:
 
 1. snapshot `data/home` + `data/supervisor` to `backups/self-*.tgz`;
 2. check out the target tag;
 3. write `DSH_SETUP_VERSION` into `.env`;
-4. re-run the entrypoint's prepare step as the service user (this installs the
+4. install the matching `@deepseek-ai/dsh` globally when it differs;
+5. re-run the entrypoint's prepare step as the service user (this installs the
    connector tag derived from the new version);
-5. `systemctl restart dsh.service`;
-6. health gate: service active **and** the published web port answers.
+6. `systemctl restart dsh.service`;
+7. health gate: service active **and** the published web port answers.
 
 On failure it checks the previous tag out again, restores the snapshot, rewrites
 the version and restarts.
 
 A release that changes `install.sh` itself (the systemd units) needs one
-`sudo ./install.sh --mode native --yes` afterwards: it is idempotent and keeps
-the values already in `.env`. The updater reports the outcome to the control chat,
-exactly as in Docker mode.
+`sudo ./install.sh --yes` afterwards: it is idempotent and keeps the values
+already in `.env`. The updater reports the outcome to the control chat.
 
 Compatibility rules are unchanged: same DSH part and same product major may
 jump; crossing either needs `--i-know-versions-are-incompatible`, which the
 connector passes through.
-
-Native updates run as root (the updater service is root because restarting
-`dsh.service` requires it). The runtime itself never runs as root.
-
-## Switching modes
-
-```sh
-./install.sh --mode native      # from a docker deployment
-./install.sh --mode docker      # from a native deployment
-```
-
-Data lives in `<dir>/data` and the two modes have different default
-directories: docker uses the checkout, native uses `/srv/dsh`. `install.sh`
-stops the other mode first (one poller per bot token) and chowns the new data
-directory, but it does not copy anything. To switch without losing the profile,
-sessions and workspace, either install both modes with the same `--dir`, or copy
-`data/` across before the first start of the new mode:
-
-```sh
-sudo ./install.sh --mode native --dir /srv/dsh --check   # plan first
-sudo rsync -a ./data/ /srv/dsh/data/                     # then carry the data over
-sudo ./install.sh --mode native --dir /srv/dsh
-```
-
-The Telegram token, the updater token and the model route carry over from
-`.env`; copy that file too if the directories differ.
-
-What changes is the update authority: in Docker mode the agent cannot touch its
-runtime; in native mode it owns the checkout.
 
 ## Security notes
 
@@ -174,14 +132,18 @@ runtime; in native mode it owns the checkout.
   and the updater token.
 - The updater token is a root credential: the updater runs `update.sh` and
   restarts the runtime.
+- The runtime and the connector share the `dsh` uid, so the agent can read the
+  bot and updater tokens. That is inherent to one unprivileged runtime; if it is
+  not acceptable, run the deployment on a dedicated host or VM.
 - Do not add the service user to the `docker` group unless you mean to give the
   agent Docker (and therefore root).
-- The systemd hardening blocks writes outside `/srv/dsh/data`; do not add
+- The systemd hardening blocks writes outside `<dir>/data`; do not add
   `ReadWritePaths` casually.
-- If the host also holds other projects' secrets, prefer Docker mode or a VM.
+- If the host also holds other projects' secrets, prefer a VM: the agent can
+  read what `dsh` can read.
 
 ## What still needs the host
 
-As in Docker mode: fixing a broken `.env`, a wedged service, a full disk, a
-failed rollback, or a host that cannot boot the runtime. Telegram remains the
-normal control path, not a recovery guarantee.
+Fixing a broken `.env`, a wedged service, a full disk, a failed rollback, or a
+host that cannot boot the runtime. Telegram remains the normal control path, not
+a recovery guarantee; [LIMITS.md](LIMITS.md) lists the boundary.

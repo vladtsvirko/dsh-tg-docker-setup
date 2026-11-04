@@ -42,33 +42,31 @@ async function install(args, { env = {}, cwd = here } = {}) {
   }
 }
 
-test('docker plan names the mode, the directory and the version', async () => {
-  const { code, out } = await install(['--check', '--mode', 'docker', '--yes'])
-  assert.equal(code, 0)
-  assert.match(out, /mode:\s+docker/)
-  assert.match(out, /directory:\s+\S+dsh-tg-docker-setup/)
+test('the plan names the directory, the version and the runtime', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'install-plan-'))
+  try {
+    const { code, out } = await install(['--check', '--yes', '--dir', join(root, 'deploy')])
+    assert.equal(code, 0)
+    assert.match(out, /directory:\s+\S+deploy/)
   const version = (await readFile(join(here, 'VERSION'), 'utf8')).trim()
   const dsh = version.replace(/-\d+\.\d+\.\d+$/, '')
   assert.ok(out.includes(`version:   ${version} (DSH ${dsh})`), 'the plan reports the repo VERSION')
-  assert.match(out, /updater:\s+sidecar/)
-  assert.match(out, /check only — nothing was changed/)
-})
-
-test('native plan names the tier, the service user and the data paths', async () => {
-  const { code, out } = await install(['--check', '--mode', 'native', '--yes'])
-  assert.equal(code, 0)
-  assert.match(out, /mode:\s+native/)
   assert.match(out, /tier:\s+sandbox/)
   assert.match(out, /user:\s+dsh/)
-  assert.match(out, /data:\s+\/srv\/dsh\/data\/home/)
+  assert.match(out, /data:\s+\S+deploy\/data\/home/)
   assert.match(out, /updater:\s+http:\/\/127\.0\.0\.1:8787/)
+  assert.match(out, /resources:\s+30% of this machine/)
+  assert.match(out, /check only — nothing was changed/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('--check never needs root and never creates the deployment directory', async () => {
   const root = await mkdtemp(join(tmpdir(), 'install-check-'))
   const target = join(root, 'deploy')
   try {
-    const { code, out } = await install(['--check', '--mode', 'native', '--dir', target, '--yes'])
+    const { code, out } = await install(['--check', '--dir', target, '--yes'])
     assert.equal(code, 0)
     assert.match(out, new RegExp(`directory:\\s+${target}`))
     await assert.rejects(stat(target), /ENOENT/)
@@ -81,13 +79,13 @@ test('answers come from a config file, without prompting', async () => {
   const root = await mkdtemp(join(tmpdir(), 'install-config-'))
   const config = join(root, 'answers.env')
   try {
-    await writeFile(config, 'MODE=native\nDIR=/srv/other\nDSH_PORT=4477\nTIER=privileged\n')
+    await writeFile(config, 'DIR=/srv/other\nDSH_PORT=4477\nTIER=privileged\nDSH_RESOURCE_PERCENT=0\n')
     const { code, out } = await install(['--check', '--config', config])
     assert.equal(code, 0)
-    assert.match(out, /mode:\s+native/)
     assert.match(out, /directory:\s+\/srv\/other/)
     assert.match(out, /web:\s+http:\/\/\S+:4477\//)
     assert.match(out, /tier:\s+privileged/)
+    assert.match(out, /resources:\s+unlimited/)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -97,25 +95,13 @@ test('a config file cannot smuggle in an unknown key', async () => {
   const root = await mkdtemp(join(tmpdir(), 'install-badkey-'))
   const config = join(root, 'answers.env')
   try {
-    await writeFile(config, 'MODE=docker\nPATH=/evil\n')
+    await writeFile(config, 'PATH=/evil\n')
     const { code, out } = await install(['--check', '--config', config])
     assert.notEqual(code, 0)
     assert.match(out, /unknown key in .*answers\.env: PATH/)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
-})
-
-test('an unknown mode is refused', async () => {
-  const { code, out } = await install(['--check', '--mode', 'podman', '--yes'])
-  assert.notEqual(code, 0)
-  assert.match(out, /--mode must be docker or native/)
-})
-
-test('--tier is native-only', async () => {
-  const { code, out } = await install(['--check', '--mode', 'docker', '--tier', 'privileged', '--yes'])
-  assert.notEqual(code, 0)
-  assert.match(out, /--tier only applies to native mode/)
 })
 
 // --- firewall advisory ----------------------------------------------------
@@ -140,7 +126,7 @@ const ufwAllow = 'Status: active\n4310/tcp                   ALLOW       192.168
 
 test('native plan names the ufw rule when the port is not allowed', async () => {
   await withUfw(ufwOpen, async (env) => {
-    const { code, out } = await install(['--check', '--mode', 'native', '--yes'], { env: { ...env, ...ufwEnv } })
+    const { code, out } = await install(['--check', '--yes'], { env: { ...env, ...ufwEnv } })
     assert.equal(code, 0)
     assert.match(out, /ufw is active and does not allow the ports this deployment serves/)
     assert.match(out, /sudo ufw allow from 192\.168\.2\.0\/24 to any port 4310 proto tcp/)
@@ -149,15 +135,7 @@ test('native plan names the ufw rule when the port is not allowed', async () => 
 
 test('native plan stays quiet when ufw already allows the port', async () => {
   await withUfw(ufwAllow, async (env) => {
-    const { code, out } = await install(['--check', '--mode', 'native', '--yes'], { env: { ...env, ...ufwEnv } })
-    assert.equal(code, 0)
-    assert.doesNotMatch(out, /ufw is active/)
-  })
-})
-
-test('docker plan says nothing about ufw, which does not gate published ports', async () => {
-  await withUfw(ufwOpen, async (env) => {
-    const { code, out } = await install(['--check', '--mode', 'docker', '--yes'], { env: { ...env, ...ufwEnv } })
+    const { code, out } = await install(['--check', '--yes'], { env: { ...env, ...ufwEnv } })
     assert.equal(code, 0)
     assert.doesNotMatch(out, /ufw is active/)
   })
@@ -166,33 +144,23 @@ test('docker plan says nothing about ufw, which does not gate published ports', 
 // --- update.sh, mode-aware ------------------------------------------------
 
 /** A throwaway deployment directory with just enough for update.sh --status. */
-async function deploy(mode) {
-  const dir = await mkdtemp(join(tmpdir(), `update-${mode}-`))
+async function deploy() {
+  const dir = await mkdtemp(join(tmpdir(), 'update-status-'))
   const version = (await readFile(join(here, 'VERSION'), 'utf8')).trim()
   await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
   await writeFile(join(dir, 'VERSION'), `${version}\n`)
-  await writeFile(join(dir, '.env'), `MODE=${mode}\nDSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n`)
+  await writeFile(join(dir, '.env'), 'DSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n')
   return dir
 }
 
-test('update.sh reports the native mode and its services', async () => {
-  const dir = await deploy('native')
+test('update.sh reports the services and the installed versions', async () => {
+  const dir = await deploy()
   try {
     const { stdout } = await exec('bash', [join(dir, 'update.sh'), '--status'], { timeout: 20000 })
-    assert.match(stdout, /mode\s+native/)
+    assert.match(stdout, /setup version\s+\S+/)
+    assert.match(stdout, /dsh version\s+\S+/)
     assert.match(stdout, /service\s+/)
     assert.match(stdout, /updater\s+/)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-test('update.sh keeps the docker path when .env says docker', async () => {
-  const dir = await deploy('docker')
-  try {
-    const { stdout } = await exec('bash', [join(dir, 'update.sh'), '--status'], { timeout: 20000 })
-    assert.match(stdout, /mode\s+docker/)
-    assert.match(stdout, /container\s+/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -315,7 +283,7 @@ test('update.sh --component validates the registry, the action and the port', as
     await mkdir(join(dir, 'design'), { recursive: true })
     await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
     await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.3.1\n')
-    await writeFile(join(dir, '.env'), 'MODE=docker\nDSH_BIND_IP=127.0.0.1\n')
+    await writeFile(join(dir, '.env'), 'DSH_BIND_IP=127.0.0.1\n')
 
     const run = async (args) => {
       try {
@@ -360,7 +328,7 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     await mkdir(join(dir, 'design'), { recursive: true })
     await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
     await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.4.0\n')
-    await writeFile(join(dir, '.env'), 'MODE=docker\nDSH_BIND_IP=127.0.0.1\n')
+    await writeFile(join(dir, '.env'), 'DSH_BIND_IP=127.0.0.1\n')
 
     await mkdir(bins, { recursive: true })
     await stub(bins, 'docker', `echo "docker $*" >> ${calls}; exit 0`)
@@ -383,9 +351,8 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     assert.match(mainEnv, /DSH_DESIGN_ENABLED=1/)
     assert.match(mainEnv, /PENPOT_ENABLED=1/)
     assert.match(mainEnv, /PENPOT_PLUGIN_REF=github:vladtsvirko\/dsh-penpot-plugin#v\d+\.\d+\.\d+/)
-    assert.match(mainEnv, /PENPOT_API_URL=http:\/\/design-frontend:8080/)
+    assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:8091/)
     assert.match(log, /compose --project-directory design -f design\/compose\.yaml up -d/)
-    assert.match(log, /compose up -d dsh/)
 
     await run(['--component', 'design', 'disable'])
     const after = await readFile(join(dir, '.env'), 'utf8')
@@ -411,7 +378,7 @@ test('configuring a stopped stack saves the port and does not start it', async (
     await mkdir(join(dir, 'design'), { recursive: true })
     await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
     await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.4.3\n')
-    await writeFile(join(dir, '.env'), 'MODE=docker\nDSH_BIND_IP=127.0.0.1\nDSH_DESIGN_ENABLED=0\n')
+    await writeFile(join(dir, '.env'), 'DSH_BIND_IP=127.0.0.1\nDSH_DESIGN_ENABLED=0\n')
     await mkdir(bins, { recursive: true })
     // `ps -q` prints nothing: nothing is running.
     await stub(bins, 'docker', `echo "docker $*" >> ${calls}; exit 0`)
@@ -463,10 +430,8 @@ test('configuring a running stack recreates it on the new port', async () => {
 
     assert.match(stdout, /starting design on 127\.0\.0\.1:8094/)
     assert.match(log, / up -d --build/)
-    // recreate, not restart: only `up -d` re-reads .env, so a changed port or
-    // token actually reaches the container
-    assert.match(log, / up -d dsh/)
-    assert.match(mainEnv, /PENPOT_API_URL=http:\/\/design-frontend:8080/)
+    // the runtime is restarted by systemd so the new PENPOT_API_URL lands
+    assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:8094/)
   } finally {
     await rm(outer, { recursive: true, force: true })
   }
@@ -521,10 +486,10 @@ test('--purge without --uninstall is refused', async () => {
   assert.match(result.out, /--purge only makes sense with --uninstall/)
 })
 
-test('--uninstall without --yes and without a terminal refuses to run', async () => {
+test('--uninstall without root refuses before touching anything', async () => {
   const result = await install(['--uninstall'], { env: { CI: '1' } })
   assert.notEqual(result.code, 0)
-  assert.match(result.out, /refusing to uninstall without a terminal/)
+  assert.match(result.out, /removing the systemd units needs root/)
 })
 
 test('an .env from an older release is repaired, not rejected', async () => {
@@ -549,7 +514,6 @@ test('an .env from an older release is repaired, not rejected', async () => {
       env: { ALLOWED_USER_IDS: undefined, DSH_ADMIN_USER_ID: undefined, DESIGN: undefined },
     })
     assert.equal(result.code, 0, result.out)
-    assert.match(result.out, /mode:\s+docker/)
     assert.match(result.out, /web:\s+http:\/\/127\.0\.0\.1:4311\//)
     assert.match(result.out, /telegram:\s+configured/)
     assert.match(result.out, /design:\s+none/)
@@ -674,7 +638,7 @@ async function withoutDocker() {
   return `${bin}:${process.env.PATH}`
 }
 
-test('docker is installed when the design stack needs it, in either mode', async (t) => {
+test('docker is installed only when the design stack needs it', async (t) => {
   // Native mode runs the agent without Docker, but the Penpot stack is a set of
   // containers: choosing it must install Docker instead of silently skipping it.
   const path = await withoutDocker()
@@ -682,13 +646,26 @@ test('docker is installed when the design stack needs it, in either mode', async
     t.skip('temp directory is noexec; cannot shadow docker')
     return
   }
-  const native = await install(['--check', '--yes', '--mode', 'native', '--design', 'docker'], { env: { PATH: path } })
-  assert.equal(native.code, 0, native.out)
-  assert.match(native.out, /installs docker\.io \+ docker-compose-v2/)
-  assert.match(native.out, /design:\s+Penpot/)
+  const root = await mkdtemp(join(tmpdir(), 'install-deps-'))
+  try {
+    const native = await install(['--check', '--yes', '--design', 'docker', '--dir', join(root, 'a')], { env: { PATH: path } })
+    assert.equal(native.code, 0, native.out)
+    assert.match(native.out, /installs docker\.io \+ docker-compose-v2/)
+    assert.match(native.out, /design:\s+Penpot/)
 
-  const plain = await install(['--check', '--yes', '--mode', 'native'], { env: { PATH: path } })
-  assert.match(plain.out, /docker absent \(optional here\)/)
+    const plain = await install(['--check', '--yes', '--dir', join(root, 'b')], { env: { PATH: path } })
+    assert.match(plain.out, /docker absent/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('the installer asks for a resource share and writes it to the unit', async () => {
+  const source = await readFile(join(here, 'install.sh'), 'utf8')
+  assert.match(source, /ask DSH_RESOURCE_PERCENT .*percent of this machine \(0 = unlimited\)" 30/)
+  assert.match(source, /MemoryMax=\$\{DSH_RESOURCE_PERCENT\}%/)
+  assert.match(source, /CPUQuota=\$\(\(DSH_RESOURCE_PERCENT \* \$\(cpu_count\)\)\)%/)
+  assert.match(source, /TasksMax=512/)
 })
 
 test('the plan names the git author and the repository access', async () => {

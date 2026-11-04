@@ -1,18 +1,20 @@
 # Design stack (optional)
 
-Penpot — the self-hosted design tool — plus a small `penpot` CLI inside the
-runtime, so the agent can read, export and import design files without a browser
-and without third-party code in the image.
+Penpot — the self-hosted design tool — plus a small dependency-free `penpot` CLI
+in the deployment, so the agent can read, export and import design files without
+a browser.
 
 The stack is **opt-in** and separate from the runtime:
 
 ```
-runtime ──penpot CLI──HTTP──► design-frontend ──► design-backend ──► postgres / redis
-                                 └──────────────► design-exporter
+runtime (penpot CLI) ──HTTP──► design-frontend ──► design-backend ──► postgres / redis
+                                     └───────────► design-exporter
 ```
 
-It is its own compose project (`design/compose.yaml`, project `dsh-design`) with
-its own data under `design/data/`. Removing it does not touch the runtime.
+The runtime calls the frontend on its published address
+(`DSH_BIND_IP:DSH_DESIGN_PORT`). It is its own compose project
+(`design/compose.yaml`, project `dsh-design`) with its own data under
+`design/data/`. Removing it does not touch the runtime.
 
 ## Install
 
@@ -24,15 +26,16 @@ its own data under `design/data/`. Removing it does not touch the runtime.
 Interactive installs ask once. Re-running `install.sh` later is how you **add it
 afterwards**: the answers already in `.env` are preserved.
 
-In **native mode** the stack is still Docker: Penpot has no supported machine
-install. `install.sh` skips it with a warning when Docker is absent.
+The stack is always Docker: Penpot has no supported machine install.
+`install.sh` skips it with a warning when Docker is absent, and the runtime
+keeps working without it.
 
 ## First run
 
 1. Open `http://<DSH_BIND_IP>:<DSH_DESIGN_PORT>/` and create the first account
    (registration is on; email verification is off, a LAN instance has no SMTP).
 2. Settings → **Access tokens** → create one.
-3. Put it in `design/.env` as `PENPOT_ACCESS_TOKEN=...`.
+3. Put it in `/srv/dsh/design/.env` as `PENPOT_ACCESS_TOKEN=...`.
 4. Re-run the component once so the runtime picks the token up: `/system manage`
    → Enable (idempotent), or `./update.sh --component design enable`.
 
@@ -42,11 +45,13 @@ install. `install.sh` skips it with a warning when Docker is absent.
 The updater applies the change on the host, restarts the runtime and reports.
 `/system manage design port 8091` does the same without a tap.
 
-The runtime reaches Penpot as `http://design-frontend:8080` over the shared
-`dsh-design` network — no published port, no host firewall in the path. The
-published port exists for your browser only. The health probe after a change is
-advisory: if it cannot reach the service it prints the container states and
-still reports the change as applied.
+The runtime reaches Penpot at `PENPOT_API_URL=http://<DSH_BIND_IP>:<DSH_DESIGN_PORT>`,
+the published frontend port — the same address your browser opens. There is no
+shared Docker network between the runtime and the stack: the CLI is a host
+process and goes over the published port, so a host firewall that blocks the
+port also blocks the CLI. The health probe after a change is advisory: if it
+cannot reach the service it prints the compose service states and still reports
+the change as applied.
 
 Changing the port is state-aware: on a stopped stack it only saves the value
 (nothing is started), and on a running stack the containers are recreated on the
@@ -67,8 +72,8 @@ The plugin is versioned on its own: bumping it means bumping the ref in
 
 ## The `penpot` CLI
 
-Shipped in the image at `/usr/local/bin/penpot` (native: symlinked from the
-checkout). One dependency-free Node file, MIT like the rest of the repo.
+Symlinked from the checkout at `/usr/local/bin/penpot` by the installer. One
+dependency-free Node file, MIT like the rest of the repo.
 
 ```sh
 penpot whoami
@@ -83,8 +88,8 @@ penpot import design.penpot --into <file-id>     # in-place, binfile-v3
 ```
 
 Auth comes from the environment: `PENPOT_API_URL` (the stack's origin) and
-`PENPOT_ACCESS_TOKEN`. Both are written into the runtime `.env` when the
-component is enabled, so the agent calls the CLI from its bash tool directly.
+`PENPOT_ACCESS_TOKEN`. Both are written into `/srv/dsh/.env` when the component
+is enabled, so the agent calls the CLI from its bash tool directly.
 
 `--json` prints the raw payload. Exit codes: `0` ok, `1` usage or environment,
 `2` the API refused the request.
@@ -121,7 +126,7 @@ docker compose --project-directory design -f design/compose.yaml down
 ```
 
 `down -v` plus deleting `design/data/` removes everything; then set `DESIGN=none`
-in the main `.env` and restart the runtime.
+in `/srv/dsh/.env` and `sudo systemctl restart dsh.service`.
 
 ## Why no MCP server
 

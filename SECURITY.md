@@ -1,103 +1,76 @@
 # Security
 
-This container runs an agent with host-level permissions *inside* the container
-boundary. Treat `/data` and the bot token as the sensitive material.
+The deployment runs an agent with the service user's access on this host. This
+page is what that means, what protects it, and what does not.
 
 ## Reporting
 
-Open a private GitHub security advisory. Do not file a public issue for a working
-exploit.
+Open a private security advisory on GitHub, or email the maintainer at the
+address in `package.json`. Please do not file a public issue for a working
+exploit. Expect an answer within a few days.
 
-## Two modes
+## Threat model
 
-`install.sh --mode docker` (the default) keeps the boundary described below.
-`install.sh --mode native` runs the same runtime under systemd as the service
-user, without Docker: the agent can then read what that user can read, and the
-updater service (root, loopback only) is the only privileged component. Native
-mode's tiers, hardening and limits are in [docs/HOST.md](docs/HOST.md). Never
-run the runtime itself as root.
+- `dsh.service` runs as the unprivileged service user `dsh` and can read what
+  that user can read: `/etc`, other projects under `/srv`, the host network. The
+  systemd unit narrows writes to `<dir>/data` and blocks privilege escalation
+  (`NoNewPrivileges`), but it is not a filesystem sandbox.
+- `dsh-updater.service` runs as root because restarting `dsh.service` requires
+  it. It listens on `127.0.0.1:8787` only, with the bearer token from `.env`.
+- The agent and the connector share the `dsh` uid, so the agent's shell can read
+  everything the connector can, including `DSH_TELEGRAM_BOT_TOKEN` and
+  `DSH_UPDATER_TOKEN` in `.env` (mode `0640 root:dsh`).
+- Telegram sees all message content; the bot token lets whoever holds it poll as
+  the bot until revoked.
 
-## The deployment's own rules
+## What protects it
 
-- `DSH_BIND_IP` keeps the web UI on one host interface. Never publish it on
+- **Allowlist and one admin.** `ALLOWED_USER_IDS` decides who may talk to the
+  bot; `DSH_ADMIN_USER_ID` decides who may restart, update, roll back, install
+  plugins or create workspaces. Empty allowlist refuses everyone.
+- **A narrow updater.** It accepts a release tag and a mode, never a command. It
+  is reachable only from the loopback interface and only with the token.
+- **Root-owned control plane.** The checkout, the units and `install.sh` are
+  root-owned; the runtime cannot rewrite the code that starts it. The supervisor
+  (the recovery path) does not load plugins.
+- **Trials.** A plugin change or restart opens a rollback window; a broken
+  runtime is restored by the supervisor, not left in place.
+- **Secrets on disk.** `.env` is `0640 root:dsh`; `secrets/git` is `0700` with
+  `0600` files; `.credentials.yaml` is `0600`. Tokens are never in the profile
+  patch or in git.
+- **One runtime per data directory.** A kernel lock stops two runtimes from
+  corrupting the session store or fighting over the bot token.
+
+## What it does not protect
+
+- A compromised bot token lets an attacker poll as the bot until the token is
+  revoked with BotFather (`/revoke`).
+- The agent can read host files the service user can read. If the host holds
+  other tenants' secrets, use a VM.
+- The updater token is root-equivalent for updates; the agent can read it. A
+  prompt-injected agent can trigger a release update (a fixed action), not
+  arbitrary root commands.
+- Anyone who is an admin of a workspace group can close topics (archiving
+  sessions) and rename the group (renaming the workspace).
+- The web UI is plain HTTP unless a proxy terminates TLS; the token and cookie
+  cross that network in clear text.
+
+## Hardening checklist
+
+- Bind `127.0.0.1` and use an SSH tunnel unless the LAN is trusted; never
   `0.0.0.0`.
-- The runtime container is the sandbox: `read_only` rootfs, `cap_drop: ALL`,
-  `no-new-privileges`, no Docker socket. Do not add the socket "temporarily".
-- The separate `updater` sidecar is the only component with the Docker socket.
-  That socket is host-root-equivalent. It publishes no port; its API answers only
-  on the internal `ops` network and needs `DSH_UPDATER_TOKEN` — treat that token
-  as a root credential, and empty it to disable apply. It also joins the compose
-  `default` network (to probe the runtime's web port) and the `design` network
-  (to probe the Penpot frontend), so it can reach those two services; it cannot
-  start anything by that route, only read their HTTP ports.
-- `.env` holds the bot token and model key. Keep it `chmod 600`, never commit it
-  (the `data/` volume and `.env` are ignored).
-- `/data` is the only persistent path. Back it up; anyone with it has the session
-  history and the profile.
-- `ALLOWED_USER_IDS` is the gate for using the bot; `DSH_ADMIN_USER_ID` is the
-  separate gate for changing the deployment (restart, update, rollback, plugins,
-  workspaces). Empty allowlist refuses everyone. The connector's inline buttons
-  currently check the allowlist only — see its `SECURITY.md`.
-- The supervisor's control socket is loopback-only and bearer-authenticated; its
-  token is generated per container start.
-- The one-shot `init` service runs as root only to chown `./data` to `DSH_UID`.
-  It has no network, a read-only rootfs, and only `CHOWN` and `DAC_OVERRIDE`;
-  the runtime itself never runs as root.
+- Keep `.env` at `0640 root:dsh` and `secrets/` at `0700`.
+- List only your own Telegram ids in `ALLOWED_USER_IDS`, and set
+  `DSH_ADMIN_USER_ID`.
+- Keep the `sandbox` tier unless you need the agent to reach Docker; `privileged`
+  adds the docker group, i.e. root-equivalent access.
+- Set a resource share (`DSH_RESOURCE_PERCENT`) so a runaway command cannot take
+  the host down.
+- Revoke and replace a token if it ever appears in logs or a repository.
+- Back up `data/` and `secrets/` separately (encrypted); `backups/self-*.tgz`
+  holds git tokens too.
 
-## If a credential leaks
+## Supported versions
 
-The bot token, the provider key, the updater token and the web UI's sign-in
-token are all passwords. What to do, in the order that limits damage:
-
-**Bot token** (it can read every message the bot sees, and send as it):
-
-```sh
-# 1. revoke it: @BotFather → /revoke → pick the bot (the old token dies at once)
-# 2. put the new one in .env
-sed -i 's|^DSH_TELEGRAM_BOT_TOKEN=.*|DSH_TELEGRAM_BOT_TOKEN=<new>|' .env
-# 3. recreate the runtime so the entrypoint rewrites the connector config
-docker compose up -d dsh
-# 4. confirm the old poller is gone: no 409 "terminated by other getUpdates"
-docker compose logs --since 2m dsh | grep -i 'conflict\|terminated'
-```
-
-**Web UI sign-in token** (it grants browser access to the agent):
-
-```sh
-docker compose restart dsh   # a restart mints a new launch token
-```
-Every link handed out before the restart stops working. The token lives in the
-container log (`dsh web: …`), which is why the log is a credential: use
-`/web` in the bot chat instead of grepping it, and do not paste it in a group.
-
-**Provider key** (billing and rate limits):
-
-Revoke it in the provider console, put the new value in `.env`, then
-`docker compose up -d dsh`. `/system status` reports `key: set|missing`.
-
-**Updater token** (equivalent to root: it restarts the stack with a Docker
-socket):
-
-```sh
-# rotate it in .env, then recreate BOTH services so the sidecar and runtime agree
-sed -i 's|^DSH_UPDATER_TOKEN=.*|DSH_UPDATER_TOKEN=<new>|' .env
-docker compose up -d updater dsh
-```
-Empty (`DSH_UPDATER_TOKEN=`) disables apply entirely: `/system update all` then
-tells the user to update from the host.
-
-**Git token** (repository access only): rotate the profile in
-`data/home/.dsh/git`, and check the rollback snapshots — `backups/self-*.tgz`
-contains them and is `0600` for that reason.
-
-After any rotation, run `/system status` in the bot chat: it reports the web
-port, the key and the last agent error, which is the fastest way to see that the
-new credential is the one in use.
-
-## What is not protected
-
-- A leaked bot token lets the holder poll and act as the bot until revoked with
-  BotFather (`/revoke`).
-- Group admins can rename topics/groups, close sessions and delete topics.
-- The agent runs with `danger-full-access` inside the container; anything mounted
-  into it is reachable by the agent.
+The `main` branch is the only supported line while the project is pre-1.0.
+Security fixes ship in the next release tag; tags are immutable.

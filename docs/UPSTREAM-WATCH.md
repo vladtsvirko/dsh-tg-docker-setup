@@ -7,9 +7,14 @@ upgrade plan and a short list of decisions for a human — never with an upgrade
 | | |
 |---|---|
 | Schedule | daily 08:00 Europe/Minsk, DSH session schedule (id `schedule-e995eea8`) |
-| Pinned version | `Dockerfile` → `ARG DSH_VERSION` (also in `VERSION`, image tags) |
-| Reports | `docs/upgrades/<dsh-version>.md` (one file per target release) |
+| Pinned version | `VERSION` — the prefix before the last `-<major>.<minor>.<patch>` is the DSH part |
+| Installed by | `install.sh` / `update.sh` as `@deepseek-ai/dsh@<DSH part>` |
+| Report | the chat message with the upgrade plan; no files are written |
 | No-op | pinned == newest RC → say so in one line, write nothing |
+
+`VERSION` is `<dsh>-<product>`: for `0.2.1-rc.5-0.8.0` the DSH part is
+`0.2.1-rc.5`. `install.sh` installs exactly that version; there is no separate
+pin.
 
 If the schedule is lost (session reset, new host), recreate it from this page:
 steps 1–6 are the prompt, the *Rules* and *What counts as a real decision*
@@ -17,11 +22,11 @@ sections are the constraints.
 
 ## Rules
 
-- Read-only against everything except `docs/upgrades/<version>.md` and a scratch
-  directory under `/tmp`. Never rebuild, never tag, never edit `VERSION` — the
-  release is a human decision (see the checklist in `AGENTS.md`).
+- Read-only: use a scratch directory under `/tmp` and do not modify the
+  checkout. Never rebuild, never tag, never edit `VERSION` — the release is a
+  human decision (see the checklist in `AGENTS.md`).
 - Report what the evidence says. If a release has no feature worth acting on,
-  write that; if there is no real decision to make, list none.
+  say that; if there is no real decision to make, list none.
 - Distinguish *tested* from *declared*: the connector's peer range is the
   contract, the compatibility matrix is what we actually ran.
 - Alpha tags are context, not targets. Only `-rc.` (or stable) releases are in
@@ -34,7 +39,7 @@ sections are the constraints.
 ```sh
 npm view @deepseek-ai/dsh dist-tags --json          # latest / next / alpha
 npm view @deepseek-ai/dsh versions --json           # pick the highest "-rc."
-grep -n 'ARG DSH_VERSION' Dockerfile; cat VERSION    # what we run
+cat VERSION                                         # what we run: <dsh>-<product>
 ```
 
 `latest` and `next` normally point at the same RC; `alpha` is the next line.
@@ -43,7 +48,7 @@ Ignore build metadata, compare semver order.
 ### 2. If pinned == newest RC
 
 Reply with one line — "no new RC; still `X` (checked <date>)" — and stop. Do not
-create an empty report.
+invent a report.
 
 ### 3. Collect the change surface
 
@@ -112,23 +117,22 @@ Also check, by reading the two manifests:
   `dsh plugin allow-version` / `version-exemptions` still exist:
   `npx -y @deepseek-ai/dsh@<target> plugin --profile <tmp> version-exemptions`.
 
-### 6. Write the report
+### 6. Report the plan
 
-`docs/upgrades/<target>.md`, same skeleton as
-[`0.2.1-rc.5.md`](upgrades/0.2.1-rc.5.md):
+Post the answer in the chat, using this skeleton:
 
 1. **Snapshot** — pinned vs target, dates, `dist-tags`, releases in range.
 2. **What ships** — table of user-visible changes and whether they touch us.
 3. **Compatibility findings** — verdict first, then the evidence table, then
    residual risks. Separate *breaks* from *annoyances* from *needs UAT*.
-4. **Upgrade plan** — connector tag → setup tag → deployment → checks →
-   rollback, using the release checklist in `AGENTS.md`.
+4. **Upgrade plan** — connector tag → setup tag → `install.sh` / `update.sh` →
+   checks → rollback, using the release checklist in `AGENTS.md`.
 5. **Decisions needed** — only real forks: product scope, model route, policy.
    Each with cost of each option and a recommendation. If there are none, say so.
 6. **Open items for UAT** — what a human should click, derived from the diff.
 
 Then summarise in chat: verdict, the plan in five lines, and the decisions with
-their options. Link the report.
+their options.
 
 ## What counts as a real decision
 
