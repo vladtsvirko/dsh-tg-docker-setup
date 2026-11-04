@@ -7,6 +7,28 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.6.2
+
+### Fixed
+
+- **The credential helper no longer needs a YAML library.** `scripts/credentials.mjs`
+  resolved `yaml` from the global dsh install, so it worked on a deployment and
+  failed in CI (which has no global dsh) — exactly the bootstrap case the helper
+  exists for. It now edits the fixed `version`/`refs`/`records` document shape
+  directly: values are written as double-quoted YAML scalars, comments and
+  `records` survive byte for byte, an unreadable or unversioned document is
+  refused instead of rewritten, and a fresh file gets the `version: 1` header the
+  runtime requires. Verified against the runtime's own parser.
+- **The doctor test no longer reads the machine it runs on.** A CI runner has a
+  working Docker daemon, so `docker compose ps` against the throwaway fixture
+  answered "no container" and the doctor reported a failure where the test
+  expected the "docker is absent" warning. The test shadows `docker` with one
+  that is installed but unusable.
+
+`v0.2.1-rc.5-0.6.1` carried the first half of this (the Docker shim) and is
+superseded: its CI stayed red on the credential tests. No runtime behaviour
+changed in either patch.
+
 ## 0.2.1-rc.5-0.6.1
 
 ### Fixed

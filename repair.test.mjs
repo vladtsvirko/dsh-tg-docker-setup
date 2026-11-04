@@ -171,7 +171,7 @@ test('a stored credential that shadows .env is a failure and --fix makes the dep
 
     const fixed = await run(['--dir', dir, '--mode', 'docker', '--fix'])
     const text = await readFile(store, 'utf8')
-    assert.match(text, /OPENCODE_GO_API_KEY: sk-test-key-that-is-long-enough/)
+    assert.match(text, /OPENCODE_GO_API_KEY: "sk-test-key-that-is-long-enough"/)
     assert.doesNotMatch(text, /sk-the-old-one-from-the-ui/)
     assert.match(fixed.out, /fix\s+credential-store/)
     // A backup keeps the previous document without losing it.
@@ -278,7 +278,7 @@ test('credentials.mjs never prints a secret and preserves unrelated entries', as
 
     const text = await readFile(path, 'utf8')
     assert.match(text, /OTHER_KEY: keep-me/)
-    assert.match(text, /OPENCODE_GO_API_KEY: sk-secret-value/)
+    assert.match(text, /OPENCODE_GO_API_KEY: "sk-secret-value"/)
     assert.equal((await stat(path)).mode & 0o777, 0o600)
 
     await exec('node', [credentials, 'clear', '--home', home, '--ref', 'OPENCODE_GO_API_KEY'])
@@ -302,7 +302,7 @@ test('credentials.mjs refuses a document it cannot trust instead of rewriting it
       (error) => ({ code: error.code, out: String(error.stderr) }),
     )
     assert.equal(result.code, 2)
-    assert.match(result.out, /not valid YAML/)
+    assert.match(result.out, /refs section this build cannot edit safely/)
     assert.equal(await readFile(path, 'utf8'), 'version: 1\nrefs: [this is not a mapping\n')
   } finally {
     await rm(home, { recursive: true, force: true })
@@ -337,5 +337,44 @@ test('a workspace whose directory vanished is a warning, not a failure', async (
     assert.match(out, /warn\s+registry\s+1 workspace\(s\), 1 with a missing directory/)
   } finally {
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('credentials.mjs creates a versioned document on a fresh deployment', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'credentials-fresh-'))
+  try {
+    const result = await exec('node', [credentials, 'sync', '--home', home, '--ref', 'OPENCODE_GO_API_KEY'], {
+      env: { ...process.env, DSH_VALUE: 'sk-fresh' },
+    })
+    assert.equal(result.stdout.trim(), 'created')
+    const text = await readFile(join(home, '.credentials.yaml'), 'utf8')
+    // The runtime rejects an unversioned document; a helper-created file must be
+    // one it reads, not the pre-release flat layout.
+    assert.match(text, /^version: 1$/m)
+    assert.match(text, /^refs:$/m)
+    assert.match(text, /OPENCODE_GO_API_KEY: "sk-fresh"/)
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('credentials.mjs round-trips a value YAML would otherwise reinterpret', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'credentials-special-'))
+  const value = 'sk-value with space #hash: and-dash/and.dot'
+  try {
+    await writeFile(join(home, '.credentials.yaml'), '# kept\nversion: 1\nrefs:\n  OTHER: keep\n', { mode: 0o600 })
+    await exec('node', [credentials, 'sync', '--home', home, '--ref', 'OPENCODE_GO_API_KEY'], {
+      env: { ...process.env, DSH_VALUE: value },
+    })
+    const status = await exec('node', [credentials, 'status', '--home', home, '--ref', 'OPENCODE_GO_API_KEY'], {
+      env: { ...process.env, DSH_VALUE: value },
+    })
+    assert.equal(status.stdout.trim(), 'match')
+    const text = await readFile(join(home, '.credentials.yaml'), 'utf8')
+    assert.match(text, /^# kept$/m)
+    assert.match(text, /OTHER: keep/)
+    assert.equal((await stat(join(home, '.credentials.yaml'))).mode & 0o777, 0o600)
+  } finally {
+    await rm(home, { recursive: true, force: true })
   }
 })
