@@ -7,6 +7,14 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.9.5
+
+Connector feature: Telegram prompts identify their channel; the setup pin moves.
+
+- The agent receives `[via Telegram]` at the start of a Telegram prompt, so it
+  can answer with chat steps instead of host commands. Web UI prompts are
+  unmarked.
+
 ## 0.2.1-rc.5-0.9.4
 
 Connector fix for messages sent during an update; the setup pin moves with it.
