@@ -32,14 +32,14 @@ part is the prefix of `VERSION`; there is no separate DSH pin to edit.
 - **Compatible** (the default): same DSH part, same product major. Any newer
   tag is fine, and jumps are fine (`0.6.0 → 0.9.1`).
 - **Crossing** a DSH line or a product major needs the explicit flag
-  `/system update all --i-know-versions-are-incompatible` (or
+  `/system update setup --i-know-versions-are-incompatible` (or
   `./update.sh --apply --i-know-versions-are-incompatible`). Neither path crosses
   on its own, and the updater refuses targets that are not newer.
 
 ## Upgrading from Telegram
 
 ```
-/system update all
+/system update setup
 ```
 
 What happens, in order:
@@ -83,7 +83,7 @@ install — opens a supervisor **trial**. The bot posts a card with **Commit** a
 - A runtime that never comes up rolls back after `DSH_BOOT_GRACE_SECONDS`
   (120 s), or immediately if it exits.
 
-**A setup upgrade** — `/system update all` or `./update.sh --apply` — opens no
+**A setup upgrade** — `/system update setup` or `./update.sh --apply` — opens no
 trial and posts no Commit/Roll back card. It has a **health gate** instead: the
 restarted service must be active **and** answer on the web port. If either
 fails, `update.sh` restores the snapshot, checks the previous tag out, rewrites
@@ -172,5 +172,5 @@ is gone. Then check `journalctl -u dsh.service -n 100` and `/system status`.
 - [ ] the drill above rolled back on its own
 - [ ] `backups/self-*.tgz` is recent
 - [ ] after the upgrade: `/system status` shows `web: … answered 200`, `key: set`,
-      and the new version in `/about`
+      and the new version in `/system status`
 - [ ] after committing: `/system status` shows no open trial

@@ -1,6 +1,6 @@
 # Acceptance run: the native install
 
-These steps were written for `v0.2.1-rc.5-0.9.0`; if you are accepting a later
+These steps were written for `v0.2.1-rc.5-0.9.1`; if you are accepting a later
 tag, substitute it everywhere below.
 
 One run, ~20 minutes. The point is not to see it work once, but to see the
@@ -33,8 +33,8 @@ in step 7.
 Install the way a stranger would — one downloaded file:
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.9.0/install.sh | sudo bash -s -- --check --dir /srv/dsh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.9.0/install.sh | sudo bash -s -- --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.9.1/install.sh | sudo bash -s -- --check --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.9.1/install.sh | sudo bash -s -- --dir /srv/dsh
 ```
 
 All `./install.sh` and `./update.sh` checks below run from `/srv/dsh`.
@@ -47,7 +47,7 @@ All `./install.sh` and `./update.sh` checks below run from `/srv/dsh`.
       `Proceed? [Y/n]`
 - [ ] it installs Node 22 (and says so), then `dsh` and `pnpm`; a missing Docker
       daemon is not an error for this run
-- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.9.0`
+- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.9.1`
 - [ ] the self-check that follows reports `clean`: `service`, `web` and
       `data-owner` all ok
 - [ ] `sudo ./install.sh --doctor` (no `--fix`) exits 0 and names the deployed
@@ -76,7 +76,7 @@ All `./install.sh` and `./update.sh` checks below run from `/srv/dsh`.
 - [ ] tap it, add the bot to a new group with Topics enabled: the group gets a
       dashboard
 - [ ] `/new` in the group creates a topic; a message in it gets a streamed answer
-- [ ] `/system status` shows: version `0.2.1-rc.5-0.9.0`, the admin line,
+- [ ] `/system status` shows: version `0.2.1-rc.5-0.9.1`, the admin line,
       `web: 127.0.0.1:<port> answered …`, `key: set`,
       `registry: 1 workspace(s) in the runtime · 1 bound to Telegram`,
       `data: … this runtime`, `last agent error: none`
@@ -113,16 +113,16 @@ All `./install.sh` and `./update.sh` checks below run from `/srv/dsh`.
 
 ## 6. An update, and a cancel
 
-- [ ] `/system update all` → drains, then either finishes (`✅ setup update
+- [ ] `/system update setup` → drains, then either finishes (`✅ setup update
       finished`) or reports why not. When this is the newest compatible tag,
       `no compatible tag after …` is the correct answer
-- [ ] start `/system update all` again and press **✖ Cancel** during the drain:
+- [ ] start `/system update setup` again and press **✖ Cancel** during the drain:
       the card closes and normal messages work immediately after
 - [ ] `/system cancel` in the chat does the same thing as the button
 
 ## 7. Component control (only if you installed the design stack)
 
-- [ ] `/system manage` lists the components with their state
+- [ ] `/system components` lists the components with their state
 - [ ] change the Penpot port: the card reports done, the stack answers on the new
       port, and `/system status` still shows the runtime healthy
 - [ ] disable it: the stack stops, the runtime keeps working

@@ -312,16 +312,13 @@ needsExec('ufw_hints stays quiet when the rule exists, ufw is inactive or the bi
   }
 })
 
-needsExec('--check and its deprecated alias resolve the same target', async () => {
+needsExec('--check resolves the target without applying it', async () => {
   const { dir } = await taggedDeployment()
   try {
-    const run = (flag) => exec('bash', [join(dir, 'update.sh'), flag], { cwd: dir, env: { ...process.env } })
+    const result = await exec('bash', [join(dir, 'update.sh'), '--check'], { cwd: dir, env: { ...process.env } })
       .then((r) => ({ code: 0, out: r.stdout + r.stderr }), (error) => ({ code: error.code ?? 1, out: String(error.stdout ?? '') + String(error.stderr ?? '') }))
-    const fresh = await run('--check')
-    const alias = await run('--self-check')
-    assert.match(fresh.out, /target tag:\s+v0\.2\.1-rc\.2-0\.5\.0/)
-    assert.match(alias.out, /--self-check is deprecated; use --check/)
-    assert.match(alias.out, /target tag:\s+v0\.2\.1-rc\.2-0\.5\.0/)
+    assert.equal(result.code, 2, 'a newer compatible tag exits 2')
+    assert.match(result.out, /target tag:\s+v0\.2\.1-rc\.2-0\.5\.0/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

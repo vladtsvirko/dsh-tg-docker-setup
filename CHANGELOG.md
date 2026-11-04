@@ -7,7 +7,36 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.9.1
+
+Docs and command names follow the native-only deployment.
+
+- Renamed in the connector (no aliases): `/system update setup`,
+  `/system components`, `/dashboard` (was `/setsystem`), `/archived` (was
+  `/list archived`); `/about` is gone (`/system status` covers it).
+- `/dashboard` posts a button card: workspace actions in a group, deployment
+  actions in the bot chat. Deployment buttons are admin-only.
+- `/unbind`, `/dashboard` and `/dangerous cleanup` now require the admin account.
+- The `update.sh` aliases from 0.9.0 are gone too: only `--check`, `--apply`,
+  `--to` and `--tg-connector` remain.
+- Setup docs use the new names; the connector release carries the code.
+
 ## 0.2.1-rc.5-0.9.0
+
+The update CLI now says what it does; no deployment behaviour changed.
+
+### Changed
+
+- `update.sh` flags: `--check` (was `--self-check`), `--apply` (was `--self`),
+  `--to <tag>` (was `--self-to`), `--tg-connector` (was `--plugin`).
+  `--yes` is accepted and means the same as `ASSUME_YES=1`.
+- `install.sh --status` is gone; `--doctor` is the one spelling for the health
+  check. (`update.sh --status` remains the short deployment summary.)
+- The deprecated names still work for one release and print a note; the updater
+  service now calls `update.sh --to`.
+- Docs, CI and examples use the new names.
+
+## 0.2.1-rc.5-0.8.2
 
 Fixes the 0.8.1 tag build and one installer gap it exposed.
 

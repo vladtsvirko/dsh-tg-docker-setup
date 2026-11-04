@@ -22,9 +22,9 @@ runtime.
 - prompts, sessions, topics, `/sync`, model and timezone changes;
 - `/system restart`, trials, `/system confirm`, `/system rollback` (profile);
 - `/system update connector` (reinstall the pinned connector);
-- `/system update all` (drain, setup update, automatic rollback);
+- `/system update setup` (drain, setup update, automatic rollback);
 - plugin install/enable/disable/remove through the approval flow;
-- `/about`, `/system status`, `/status` diagnostics;
+- `/system status`, `/system status`, `/status` diagnostics;
 - Telegram reports for update success, failure and rollback.
 
 ### Still requires host access
@@ -58,7 +58,7 @@ it cannot repair a dead bot, a dead updater, or a dead systemd.
 
 ## Update restrictions
 
-- `/system update all` drains **all** agents, including sessions owned by a web
+- `/system update setup` drains **all** agents, including sessions owned by a web
   UI tab. A web turn can still start in the instant before the updater restarts
   the service; that race is best-effort and accepted.
 - The updater stops a job that runs longer than `DSH_UPDATE_TIMEOUT_SECONDS`
@@ -112,7 +112,7 @@ it cannot repair a dead bot, a dead updater, or a dead systemd.
 - The agent and the connector share the `dsh` uid, so the agent can read
   `.env`, including `DSH_UPDATER_TOKEN`. A prompt-injected agent can trigger a
   release update (a fixed action), not arbitrary root commands.
-- `DSH_UPDATER_TOKEN` empty disables apply; `/system update all` degrades to
+- `DSH_UPDATER_TOKEN` empty disables apply; `/system update setup` degrades to
   diagnostics/host instructions.
 - `DSH_BIND_IP` publishes the web UI on one host interface. Never use `0.0.0.0`;
   the UI drives a shell. `127.0.0.1` means host-only, normally via an SSH tunnel,

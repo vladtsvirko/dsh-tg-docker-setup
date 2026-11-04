@@ -27,7 +27,7 @@ session between the two.
 | `update.sh` | Check / apply / roll back setup updates |
 | `entrypoint.sh` | Boot preparation (profile, plugins, provider, git), then `exec dsh` under the supervisor |
 | `supervisor.mjs` | Owns restarts and the profile snapshot; trial restarts with automatic rollback |
-| `updater.mjs` | The privileged updater service behind `/system update all` (loopback only) |
+| `updater.mjs` | The privileged updater service behind `/system update setup` (loopback only) |
 | `healthcheck.sh` | The probe systemd and the updater run |
 | `.env.example` | Every knob, with comments |
 | `install.example.env` | Every answer `install.sh --config` accepts |
@@ -104,7 +104,7 @@ curl -fsSL …/install.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.9.0`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.9.1`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -210,14 +210,14 @@ agent's memory), and `data/workspace` if you care about its files.
 | `DSH_TRIAL_SECONDS` | Rollback window for a trial, default `300` (5 min). |
 | `DSH_BOOT_GRACE_SECONDS` | How long a trial runtime may stay up without checking in, default `120`. |
 | `DSH_UPDATE_TIMEOUT_SECONDS` | Deadline for a supervisor job and for an updater apply, default `900`; the updater's own fallback is `1800`. |
-| `DSH_UPDATER_TOKEN` | Bearer token for the updater service. Empty makes it refuse work; `/system update all` then prints the host fallback. Treat it as a root credential. |
+| `DSH_UPDATER_TOKEN` | Bearer token for the updater service. Empty makes it refuse work; `/system update setup` then prints the host fallback. Treat it as a root credential. |
 
 ## Versioning and compatibility
 
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.9.0
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.9.1
          DSH part          product part
 ```
 
@@ -246,7 +246,7 @@ and reinstalls when that ref changes. Therefore:
   select a newer connector tag.
 
 The full policy, release checklist and coupling rules are in
-[`docs/VERSIONS.md`](docs/VERSIONS.md). Inside the bot, `/about` reports the
+[`docs/VERSIONS.md`](docs/VERSIONS.md). Inside the bot, `/system status` reports the
 connector version, runtime version and updater state.
 
 ## Choosing the connector
@@ -296,7 +296,7 @@ DSH_TELEGRAM_PUBLISHER_TOKENS=123:AAA...,456:BBB...
   just post and edit their own messages.
 - **Add each publisher to every group yourself** — the Bot API cannot add a bot
   to an existing group. The main bot checks membership every six hours and posts
-  a reminder in the group's system topic when one is missing.
+  a reminder in the group's dashboard topic when one is missing.
 - The outbox keeps one queue per group, paced per bot, and shows a single status
   line while it waits. When every bot is saturated, the owner gets a digest in
   the bot chat.
@@ -358,11 +358,11 @@ From the bot chat:
 | `/system restart now` | restart without a trial; the current state becomes the rollback point |
 | `/system update connector` | reinstall the pinned connector: stop, run `reset-plugin`, start in a trial |
 | `/system update connector now` | same, without the trial |
-| `/system update all` | drain all agents, then update the setup through the updater; automatic rollback on failed health |
+| `/system update setup` | drain all agents, then update the setup through the updater; automatic rollback on failed health |
 | `/system confirm` | commit the trial: this state becomes the new rollback point |
 | `/system rollback` | restore the last committed **profile** state and restart (does not move the checkout) |
 | `/system cancel` | abandon a pending update and unblock the bot; after acceptance it stops the updater job |
-| `/system manage` | optional components (the design stack): a card with Enable/Disable/Port buttons |
+| `/system components` | optional components (the design stack): a card with Enable/Disable/Port buttons |
 | `/web` | a signed link into the web UI for the same sessions (bot chat only) |
 | `/firewall` | whether ufw lets the web UI through, and the `/firewall allow <port>` fix |
 
@@ -396,7 +396,7 @@ into the bot: the supervisor stops the runtime, runs the entrypoint's own
 then starts the runtime inside a trial. `now` skips the trial. If the reinstall
 fails, the snapshot is restored before the runtime comes back.
 
-`/system update all` is the checkout half: it drains every agent, asks the
+`/system update setup` is the checkout half: it drains every agent, asks the
 updater service to check out, install and start the latest **compatible setup
 tag**, and reports the result to the control chat. If `DSH_UPDATER_TOKEN` is
 empty, the command degrades to diagnostics and prints the host fallback
@@ -407,7 +407,7 @@ Scopes:
 | Operation | Scope | Rollback |
 |---|---|---|
 | `/system restart`, `/system update connector`, plugins | profile (`data/home/profiles/web`) | supervisor trial: Commit / Roll back / deadline |
-| `/system update all` | setup checkout, DSH install, connector pin, profile snapshot | automatic on failed health; one previous checkout + one snapshot |
+| `/system update setup` | setup checkout, DSH install, connector pin, profile snapshot | automatic on failed health; one previous checkout + one snapshot |
 | `/system rollback` | profile only | does not move the checkout or the setup tag |
 
 Sessions and the workspace are outside a profile trial. A change made directly
@@ -464,7 +464,7 @@ runtime's web UI shows a different workspace list.
 
 ## Updating dsh
 
-The normal path is `/system update all` in the bot: it drains every agent, asks
+The normal path is `/system update setup` in the bot: it drains every agent, asks
 the updater service, and the updater runs the same host update script. The host
 commands remain the bootstrap, break-glass and deliberate manual path:
 
@@ -477,17 +477,15 @@ commands remain the bootstrap, break-glass and deliberate manual path:
 ./update.sh --tg-connector # re-resolve the pinned Telegram connector
 ```
 
-The old spellings (`--self-check`, `--self`, `--self-to`, `--plugin`) still work
-and print a deprecation note.
 
 `--apply` snapshots `data/home` + `data/supervisor`, checks out the target tag,
 installs the matching `dsh` globally, re-runs the entrypoint's prepare step as
 the service user, restarts `dsh.service` and waits for health. On failure it
 restores the snapshot and the previous tag. One `backups/self-*.tgz` is kept.
 
-`/system update all` does the same after draining all agents and reports the
+`/system update setup` does the same after draining all agents and reports the
 result to the control chat. It is opt-in through the token: an empty
-`DSH_UPDATER_TOKEN` leaves `/system update all` as a diagnostic that prints the
+`DSH_UPDATER_TOKEN` leaves `/system update setup` as a diagnostic that prints the
 host fallback. Endpoint, modes, drain semantics and recovery are in
 [docs/UPDATER.md](docs/UPDATER.md); version rules are in
 [docs/VERSIONS.md](docs/VERSIONS.md).
@@ -554,7 +552,7 @@ full list is in [`docs/LIMITS.md`](docs/LIMITS.md).
 | Bot silent after a dsh upgrade | adapter no longer mounts | re-grant the exemption, or move to the previous setup tag |
 | Bot says `⛔ You are not authorized` | your id isn't in `allowedUserIds` | add it to `ALLOWED_USER_IDS` in `.env`, then restart |
 | `no space left on device` | sessions + pnpm store in `data/home` | prune old sessions, move the data directory |
-| `/system update all` says updater unreachable | updater not running, or token mismatch | `systemctl status dsh-updater.service`; `journalctl -u dsh-updater.service` |
+| `/system update setup` says updater unreachable | updater not running, or token mismatch | `systemctl status dsh-updater.service`; `journalctl -u dsh-updater.service` |
 | Model calls fail after re-running the installer | the runtime prefers a key stored by the web UI over `.env` (or `.env` has two copies) | `./install.sh --doctor --fix`, then restart |
 | Web UI lists no workspace after a restart, Telegram still does | the connector's bindings and the runtime's registry disagree | `/sync` in the group repairs it; the connector retries at boot |
 | Telegram: "this session is held by another client" right after a restart | a second runtime over the same data directory holds the lock | `./install.sh --doctor` names it; stop the other one, then `/system restart now` |

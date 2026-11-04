@@ -100,7 +100,7 @@ Both paths end in the same script and the same tag policy.
 
 | Trigger | Path |
 |---|---|
-| Telegram `/system update all` | connector → `dsh-updater.service` (127.0.0.1:8787, bearer token) → `update.sh --to <tag>` |
+| Telegram `/system update setup` | connector → `dsh-updater.service` (127.0.0.1:8787, bearer token) → `update.sh --to <tag>` |
 | Host `./update.sh --apply` | `update.sh --apply` (root) |
 | Telegram `/system update connector` | supervisor → `entrypoint reset-plugin`, profile only |
 

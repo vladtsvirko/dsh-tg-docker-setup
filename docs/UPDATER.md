@@ -1,6 +1,6 @@
 # Setup updater
 
-`/system update all` drains all agents, then asks a privileged updater service
+`/system update setup` drains all agents, then asks a privileged updater service
 to move the setup to a release tag. The updater snapshots state, checks out the
 tag, installs the matching DSH, restarts the runtime, and rolls back on failure.
 It reports the result to the control chat itself.
@@ -13,7 +13,7 @@ This is the normal no-SSH path. Version rules are in
 
 ```
 Telegram user
-   │ /system update all
+   │ /system update setup
    ▼
 connector (dsh.service, user dsh)
    ├─ UPDATING, blocks prompts
@@ -84,9 +84,9 @@ Tags are `<dsh>-<major>.<minor>.<patch>`; `0.x` is the compatible line, a major
 bump is a break. The product part resets to `0.0.0` on a new DSH alignment.
 
 - `compatible`: same DSH part and same product major; latest wins; compatible
-  releases may be skipped. This is what `/system update all` uses by default.
+  releases may be skipped. This is what `/system update setup` uses by default.
 - `available`: latest overall. Reached only with the explicit
-  `/system update all --i-know-versions-are-incompatible`; it may cross a DSH
+  `/system update setup --i-know-versions-are-incompatible`; it may cross a DSH
   line or product major.
 - `exact`: the updater's explicit target; must be newer than the current tag,
   never an older one. The apply step (`update.sh --to`) additionally
@@ -173,7 +173,7 @@ systemctl status dsh-updater.service
 journalctl -u dsh-updater.service -f
 ```
 
-`/system update all` in the bot control chat. If the token is empty, the
+`/system update setup` in the bot control chat. If the token is empty, the
 connector prints the host commands instead of calling the updater.
 
 ## Test plan
@@ -195,7 +195,7 @@ Real stack, disposable setup:
 1. Set `DSH_UPDATER_TOKEN` (the installer writes one).
 2. `systemctl start dsh-updater.service`; check
    `curl -H "Authorization: Bearer $DSH_UPDATER_TOKEN" http://127.0.0.1:8787/health`.
-3. `/system update all` with one idle session: it drains, reports started, the
+3. `/system update setup` with one idle session: it drains, reports started, the
    service restarts, and the updater reports the new version.
 4. Break a target on purpose (a service that cannot start, or a web bind that
    does not answer) and verify: snapshot restore, previous tag checkout,

@@ -2,7 +2,7 @@
 
 There are two entry points to the same update path:
 
-- **`/system update all`** in the bot control chat — normal operation, no host
+- **`/system update setup`** in the bot control chat — normal operation, no host
   shell. The connector drains all agents, asks the updater service, and reports
   the result to Telegram. See [`UPDATER.md`](UPDATER.md).
 - **`./update.sh --apply`** on the host — bootstrap, break-glass, or a deliberate
@@ -39,18 +39,18 @@ crossing, so an unattended update cannot cross on its own.
 ## Tag convention
 
 Tags match `<dsh>-<major>.<minor>.<patch>`, for example
-`v0.2.1-rc.5-0.9.0`, and the target must be a descendant of the current one:
+`v0.2.1-rc.5-0.9.1`, and the target must be a descendant of the current one:
 
 ```sh
-git tag v0.2.1-rc.5-0.9.0
-git push origin v0.2.1-rc.5-0.9.0
+git tag v0.2.1-rc.5-0.9.1
+git push origin v0.2.1-rc.5-0.9.1
 ```
 
 - Product `0.x` is the compatible line; `1.0.0` marks a break.
 - The product part resets to `0.0.0` for each new DSH alignment.
 - Same product major **and same DSH part** may jump: `0.1.1 → 0.4.2`.
 - Crossing a major **or** a DSH line needs
-  `--i-know-versions-are-incompatible`; `/system update all` accepts the same
+  `--i-know-versions-are-incompatible`; `/system update setup` accepts the same
   explicit flag, but never crosses without it.
 - The setup release and the connector release carry the same tag. The entrypoint
   installs the connector tag derived from the setup `VERSION`; see
@@ -95,7 +95,7 @@ The previous release is a tag plus the data snapshot.
 - `data/workspace` is never snapshotted or restored. Changes a failed deployment
   made there are not undone, and files written there after the snapshot survive a
   rollback.
-- `/system update all` has a job deadline: the updater stops a job that runs
+- `/system update setup` has a job deadline: the updater stops a job that runs
   longer than `DSH_UPDATE_TIMEOUT_SECONDS` (default 30 minutes) with `SIGTERM`,
   then `SIGKILL` after ten seconds, and `/system cancel` stops a running job.
   The card's **✖ Cancel** button exists only while it is still draining. A stuck

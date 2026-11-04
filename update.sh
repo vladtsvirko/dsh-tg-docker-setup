@@ -12,7 +12,6 @@
 #
 # --yes (or ASSUME_YES=1) skips the confirmation. --check, --apply and --to also
 # accept --i-know-versions-are-incompatible to cross a DSH line or a product
-# major. Deprecated aliases: --self-check, --self, --self-to, --plugin.
 #
 # Run it from this directory (next to VERSION and .env).
 #
@@ -721,28 +720,24 @@ case "${1:---status}" in
     done
     component_apply "$comp_name" "$comp_action" "$comp_port"
     ;;
-  --tg-connector|--plugin)
-    [ "$1" = "--plugin" ] && warn "--plugin is deprecated; use --tg-connector"
+  --tg-connector)
     log "re-resolving the Telegram connector"
     entry="$(entrypoint_bin)" || die "no entrypoint launcher found — reinstall with ./install.sh"
     run_as_service "$entry" reset-plugin
     systemctl restart dsh.service
     wait_native_healthy && verify
     ;;
-  --check|--self-check)
-    [ "$1" = "--self-check" ] && warn "--self-check is deprecated; use --check"
+  --check)
     if [ "${2:-}" = "--i-know-versions-are-incompatible" ]; then self_check 1
     elif [ -n "${2:-}" ]; then die "unknown option for --check: ${2}"
     else self_check 0; fi
     ;;
-  --apply|--self)
-    [ "$1" = "--self" ] && warn "--self is deprecated; use --apply"
+  --apply)
     if [ "${2:-}" = "--i-know-versions-are-incompatible" ]; then self_update 1
     elif [ -n "${2:-}" ]; then die "unknown option for --apply: ${2}"
     else self_update 0; fi
     ;;
-  --to|--self-to)
-    [ "$1" = "--self-to" ] && warn "--self-to is deprecated; use --to"
+  --to)
     [ -n "${2:-}" ] || die "usage: ./update.sh --to <tag> [--i-know-versions-are-incompatible]"
     case "${3:-}" in
       "") self_update 0 "$2" 0 ;;

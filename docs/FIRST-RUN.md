@@ -57,7 +57,7 @@ wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main
 Or from a checkout: `git clone … && cd dsh-tg-docker-setup && ./install.sh`.
 
 What it sets up that a hand-rolled `dsh` service does not: the updater token
-(`/system update all` needs it), the agent's git author, the profile repair pass,
+(`/system update setup` needs it), the agent's git author, the profile repair pass,
 and the wiring between the runtime and the updater. Prefer it over copying
 `.env.example` by hand.
 
@@ -108,7 +108,7 @@ TLS in front and set `DSH_PUBLIC_URL` to the https root.
 5. In **General**, send `/new` — or create a topic by hand and send a plain
    message in it. A topic is a session; the bot creates one per session.
 
-Optional but recommended: create one empty topic and send `/setsystem` in it.
+Optional but recommended: create one empty topic and send `/dashboard` in it.
 The management commands move there; session topics then take plain text (plus
 `/commands`, `/skills`, `/run`, `/skill` and `//text`).
 
@@ -132,14 +132,16 @@ One runtime means the handover is mostly automatic:
 
 ## 5. Buttons, and when to type
 
-Most management is a typed command, but the flows where a mistake is expensive
-have buttons:
+Most management is a typed command, but the common actions and the flows where
+a mistake is expensive have buttons:
 
 | Flow | What you get |
 |---|---|
+| `/dashboard` in the group | **➕ New session** · **🔄 Sync** · **📊 Status** · **📋 Sessions** |
+| `/dashboard` in the bot chat | **📊 Status** · **🌐 Web link** · **⬆️ Update setup** · **♻️ Restart** · **🧩 Plugins** · **⚙️ Components** |
 | Trial after a restart / connector update / plugin change | **✅ Commit** and **↩️ Roll back**, plus a deadline |
-| `/system update all` while draining | **✖ Cancel update** (after acceptance, `/system cancel` still stops the job) |
-| `/system manage` (design stack) | one row per component: Enable/Disable and Port |
+| `/system update setup` while draining | **✖ Cancel update** (after acceptance, `/system cancel` still stops the job) |
+| `/system components` (design stack) | one row per component: Enable/Disable and Port |
 | A session held by a browser tab | **↪️ Take over** |
 
 Everything else is a command, and the bot is self-documenting: `/help` lists
@@ -160,7 +162,7 @@ and recovering from a dead runtime. [LIMITS.md](LIMITS.md) is the exact boundary
 ./update.sh --status
 ./install.sh --doctor            # add --fix to repair the safe subset
 
-# update the whole setup (the bot does this too, via /system update all)
+# update the whole setup (the bot does this too, via /system update setup)
 ./update.sh --check         # what would change
 sudo ./update.sh --apply          # check out, install, health gate, automatic rollback
 

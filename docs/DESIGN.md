@@ -36,14 +36,14 @@ keeps working without it.
    (registration is on; email verification is off, a LAN instance has no SMTP).
 2. Settings → **Access tokens** → create one.
 3. Put it in `/srv/dsh/design/.env` as `PENPOT_ACCESS_TOKEN=...`.
-4. Re-run the component once so the runtime picks the token up: `/system manage`
+4. Re-run the component once so the runtime picks the token up: `/system components`
    → Enable (idempotent), or `./update.sh --component design enable`.
 
 ## Managing it from the control chat
 
-`/system manage` posts a card with one row per component: Enable / Disable / Port.
+`/system components` posts a card with one row per component: Enable / Disable / Port.
 The updater applies the change on the host, restarts the runtime and reports.
-`/system manage design port 8091` does the same without a tap.
+`/system components design port 8091` does the same without a tap.
 
 The runtime reaches Penpot at `PENPOT_API_URL=http://<DSH_BIND_IP>:<DSH_DESIGN_PORT>`,
 the published frontend port — the same address your browser opens. There is no
