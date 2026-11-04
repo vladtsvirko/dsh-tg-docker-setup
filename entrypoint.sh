@@ -163,10 +163,12 @@ acquire_instance() {
   # The id, not the pid, is what identifies this runtime to its children: the
   # entrypoint execs into the supervisor and the supervisor spawns dsh as a
   # child, so the plugin process has a different pid but the same environment.
-  INSTANCE_ID="${SETUP_VERSION}-$-$(date +%s)"
+  INSTANCE_ID="${SETUP_VERSION}-$$-$(date +%s)"
   export DSH_INSTANCE_ID="$INSTANCE_ID"
+  # Every value goes through %s so a missing one can never produce invalid JSON:
+  # the plugin parses this file and must never crash on it.
   printf '{"id":"%s","mode":"%s","pid":%s,"version":"%s","startedAt":"%s"}\n' \
-    "$INSTANCE_ID" "${MODE:-docker}" "$" "$SETUP_VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$INSTANCE_FILE.tmp" 2>/dev/null &&
+    "$INSTANCE_ID" "${MODE:-docker}" "$$" "$SETUP_VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$INSTANCE_FILE.tmp" 2>/dev/null &&
     mv "$INSTANCE_FILE.tmp" "$INSTANCE_FILE" 2>/dev/null || true
   return 0
 }

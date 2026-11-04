@@ -285,8 +285,16 @@ check_instance() {
   pid="$(sed -n 's/.*"pid":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$marker" | head -1)"
   mode="$(sed -n 's/.*"mode":[[:space:]]*"\([^"]*\)".*/\1/p' "$marker" | head -1)"
   started="$(sed -n 's/.*"startedAt":[[:space:]]*"\([^"]*\)".*/\1/p' "$marker" | head -1)"
-  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
-    ok instance "no live runtime holds $DATA_DIR (stale marker from pid ${pid:-?})"
+  if [ -z "$pid" ]; then
+    # A marker without a pid is either from a runtime that never finished
+    # writing it or from a build that wrote an older shape. It names no holder,
+    # so it is a warning with the recovery, not a failure: the running runtime
+    # rewrites the file at every boot.
+    warns instance "${marker} has no readable pid — restart dsh.service to rewrite it"
+    return
+  fi
+  if ! kill -0 "$pid" 2>/dev/null; then
+    ok instance "no live runtime holds $DATA_DIR (stale marker from pid $pid)"
     return
   fi
   if [ "${mode:-}" = "$MODE" ]; then

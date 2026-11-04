@@ -396,3 +396,99 @@ test('a data directory owned by another user is a failure, not a warning', async
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+// --- the instance marker the entrypoint writes ------------------------------
+// The plugin reads this file to tell "another client in this runtime" from
+// "another runtime over the same data directory", and the doctor reads it to
+// name the holder. A malformed document silently degrades both, so the shape is
+// pinned here: `node --test` boots the real entrypoint with stubbed binaries.
+
+/** Run the entrypoint's `serve` (all binaries are stubbed) and capture the output. */
+async function runEntrypoint(env) {
+  try {
+    const { stdout, stderr } = await exec('bash', [join(here, 'entrypoint.sh'), 'serve'], { env, timeout: 30000 })
+    return { code: 0, out: stdout + stderr }
+  } catch (error) {
+    return { code: error.code ?? 1, out: String(error.stdout ?? '') + String(error.stderr ?? '') }
+  }
+}
+
+/** A deployment skeleton plus stubs, so `entrypoint.sh serve` boots and stops. */
+async function entrypointFixture() {
+  const dir = await mkdtemp(join(tmpdir(), 'entrypoint-marker-'))
+  const home = join(dir, 'home')
+  const workspace = join(dir, 'workspace')
+  const bin = join(dir, 'bin')
+  await mkdir(join(home, 'profiles', 'web'), { recursive: true })
+  await mkdir(workspace, { recursive: true })
+  await mkdir(bin, { recursive: true })
+  await writeFile(join(home, 'profiles', 'web', 'cordis.patch.yml'), '[]\n')
+  for (const name of ['node', 'dsh', 'pnpm']) {
+    await writeFile(join(bin, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+  }
+  const env = {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH ?? ''}`,
+    DSH_HOME: home,
+    DSH_WORKSPACE: workspace,
+    DSH_DATA_ROOT: dir,
+    DSH_INSTANCE_WAIT_SECONDS: '1',
+    DSH_BIND_IP: '127.0.0.1',
+    DSH_PORT: '45999',
+    DSH_SETUP_VERSION: '0.0.0-test',
+    NARB_NATIVE_CACHE_DIR: join(dir, '.cache', 'native'),
+    MODE: 'native',
+    PENPOT_ENABLED: '0',
+    DSH_TELEGRAM_ENABLED: 'off',
+    DSH_TELEGRAM_BOT_TOKEN: '',
+  }
+  return { dir, home, env }
+}
+
+test('entrypoint serve writes a parseable instance marker with this pid and id', async () => {
+  const { dir, env } = await entrypointFixture()
+  try {
+    const { code, out } = await runEntrypoint(env)
+    assert.equal(code, 0, out)
+    const raw = await readFile(join(dir, '.runtime.json'), 'utf8')
+    const marker = JSON.parse(raw)
+    assert.equal(marker.mode, 'native')
+    assert.equal(marker.version, '0.0.0-test')
+    assert.ok(Number.isInteger(marker.pid) && (marker.pid ?? 0) > 0, `pid must be a positive integer, got ${String(marker.pid)}`)
+    assert.match(marker.id ?? '', /^0\.0\.0-test-\d+-\d+$/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('a second runtime over the same data directory is refused, naming the holder', async () => {
+  const { dir, env } = await entrypointFixture()
+  try {
+    // Hold the lock the way a live runtime does: an open descriptor for the
+    // lifetime of the process.
+    const holder = join(dir, 'holder.sh')
+    await writeFile(holder, `#!/bin/sh\nexec 9>>"${join(dir, '.runtime.lock')}"\nflock 9\nsleep 2\n`, { mode: 0o755 })
+    const holding = exec(holder)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    const { code, out } = await runEntrypoint(env)
+    assert.equal(code, 0, out)
+    assert.match(out, /another dsh runtime already uses/)
+    assert.match(out, /stop the other one first/)
+    await holding.catch(() => undefined)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('an unreadable instance marker is a warning that names the rewrite', async () => {
+  const dir = await fixture('docker')
+  try {
+    // The shape a build with a broken marker would leave: no pid to check.
+    await writeFile(join(dir, 'data', '.runtime.json'), '{"mode":"native","pid":}\n')
+    const { code, out } = await run(['--dir', dir, '--mode', 'docker'])
+    assert.equal(code, 0, out)
+    assert.match(out, /warn\s+instance\s+.*has no readable pid — restart dsh\.service/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

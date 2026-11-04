@@ -7,6 +7,38 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.6.4
+
+### Fixed
+
+- **The instance marker was invalid JSON.** An editing pass collapsed `$` to
+  `# Changelog
+
+The setup repo ships in lockstep with `dsh-telegram-connector`: `VERSION` is the
+tag, the image tag and the connector tag at once. Connector-side changes are in
+that repository's changelog; this file records what the installer, the
+supervisor, the updater and the entrypoint changed.
+
+Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
+
+ in `entrypoint.sh`, so the marker read
+  `{"id":"…","mode":"native","pid":,"version":"…"}` — no process id, unparseable.
+  Nothing failed visibly: the flock guard still held, but the doctor could not
+  name the holder (`stale marker from pid ?`) and the connector could not tell
+  its own runtime from a foreign one, so every held session fell back to the
+  "web UI tab" advice. The pid is now written with `$` and through `%s`, which
+  cannot produce invalid JSON even if a value goes missing.
+- **The doctor says what an unreadable marker means.** A marker without a pid is
+  now a warning that names the fix (`restart dsh.service to rewrite it`) instead
+  of a stale-pid message with a question mark.
+
+### Added
+
+- `node --test` now boots the real `entrypoint.sh serve` with stubbed binaries and
+  asserts the marker parses, carries this pid and an id, and that a second
+  runtime over the same data directory is refused with the holder named. That
+  test fails on the broken marker, which is how this was found after release.
+
 ## 0.2.1-rc.5-0.6.3
 
 ### Fixed
