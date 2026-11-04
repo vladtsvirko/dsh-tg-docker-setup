@@ -564,7 +564,7 @@ restart_runtime() {
 
 component_running() {
   local dir=$1 file=$2
-  docker compose --project-directory "$dir" -f "$file" ps -q 2>/dev/null | grep -q .
+  podman-compose --project-directory "$dir" -f "$file" ps -q 2>/dev/null | grep -q .
 }
 
 component_health() {
@@ -620,8 +620,10 @@ component_apply() {
   set_env DSH_BIND_IP "$bind" "$env_file"
   if [ -n "$port_key" ]; then set_env "$port_key" "$port" "$env_file"; fi
 
+  local compose_file
+  compose_file="$(basename "$(component_field "$name" compose)")"
   local running=0
-  if component_running "$compose_dir" "$compose_dir/$(basename "$(component_field "$name" compose)")"; then running=1; fi
+  if component_running "$compose_dir" "$compose_dir/$compose_file"; then running=1; fi
 
   # Configuring a stopped stack is a preference, not a start: save the value and
   # leave the runtime alone. Only a running stack is recreated for a new port.
@@ -633,13 +635,7 @@ component_apply() {
   case "$action" in
     enable|configure)
       log "starting $name on $bind:$port"
-      local net
-      net="$(component_field "$name" network)"
-      if [ -n "$net" ]; then
-        docker network inspect "$net" >/dev/null 2>&1 || docker network create "$net" >/dev/null \
-          || warn "could not create the $net network"
-      fi
-      docker compose --project-directory "$compose_dir" -f "$compose_dir/$(basename "$(component_field "$name" compose)")" up -d --build || die "docker compose failed for $name"
+      ( cd "$compose_dir" && podman-compose -f "$compose_file" up -d ) || die "podman-compose failed for $name"
       set_env "$flag" 1 "$ENV_FILE"
       # The agent calls design/penpot.mjs from inside the runtime, so the
       # runtime environment needs the API root and the token.
@@ -656,7 +652,7 @@ component_apply() {
       ;;
     disable)
       log "stopping $name (data stays in $compose_dir/data)"
-      docker compose --project-directory "$compose_dir" -f "$compose_dir/$(basename "$(component_field "$name" compose)")" down || warn "docker compose down failed"
+      ( cd "$compose_dir" && podman-compose -f "$compose_file" down ) || warn "podman-compose down failed"
       set_env "$flag" 0 "$ENV_FILE"
       set_env PENPOT_ENABLED 0 "$ENV_FILE"
       set_env PENPOT_ACCESS_TOKEN "" "$ENV_FILE"
@@ -677,7 +673,7 @@ component_apply() {
       log "$name is up"
     else
       warn "$name containers are up, but $probe_url did not answer — check the port"
-      docker compose --project-directory "$compose_dir" -f "$compose_dir/$(basename "$(component_field "$name" compose)")" ps 2>/dev/null \
+      ( cd "$compose_dir" && podman-compose -f "$compose_file" ps ) 2>/dev/null \
         | sed 's/^/    /' >&2 || true
     fi
   fi

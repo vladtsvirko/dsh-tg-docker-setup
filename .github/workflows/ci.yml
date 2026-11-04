@@ -55,7 +55,7 @@ jobs:
           test -x scripts/credentials.mjs
           # The Penpot stack is the only compose file left.
           cp design/.env.example design/.env
-          docker compose --project-directory design -f design/compose.yaml config >/dev/null
+          python3 -c 'import yaml; yaml.safe_load(open("design/compose.yaml"))'
 
       - name: Validate release tag
         run: node scripts/check-version.mjs

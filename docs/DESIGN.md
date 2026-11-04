@@ -13,22 +13,23 @@ runtime (penpot CLI) ──HTTP──► design-frontend ──► design-backen
 
 The runtime calls the frontend on its published address
 (`DSH_BIND_IP:DSH_DESIGN_PORT`). It is its own compose project
-(`design/compose.yaml`, project `dsh-design`) with its own data under
+(`design/compose.yaml`) with its own data under
 `design/data/`. Removing it does not touch the runtime.
 
 ## Install
 
 ```sh
-./install.sh --design docker          # add the stack
+./install.sh --design penpot          # add the stack
 ./install.sh --design none            # skip it (the default when unattended)
 ```
 
 Interactive installs ask once. Re-running `install.sh` later is how you **add it
 afterwards**: the answers already in `.env` are preserved.
 
-The stack is always Docker: Penpot has no supported machine install.
-`install.sh` skips it with a warning when Docker is absent, and the runtime
-keeps working without it.
+The stack always runs on Podman: Penpot has no supported machine install. The
+updater runs it rootful (the Penpot images need normal container networking),
+while the agent's own containers are rootless. `install.sh` skips the stack with
+a warning when Podman is absent, and the runtime keeps working without it.
 
 ## First run
 
@@ -47,7 +48,7 @@ The updater applies the change on the host, restarts the runtime and reports.
 
 The runtime reaches Penpot at `PENPOT_API_URL=http://<DSH_BIND_IP>:<DSH_DESIGN_PORT>`,
 the published frontend port — the same address your browser opens. There is no
-shared Docker network between the runtime and the stack: the CLI is a host
+shared container network between the runtime and the stack: the CLI is a host
 process and goes over the published port, so a host firewall that blocks the
 port also blocks the CLI. The health probe after a change is advisory: if it
 cannot reach the service it prints the compose service states and still reports
@@ -122,7 +123,7 @@ operations, and reimplementing that is a project, not a wrapper.
   `design-postgres` service.
 
 ```sh
-docker compose --project-directory design -f design/compose.yaml down
+(cd design && podman-compose -f compose.yaml down)
 ```
 
 `down -v` plus deleting `design/data/` removes everything; then set `DESIGN=none`

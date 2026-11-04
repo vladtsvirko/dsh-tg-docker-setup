@@ -51,7 +51,7 @@ test('the plan names the directory, the version and the runtime', async () => {
   const version = (await readFile(join(here, 'VERSION'), 'utf8')).trim()
   const dsh = version.replace(/-\d+\.\d+\.\d+$/, '')
   assert.ok(out.includes(`version:   ${version} (DSH ${dsh})`), 'the plan reports the repo VERSION')
-  assert.match(out, /tier:\s+sandbox/)
+  assert.match(out, /containers:\s+podman \(rootless\)/)
   assert.match(out, /user:\s+dsh/)
   assert.match(out, /data:\s+\S+deploy\/data\/home/)
   assert.match(out, /updater:\s+http:\/\/127\.0\.0\.1:8787/)
@@ -79,12 +79,12 @@ test('answers come from a config file, without prompting', async () => {
   const root = await mkdtemp(join(tmpdir(), 'install-config-'))
   const config = join(root, 'answers.env')
   try {
-    await writeFile(config, 'DIR=/srv/other\nDSH_PORT=4477\nTIER=privileged\nDSH_RESOURCE_PERCENT=0\n')
+    await writeFile(config, 'DIR=/srv/other\nDSH_PORT=4477\nCONTAINERS=none\nDSH_RESOURCE_PERCENT=0\n')
     const { code, out } = await install(['--check', '--config', config])
     assert.equal(code, 0)
     assert.match(out, /directory:\s+\/srv\/other/)
     assert.match(out, /web:\s+http:\/\/\S+:4477\//)
-    assert.match(out, /tier:\s+privileged/)
+    assert.match(out, /containers:\s+none/)
     assert.match(out, /resources:\s+unlimited/)
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -259,9 +259,9 @@ test('update.sh --to applies natively: checkout, env, restart, health gate', asy
 
 test('the design stack is opt-in and named in the plan', async () => {
   const off = await install(['--check', '--yes'])
-  assert.match(off.out, /design:\s+none \(re-run with --design docker to add it later\)/)
+  assert.match(off.out, /design:\s+none \(re-run with --design penpot to add it later\)/)
 
-  const on = await install(['--check', '--design', 'docker', '--yes'])
+  const on = await install(['--check', '--design', 'penpot', '--yes'])
   assert.equal(on.code, 0)
   assert.match(on.out, /design:\s+Penpot on http:\/\/\S+:8090\//)
 
@@ -270,7 +270,7 @@ test('the design stack is opt-in and named in the plan', async () => {
 test('an unknown design value is refused', async () => {
   const { code, out } = await install(['--check', '--design', 'maybe', '--yes'])
   assert.notEqual(code, 0)
-  assert.match(out, /--design must be none or docker/)
+  assert.match(out, /--design must be penpot or none/)
 })
 
 // --- component actions, validation only (Docker does the rest) -------------
@@ -331,7 +331,7 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     await writeFile(join(dir, '.env'), 'DSH_BIND_IP=127.0.0.1\n')
 
     await mkdir(bins, { recursive: true })
-    await stub(bins, 'docker', `echo "docker $*" >> ${calls}; exit 0`)
+    await stub(bins, 'podman-compose', `echo "podman-compose $*" >> ${calls}; exit 0`)
     await stub(bins, 'curl', 'printf 200')
     await stub(bins, 'systemctl', 'exit 0')
 
@@ -352,14 +352,14 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     assert.match(mainEnv, /PENPOT_ENABLED=1/)
     assert.match(mainEnv, /PENPOT_PLUGIN_REF=github:vladtsvirko\/dsh-penpot-plugin#v\d+\.\d+\.\d+/)
     assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:8091/)
-    assert.match(log, /compose --project-directory design -f design\/compose\.yaml up -d/)
+    assert.match(log, /podman-compose -f compose\.yaml up -d/)
 
     await run(['--component', 'design', 'disable'])
     const after = await readFile(join(dir, '.env'), 'utf8')
     const log2 = await readFile(calls, 'utf8')
     assert.match(after, /DSH_DESIGN_ENABLED=0/)
     assert.match(after, /PENPOT_ENABLED=0/)
-    assert.match(log2, /compose --project-directory design -f design\/compose\.yaml down/)
+    assert.match(log2, /podman-compose -f compose\.yaml down/)
   } finally {
     await rm(outer, { recursive: true, force: true })
   }
@@ -381,7 +381,7 @@ test('configuring a stopped stack saves the port and does not start it', async (
     await writeFile(join(dir, '.env'), 'DSH_BIND_IP=127.0.0.1\nDSH_DESIGN_ENABLED=0\n')
     await mkdir(bins, { recursive: true })
     // `ps -q` prints nothing: nothing is running.
-    await stub(bins, 'docker', `echo "docker $*" >> ${calls}; exit 0`)
+    await stub(bins, 'podman-compose', `echo "podman-compose $*" >> ${calls}; exit 0`)
     await stub(bins, 'curl', 'printf 200')
 
     const { stdout } = await exec('bash', [join(dir, 'update.sh'), '--component', 'design', 'configure', '--port', '8093'], {
@@ -415,10 +415,10 @@ test('configuring a running stack recreates it on the new port', async () => {
     await mkdir(join(dir, 'design'), { recursive: true })
     await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
     await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.4.3\n')
-    await writeFile(join(dir, '.env'), 'MODE=docker\nDSH_BIND_IP=127.0.0.1\nDSH_DESIGN_ENABLED=1\n')
+    await writeFile(join(dir, '.env'), 'DSH_BIND_IP=127.0.0.1\nDSH_DESIGN_ENABLED=1\n')
     await mkdir(bins, { recursive: true })
     // `ps -q` prints a container id: something is running.
-    await stub(bins, 'docker', `echo "docker $*" >> ${calls}; case "$*" in *"ps -q"*) echo abc123 ;; esac; exit 0`)
+    await stub(bins, 'podman-compose', `echo "podman-compose $*" >> ${calls}; case "$*" in *"ps -q"*) echo abc123 ;; esac; exit 0`)
     await stub(bins, 'curl', 'printf 200')
 
     const { stdout } = await exec('bash', [join(dir, 'update.sh'), '--component', 'design', 'configure', '--port', '8094'], {
@@ -429,7 +429,7 @@ test('configuring a running stack recreates it on the new port', async () => {
     const mainEnv = await readFile(join(dir, '.env'), 'utf8')
 
     assert.match(stdout, /starting design on 127\.0\.0\.1:8094/)
-    assert.match(log, / up -d --build/)
+    assert.match(log, / up -d/)
     // the runtime is restarted by systemd so the new PENPOT_API_URL lands
     assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:8094/)
   } finally {
@@ -449,9 +449,9 @@ test('a component whose probe never answers is still considered applied', async 
     await mkdir(join(dir, 'design'), { recursive: true })
     await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
     await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.4.5\n')
-    await writeFile(join(dir, '.env'), 'MODE=docker\nDSH_BIND_IP=127.0.0.1\nDSH_DESIGN_ENABLED=1\n')
+    await writeFile(join(dir, '.env'), 'DSH_BIND_IP=127.0.0.1\nDSH_DESIGN_ENABLED=1\n')
     await mkdir(bins, { recursive: true })
-    await stub(bins, 'docker', `case "$*" in *"ps -q"*) echo abc123 ;; esac; exit 0`)
+    await stub(bins, 'podman-compose', `case "$*" in *"ps -q"*) echo abc123 ;; esac; exit 0`)
     // The probe cannot reach the service (firewall, wrong address): 000.
     await stub(bins, 'curl', 'printf 000')
 
@@ -638,23 +638,16 @@ async function withoutDocker() {
   return `${bin}:${process.env.PATH}`
 }
 
-test('docker is installed only when the design stack needs it', async (t) => {
-  // Native mode runs the agent without Docker, but the Penpot stack is a set of
-  // containers: choosing it must install Docker instead of silently skipping it.
-  const path = await withoutDocker()
-  if (path === null) {
-    t.skip('temp directory is noexec; cannot shadow docker')
-    return
-  }
+test('Podman is planned for the agent and skipped when containers are off', async () => {
   const root = await mkdtemp(join(tmpdir(), 'install-deps-'))
   try {
-    const native = await install(['--check', '--yes', '--design', 'docker', '--dir', join(root, 'a')], { env: { PATH: path } })
-    assert.equal(native.code, 0, native.out)
-    assert.match(native.out, /installs docker\.io \+ docker-compose-v2/)
-    assert.match(native.out, /design:\s+Penpot/)
+    const on = await install(['--check', '--yes', '--dir', join(root, 'a')])
+    assert.equal(on.code, 0, on.out)
+    assert.match(on.out, /installs podman/)
 
-    const plain = await install(['--check', '--yes', '--dir', join(root, 'b')], { env: { PATH: path } })
-    assert.match(plain.out, /docker absent/)
+    const off = await install(['--check', '--yes', '--containers', 'none', '--dir', join(root, 'b')])
+    assert.equal(off.code, 0, off.out)
+    assert.match(off.out, /podman not requested/)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

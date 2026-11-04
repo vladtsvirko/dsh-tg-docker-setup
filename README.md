@@ -35,14 +35,15 @@ session between the two.
 | `scripts/credentials.mjs` | Reads and reconciles `data/home/.credentials.yaml` without printing a secret |
 | `scripts/git-manifest.mjs` | Builds or merges `secrets/git/profiles.json` from the installer's accounts |
 | `components.json` | Optional components (the Penpot design stack) |
-| `design/` | Penpot compose stack + the `penpot` CLI for design work (`--design docker`) |
+| `design/` | Penpot compose stack on Podman + the `penpot` CLI (`--design penpot`) |
 | `docs/FIRST-RUN.md` | The guided first run |
-| `docs/HOST.md` | The host deployment: layout, tiers, resource limits, security boundary |
+| `docs/HOST.md` | The host deployment: layout, containers, resource limits, security boundary |
 | `docs/VERSIONS.md` | Version scheme, release coupling and update rules |
 | `docs/UPGRADE.md` | Upgrading, the health gate vs. a trial, and the rollback drill |
 | `docs/SELF-UPDATE.md` | `update.sh --apply` in detail |
 | `docs/UPDATER.md` | The privileged updater service |
 | `docs/GIT.md` | Repository access: HTTPS tokens and SSH keys, per host and workspace |
+| `docs/CONTAINERS.md` | Rootless Podman for the agent; rootful Podman for Penpot |
 | `docs/UAT.md` | The acceptance run for a release |
 | `docs/LIMITS.md` | What still needs a host shell, and why |
 | `docs/UPSTREAM-WATCH.md` | The daily check for a new DSH release candidate |
@@ -63,8 +64,8 @@ working runtime and no bot.
 | Your numeric Telegram id | the allow-list is empty by default and the bot refuses everyone else | [@userinfobot](https://t.me/userinfobot) |
 
 The bot cannot create the group; `/workspace new` prints a one-tap
-`?startgroup=` link, and you create it. Docker is only needed if you choose the
-optional Penpot design stack.
+`?startgroup=` link, and you create it. Podman is installed for the agent's
+containers; Docker is not used at all.
 
 ## Install
 
@@ -104,7 +105,7 @@ curl -fsSL …/install.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.9.5`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.10.0`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -121,12 +122,12 @@ cd dsh-tg-docker-setup
 ./install.sh                # interactive: port, key, bot token, admin, git
 ```
 
-### Tiers
+### Containers
 
-`--tier sandbox` (default) is the hardened systemd unit: `ProtectSystem=strict`,
-`ProtectHome=yes`, `NoNewPrivileges`, writes only under the data directory.
-`--tier privileged` adds the `docker` group to the service user, i.e. gives the
-agent Docker access (root-equivalent) — only for deployments that need it.
+`--containers podman` (default) installs rootless Podman for the agent: it can
+run `podman run --rm …` as `dsh`, with no root socket and no `docker` group.
+`--containers none` skips it. The optional Penpot stack (`--design penpot`) runs
+on rootful Podman under the updater; the agent's own containers stay rootless.
 
 ### Resource limits
 
@@ -217,7 +218,7 @@ agent's memory), and `data/workspace` if you care about its files.
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.9.5
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.10.0
          DSH part          product part
 ```
 
@@ -590,5 +591,5 @@ the deployment checkout or the units, and cannot become root
 (`NoNewPrivileges`). It shares the service user with the connector, so it can
 read the bot and updater tokens; the updater token only accepts a release
 target, but treat it as a root credential. If the host also holds other tenants'
-secrets, use a VM; the details, the trade-offs and the tiers are in
+secrets, use a VM; the details, the trade-offs and the containers are in
 [docs/HOST.md](docs/HOST.md).

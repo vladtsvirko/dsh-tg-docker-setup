@@ -1,6 +1,6 @@
 # Acceptance run: the native install
 
-These steps were written for `v0.2.1-rc.5-0.9.5`; if you are accepting a later
+These steps were written for `v0.2.1-rc.5-0.10.0`; if you are accepting a later
 tag, substitute it everywhere below.
 
 One run, ~20 minutes. The point is not to see it work once, but to see the
@@ -17,7 +17,7 @@ transcript.
 ## 0. Before you start
 
 Use a fresh Debian/Ubuntu VM (2 CPU, 4 GB). Root access, network, nothing else.
-Docker is not needed for this run unless you exercise the optional design stack
+Podman is installed for the agent; the optional design stack uses it too
 in step 7.
 
 - [ ] Node **not** installed: the installer must install 22 from NodeSource
@@ -33,21 +33,21 @@ in step 7.
 Install the way a stranger would — one downloaded file:
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.9.5/install.sh | sudo bash -s -- --check --dir /srv/dsh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.9.5/install.sh | sudo bash -s -- --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.10.0/install.sh | sudo bash -s -- --check --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.10.0/install.sh | sudo bash -s -- --dir /srv/dsh
 ```
 
 All `./install.sh` and `./update.sh` checks below run from `/srv/dsh`.
 
 - [ ] the first line prints what it will fetch, then the full plan, and changes
       nothing
-- [ ] the plan shows `tier: sandbox`, `user: dsh`, `data: /srv/dsh/data/home`,
+- [ ] the plan shows `containers: podman (rootless)`, `user: dsh`, `data: /srv/dsh/data/home`,
       the updater on `127.0.0.1` and `resources: 30%`
 - [ ] the second asks the questions, shows the plan again and asks
       `Proceed? [Y/n]`
-- [ ] it installs Node 22 (and says so), then `dsh` and `pnpm`; a missing Docker
+- [ ] it installs Node 22 (and says so), then `dsh` and `pnpm`; a missing Podman
       daemon is not an error for this run
-- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.9.5`
+- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.10.0`
 - [ ] the self-check that follows reports `clean`: `service`, `web` and
       `data-owner` all ok
 - [ ] `sudo ./install.sh --doctor` (no `--fix`) exits 0 and names the deployed
@@ -76,7 +76,7 @@ All `./install.sh` and `./update.sh` checks below run from `/srv/dsh`.
 - [ ] tap it, add the bot to a new group with Topics enabled: the group gets a
       dashboard
 - [ ] `/new` in the group creates a topic; a message in it gets a streamed answer
-- [ ] `/system status` shows: version `0.2.1-rc.5-0.9.5`, the admin line,
+- [ ] `/system status` shows: version `0.2.1-rc.5-0.10.0`, the admin line,
       `web: 127.0.0.1:<port> answered …`, `key: set`,
       `registry: 1 workspace(s) in the runtime · 1 bound to Telegram`,
       `data: … this runtime`, `last agent error: none`

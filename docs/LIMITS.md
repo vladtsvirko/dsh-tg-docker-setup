@@ -44,7 +44,7 @@ These cannot be done through the bot, by design or by physics:
   reach Telegram;
 - adding publisher bots to groups (a human must add them; the Bot API cannot);
 - creating a group or enabling Topics (Telegram only allows a human to do this);
-- changing `DSH_BIND_IP`, the port, the resource share, the tier, or the unit
+- changing `DSH_BIND_IP`, the port, the resource share, the containers, or the unit
   files;
 - retrieving the web token if the browser cookie is gone and the runtime logs
   are unreachable;

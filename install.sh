@@ -192,7 +192,7 @@ cd "$SRC_DIR"
 SETUP_VERSION="$(tr -d '\n' < "$SRC_DIR/VERSION")"
 DSH_VERSION="$(printf '%s' "$SETUP_VERSION" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+$//')"
 
-TIER="" DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0 DEPS=1 CLEAN_SOURCE=0
+CONTAINERS="" DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0 DEPS=1 CLEAN_SOURCE=0
 DOCTOR=0 FIX=0 ROTATE_KEY=0
 SERVICE_USER="${SERVICE_USER:-dsh}"
 DSH_PORT="${DSH_PORT:-}"
@@ -214,7 +214,7 @@ GIT_AUTH="${GIT_AUTH:-}"
 GIT_KEY="${GIT_KEY:-}"
 GIT_KNOWN_HOSTS="${GIT_KNOWN_HOSTS:-}"
 GIT_PROFILES_FILE="${GIT_PROFILES_FILE:-}"
-INSTALL_DOCKER="${INSTALL_DOCKER:-}"
+CONTAINERS="${CONTAINERS:-}"
 DSH_UPDATER_TOKEN="${DSH_UPDATER_TOKEN:-}"
 DESIGN="${DESIGN:-}"
 DSH_DESIGN_PORT="${DSH_DESIGN_PORT:-}"
@@ -240,11 +240,12 @@ git and the systemd units:
   curl -fsSL https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash -s -- --yes
 
 Options:
-  --tier sandbox|privileged
-                         sandbox (default) or add the docker group (for the
-                         Penpot design stack and Docker access)
+  --containers podman|none
+                         rootless Podman for the agent's disposable containers
+                         (default: podman; Docker is never installed)
   --dir PATH             deployment directory (default: /srv/dsh)
-  --design none|docker   optional Penpot design stack (default: ask, else none)
+  --design penpot|none   optional Penpot design stack, run on Podman
+                         (default: ask, else none)
   --ref REF              git ref for the native checkout (default: v<VERSION>)
   --config FILE          read answers from FILE (KEY=VALUE, no shell)
   --no-deps              do not install Node or git; they must already exist
@@ -263,7 +264,7 @@ EOF
 
 # --- answers from a file ---------------------------------------------------
 # Strict KEY=VALUE parsing: no sourcing, so a config file cannot execute code.
-CONFIG_KEYS="TIER DIR SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PROVIDER DSH_MODEL DSH_RESOURCE_PERCENT
+CONFIG_KEYS="CONTAINERS DIR SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PROVIDER DSH_MODEL DSH_RESOURCE_PERCENT
 DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT PROVIDER_KEY
 DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN GIT_HOST
 GIT_AUTH GIT_KEY GIT_KNOWN_HOSTS GIT_PROFILES_FILE"
@@ -297,8 +298,8 @@ set -- "${ARGS[@]}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --tier)   TIER="${2:?--tier needs a value}"; shift 2 ;;
-    --tier=*) TIER="${1#*=}"; shift ;;
+    --containers) CONTAINERS="${2:?--containers needs a value}"; shift 2 ;;
+    --containers=*) CONTAINERS="${1#*=}"; shift ;;
     --design) DESIGN="${2:?--design needs a value}"; shift 2 ;;
     --design=*) DESIGN="${1#*=}"; shift ;;
     --ref)    REF="${2:?--ref needs a value}"; shift 2 ;;
@@ -689,7 +690,7 @@ read_existing_env() {
   local key value provider key_var
   [ -f "$DIR/.env" ] || return 0
   for key in DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PROVIDER DSH_MODEL DSH_RESOURCE_PERCENT DSH_TELEGRAM_BOT_TOKEN \
-             ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT \
+             ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT CONTAINERS \
              DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN \
              DSH_PROVIDER_API_KEY_ENV; do
     # The last assignment is what the runtime reads (systemd's EnvironmentFile
@@ -766,14 +767,12 @@ uninstall_run() {
   printf '    dir:     %s still exists (rm -rf %s to remove the checkout)\n' "$DIR" "$DIR"
 }
 
-docker_ready() {
-  command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1
+podman_ready() {
+  command -v podman >/dev/null 2>&1
 }
 
-# `docker compose version` only reads the plugin; building and starting need the
-# daemon, and therefore either root or the docker group.
-docker_usable() {
-  docker_ready && docker info >/dev/null 2>&1
+podman_compose_ready() {
+  command -v podman-compose >/dev/null 2>&1
 }
 
 node_ready() {
@@ -792,7 +791,7 @@ rerun_as_root() {
   local -a keep=() pair
   while IFS= read -r pair; do
     case "$pair" in
-      DSH_*=*|PROVIDER_KEY=*|ALLOWED_USER_IDS=*|SERVICE_USER=*|TIER=*|DESIGN=*) keep+=("$pair") ;;
+      DSH_*=*|PROVIDER_KEY=*|ALLOWED_USER_IDS=*|SERVICE_USER=*|CONTAINERS=*|DESIGN=*) keep+=("$pair") ;;
     esac
   done < <(env 2>/dev/null || true)
   # Remember where the download lives, so the installer can say it is not the
@@ -806,12 +805,22 @@ if [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$DOCTOR" = 0 ] && [ "$(id -u)"
 fi
 
 case "${DESIGN:-}" in
-  ""|none|docker) ;;
-  *) die "--design must be none or docker" ;;
+  ""|none|penpot) ;;
+  # Migration: the old value meant the Docker stack, which no longer exists.
+  docker) DESIGN=penpot; warn "DESIGN=docker is now DESIGN=penpot (Podman); the stack will be recreated" ;;
+  *) die "--design must be penpot or none" ;;
 esac
-
-[ -n "$TIER" ] || TIER=sandbox
-case "$TIER" in sandbox|privileged) ;; *) die "--tier must be sandbox or privileged" ;; esac
+case "${CONTAINERS:-}" in
+  ""|podman|none) ;;
+  *) die "--containers must be podman or none" ;;
+esac
+[ -n "$CONTAINERS" ] || CONTAINERS=podman
+[ -n "$DESIGN" ] || DESIGN=none
+# Penpot runs on Podman in this setup; asking for it implies the runtime.
+if [ "$DESIGN" = penpot ] && [ "$CONTAINERS" = none ]; then
+  CONTAINERS=podman
+  warn "--design penpot needs Podman; containers set to podman"
+fi
 [ -n "$DIR" ] || DIR=/srv/dsh
 
 read_existing_env
@@ -831,7 +840,7 @@ fi
 # Defaults apply after the existing .env, so a repair keeps the deployed values.
 [ -n "$DSH_PORT" ] || DSH_PORT=4310
 [ -n "$DESIGN" ] || DESIGN=none
-[ "$DESIGN" = docker ] && { [ -n "$DSH_DESIGN_PORT" ] || DSH_DESIGN_PORT=8090; }
+[ "$DESIGN" = penpot ] && { [ -n "$DSH_DESIGN_PORT" ] || DSH_DESIGN_PORT=8090; }
 [ -n "$DSH_PROVIDER" ] || DSH_PROVIDER=opencode-go
 
 model_default() {
@@ -924,8 +933,9 @@ if [ "$CHECK" != 1 ]; then
   fi
   # Repository access: one or more git accounts. See docs/GIT.md.
   ask_git_accounts
-  ask DESIGN "Install the Penpot design stack? (docker/none)" none
-  if [ "$DESIGN" = docker ]; then
+  ask CONTAINERS "Container runtime for the agent (podman/none)" podman
+  ask DESIGN "Install the Penpot design stack? (penpot/none)" none
+  if [ "$DESIGN" = penpot ]; then
     ask DSH_DESIGN_PORT "Penpot port" 8090
   fi
   ask DSH_RESOURCE_PERCENT "CPU/RAM limit for the runtime, percent of this machine (0 = unlimited)" 30
@@ -965,23 +975,26 @@ UPDATER_URL="http://127.0.0.1:8787"
 [ "$CHECK" != 1 ] && [ "$(id -u)" != 0 ] \
   && die "this installs a systemd service — run with sudo"
 
-# Docker is needed only by the optional Penpot design stack: the runtime itself
-# is a systemd service on the host.
-DOCKER_REQUIRED=0
-[ "$DESIGN" = docker ] && DOCKER_REQUIRED=1
+# Podman is the only container runtime: rootless for the agent, rootful for the
+# optional Penpot stack. Docker is not installed or used.
+PODMAN_REQUIRED=0
+[ "$CONTAINERS" = podman ] && PODMAN_REQUIRED=1
 
 if [ "$DEPS" = 0 ]; then
   DEPS_PLAN="skipped (--no-deps)"
 else
   DEPS_PLAN=""
   if command -v git >/dev/null 2>&1; then DEPS_PLAN="git present"; else DEPS_PLAN="installs git"; fi
-  if [ "$DOCKER_REQUIRED" = 1 ]; then
-    if docker_ready; then DEPS_PLAN="$DEPS_PLAN · docker present"
-    else DEPS_PLAN="$DEPS_PLAN · installs docker.io + docker-compose-v2 (needs root)"; fi
-  elif ! docker_ready; then
-    DEPS_PLAN="$DEPS_PLAN · docker absent (only the Penpot stack needs it)"
+  if [ "$PODMAN_REQUIRED" = 1 ]; then
+    if podman_ready && { [ "$DESIGN" != penpot ] || podman_compose_ready; }; then
+      DEPS_PLAN="$DEPS_PLAN · podman present"
+    elif [ "$DESIGN" = penpot ]; then
+      DEPS_PLAN="$DEPS_PLAN · installs podman + podman-compose (needs root)"
+    else
+      DEPS_PLAN="$DEPS_PLAN · installs podman (needs root)"
+    fi
   else
-    DEPS_PLAN="$DEPS_PLAN · docker present"
+    DEPS_PLAN="$DEPS_PLAN · podman not requested"
   fi
   if node_ready; then DEPS_PLAN="$DEPS_PLAN · node present"; else DEPS_PLAN="$DEPS_PLAN · installs Node 22 (NodeSource)"; fi
 fi
@@ -1008,12 +1021,12 @@ fi
 if [ -n "$DSH_ADMIN_USER_ID" ]; then
   printf '    admin:     %s (may update, restart and roll back)\n' "$DSH_ADMIN_USER_ID"
 fi
-if [ "$DESIGN" = docker ]; then
-  printf '    design:    Penpot on http://%s:%s/\n' "$DSH_BIND_IP" "$DSH_DESIGN_PORT"
+if [ "$DESIGN" = penpot ]; then
+  printf '    design:    Penpot on http://%s:%s/ (Podman)\n' "$DSH_BIND_IP" "$DSH_DESIGN_PORT"
 else
-  printf '    design:    none (re-run with --design docker to add it later)\n'
+  printf '    design:    none (re-run with --design penpot to add it later)\n'
 fi
-printf '    tier:      %s\n' "$TIER"
+printf '    containers: %s\n' "$(if [ "$CONTAINERS" = podman ]; then printf 'podman (rootless)'; else printf 'none'; fi)"
 printf '    user:      %s\n' "$SERVICE_USER"
 printf '    data:      %s\n' "$DATA_HOME"
 printf '    updater:   %s (127.0.0.1 only, root)\n' "$UPDATER_URL"
@@ -1086,51 +1099,40 @@ apt_install() {
   as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "$@"
 }
 
-# Docker's own apt repository, for the hosts where the distro packages do not
-# provide `docker compose` (Debian 12, or Ubuntu with universe disabled).
-install_docker_repo() {
-  local id codename
-  id="$(. /etc/os-release 2>/dev/null && printf '%s' "${ID:-}")"
-  codename="$(. /etc/os-release 2>/dev/null && printf '%s' "${VERSION_CODENAME:-}")"
-  case "$id" in
-    ubuntu|debian) ;;
-    *) die "docker's apt repository has no packages for '$id' — install Docker and the compose plugin yourself, or pass --no-deps" ;;
-  esac
-  [ -n "$codename" ] || die "cannot read the release codename from /etc/os-release"
-  log "adding docker's apt repository ($id $codename)"
-  apt_install ca-certificates curl
-  as_root install -m 0755 -d /etc/apt/keyrings
-  as_root curl -fsSL "https://download.docker.com/linux/$id/gpg" -o /etc/apt/keyrings/docker.asc \
-    || die "cannot fetch docker's signing key"
-  as_root chmod a+r /etc/apt/keyrings/docker.asc
-  printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/%s %s stable\n' \
-    "$(dpkg --print-architecture)" "$id" "$codename" \
-    | as_root tee /etc/apt/sources.list.d/docker.list >/dev/null
-  apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+ensure_podman() {
+  if ! podman_ready; then
+    [ "$DEPS" = 1 ] || die "podman is missing and --no-deps was given"
+    apt_install podman || die "could not install podman"
+  fi
+  # Rootless helpers; best effort because the distro names vary.
+  apt_install uidmap slirp4netns fuse-overlayfs || warn "some rootless podman helpers are missing; check 'podman info'"
+  # Only the Penpot stack needs compose; the agent's `podman run` does not.
+  if [ "$DESIGN" = penpot ] && ! podman_compose_ready; then
+    [ "$DEPS" = 1 ] || die "podman-compose is missing and --no-deps was given"
+    apt_install podman-compose || die "could not install podman-compose (Penpot uses it)"
+  fi
+  log "podman ready: $(podman --version)"
 }
 
-ensure_docker() {
-  if docker_ready; then return 0; fi
-  [ "$DEPS" = 1 ] || die "docker (with the compose plugin) is missing and --no-deps was given"
-  if command -v docker >/dev/null 2>&1; then
-    # docker is there but the compose plugin is not: that is the whole gap.
-    apt_install docker-compose-v2 || warn "no docker-compose-v2 package here; trying docker's own repository"
+# The agent runs containers rootless as the service user. Rootless Podman needs
+# a subordinate id range and a private runtime directory; both are per-user and
+# only possible after the service user exists.
+podman_user_setup() {
+  [ "$CONTAINERS" = podman ] || return 0
+  id "$SERVICE_USER" >/dev/null 2>&1 || return 0
+  if ! grep -q "^$SERVICE_USER:" /etc/subuid 2>/dev/null; then
+    usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "$SERVICE_USER" \
+      || warn "could not add subuid/subgid for $SERVICE_USER; rootless podman may fail"
+  fi
+  local runtime="$DATA_HOME/.local/state"
+  run mkdir -p "$runtime"
+  run chown "$SERVICE_USER:$SERVICE_USER" "$runtime"
+  run chmod 700 "$runtime"
+  if run runuser -u "$SERVICE_USER" -- env HOME="$DATA_HOME" XDG_RUNTIME_DIR="$runtime" podman info >/dev/null 2>&1; then
+    log "podman ready for $SERVICE_USER (rootless)"
   else
-    # The distro packages first: no third-party repository, and they are enough
-    # on Ubuntu 24.04. The official repository is the fallback, not the default.
-    if ! apt_install docker.io docker-compose-v2; then
-      warn "the distro has no usable docker packages; using docker's own repository"
-    fi
+    warn "rootless podman is not usable as $SERVICE_USER yet — check /etc/subuid, uidmap, and re-login"
   fi
-  if ! docker_ready; then install_docker_repo; fi
-  as_root systemctl enable --now docker >/dev/null 2>&1 || warn "could not start docker — start it yourself"
-  if [ "$(id -u)" = 0 ] && [ -n "${SUDO_USER:-}" ]; then
-    usermod -aG docker "$SUDO_USER" 2>/dev/null && \
-      log "added $SUDO_USER to the docker group (log out and back in to use docker without sudo)"
-  fi
-  docker_ready || die "docker is installed but 'docker compose' still fails — check 'docker compose version'"
-  docker_usable || warn "the docker daemon is not reachable for $(id -un) yet — log out and back in (docker group), then re-run"
-  log "docker ready: $(docker --version)"
 }
 
 ensure_node() {
@@ -1158,10 +1160,8 @@ if [ "$DEPS" = 1 ]; then
   # worth a question.
   ensure_git
   ensure_node
-  if [ "$DOCKER_REQUIRED" = 1 ]; then
-    # Chosen explicitly (the design stack): install it without asking, because
-    # the request already said so. Nothing else uses Docker.
-    ensure_docker
+  if [ "$PODMAN_REQUIRED" = 1 ]; then
+    ensure_podman
   fi
 fi
 
@@ -1277,7 +1277,8 @@ write_env() {
   set_env DSH_UPDATER_TOKEN "$DSH_UPDATER_TOKEN" "$file"
   set_env DSH_SETUP_VERSION "$SETUP_VERSION" "$file"
   set_env DESIGN "$DESIGN" "$file"
-  if [ "$DESIGN" = docker ]; then
+  set_env CONTAINERS "$CONTAINERS" "$file"
+  if [ "$DESIGN" = penpot ]; then
     set_env DSH_DESIGN_PORT "$DSH_DESIGN_PORT" "$file"
     set_env DSH_DESIGN_ENABLED 1 "$file"
     set_env PENPOT_ENABLED 1 "$file"
@@ -1316,14 +1317,13 @@ wait_health() {
   return 1
 }
 
-# Optional Penpot stack. It is a separate compose project: its own data, its own
-# lifecycle, and it can be absent without touching the runtime.
+# Optional Penpot stack. It runs on rootful Podman (the updater's user), while
+# the agent's own containers are rootless. Data lives in design/data and is kept
+# across down/up.
 design_apply() {
-  [ "$DESIGN" = docker ] || return 0
-  if ! command -v docker >/dev/null 2>&1; then
-    # Requested and impossible: leave the plugin off, so the runtime does not
-    # boot with an entry that cannot start.
-    warn "the design stack needs Docker and it is not available — the design tools stay off"
+  [ "$DESIGN" = penpot ] || return 0
+  if ! podman_ready || ! podman_compose_ready; then
+    warn "the design stack needs Podman and podman-compose — the design tools stay off"
     set_env PENPOT_ENABLED 0 "$DIR/.env" 2>/dev/null || true
     set_env DSH_DESIGN_ENABLED 0 "$DIR/.env" 2>/dev/null || true
     return 0
@@ -1349,11 +1349,16 @@ design_apply() {
   log "restarting the runtime so the Penpot plugin loads"
   run systemctl restart dsh.service
 
-  log "starting Penpot (the first start pulls the images)"
-  if ! docker network inspect dsh-design >/dev/null 2>&1; then
-    run docker network create dsh-design || warn "could not create the dsh-design network"
+  # A deployment migrated from the Docker era may still have the old stack on
+  # the same port and data. Stop it once; the bind-mounted data is reused.
+  if command -v docker >/dev/null 2>&1 && \
+     docker compose --project-directory "$dir" -f "$dir/compose.yaml" ps -q 2>/dev/null | grep -q .; then
+    warn "stopping the previous Docker design stack (data is kept)"
+    run docker compose --project-directory "$dir" -f "$dir/compose.yaml" down || warn "docker compose down failed"
   fi
-  run docker compose --project-directory "$dir" -f "$dir/compose.yaml" up -d --build
+
+  log "starting Penpot on Podman (the first start pulls the images)"
+  ( cd "$dir" && run podman-compose -f compose.yaml up -d ) || die "podman-compose failed for the design stack"
 
   log "waiting for Penpot on http://$DSH_BIND_IP:$DSH_DESIGN_PORT/"
   local waited=0
@@ -1364,7 +1369,7 @@ design_apply() {
     sleep 5; waited=$((waited + 5))
   done
   if [ "$waited" -ge 300 ]; then
-    warn "Penpot did not answer within 5 minutes — inspect: docker compose --project-directory $dir ps"
+    warn "Penpot did not answer within 5 minutes — inspect: (cd $dir && podman-compose ps)"
     return 1
   fi
 
@@ -1407,9 +1412,8 @@ MemoryMax=${DSH_RESOURCE_PERCENT}%
 CPUQuota=$((DSH_RESOURCE_PERCENT * $(cpu_count)))%
 TasksMax=512"
   fi
-  local sandbox_lines=""
-  if [ "$TIER" = sandbox ]; then
-    sandbox_lines="$(cat <<'EOF'
+  local sandbox_lines
+  sandbox_lines="$(cat <<'EOF'
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
@@ -1420,11 +1424,8 @@ ReadWritePaths=/srv/dsh/data
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 EOF
 )"
-    # ReadWritePaths must match the configured directory.
-    sandbox_lines="${sandbox_lines/\/srv\/dsh\/data/$DIR\/data}"
-  else
-    sandbox_lines="SupplementaryGroups=docker"
-  fi
+  # ReadWritePaths must match the configured directory.
+  sandbox_lines="${sandbox_lines/\/srv\/dsh\/data/$DIR\/data}"
 
   log "writing $unit"
   cat > "$unit" <<EOF
@@ -1521,6 +1522,7 @@ native_apply() {
   log "creating the data layout under $DIR"
   run mkdir -p "$DATA_HOME" "$DATA_WORKSPACE" "$SUPERVISOR_STATE" "$DIR/data/.cache/tmp" "$DIR/backups"
   run chown -R "$SERVICE_USER:$SERVICE_USER" "$DIR/data"
+  podman_user_setup
 
   if [ ! -d "$DIR/.git" ]; then
     log "initialising the setup checkout in $DIR"

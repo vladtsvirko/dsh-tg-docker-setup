@@ -34,18 +34,22 @@ published port: only the loopback interface, only with the token from `.env`.
 update can therefore be a `git checkout` without leaving root-owned profile
 files behind, and the runtime cannot rewrite the code that starts it.
 
-## Tiers
+## Containers
 
-| Tier | What it adds | Trade |
+The unit is always hardened (`ProtectSystem=strict`, `ProtectHome=yes`,
+`PrivateTmp`, `NoNewPrivileges`, `ReadWritePaths=<dir>/data`). DSH itself runs
+with `DSH_PERMISSION_MODE=danger-full-access`; the unit is the filesystem
+boundary.
+
+| Runtime | Who | Purpose |
 |---|---|---|
-| `sandbox` (default) | `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp`, `NoNewPrivileges`, `ReadWritePaths=<dir>/data` | no writes outside the data directory |
-| `privileged` | `SupplementaryGroups=docker` | Docker access = root-equivalent by design |
+| rootless Podman as `dsh` | the agent | disposable test containers, `podman run --rm` |
+| rootful Podman | the updater (root) | the optional Penpot stack, `podman-compose` |
 
-The tier is a unit setting, not a sandbox inside the harness: DSH itself runs
-with `DSH_PERMISSION_MODE=danger-full-access` in both cases (a nested
-bwrap/Landlock sandbox fails closed and breaks the bash tool). What the agent
-can read is what the service user can read; the tier only narrows writes and
-decides whether the agent can talk to Docker.
+Docker is not installed or used. `--containers none` skips Podman entirely.
+Rootless Podman needs `/etc/subuid`/`/etc/subgid` for `dsh` and `uidmap`; the
+installer adds them. Penpot's data lives in `<dir>/design/data` and is kept
+across `podman-compose down`.
 
 ## Resource limits
 
@@ -69,7 +73,7 @@ unit and `systemctl daemon-reload`.
 ```sh
 ./install.sh                 # asks the questions, writes units, starts
 ./install.sh --check         # the plan, nothing changed
-./install.sh --tier privileged --yes
+./install.sh --containers none --yes
 ./install.sh --config answers.env
 ./install.sh --ref <git ref>
 ```
@@ -135,8 +139,8 @@ connector passes through.
 - The runtime and the connector share the `dsh` uid, so the agent can read the
   bot and updater tokens. That is inherent to one unprivileged runtime; if it is
   not acceptable, run the deployment on a dedicated host or VM.
-- Do not add the service user to the `docker` group unless you mean to give the
-  agent Docker (and therefore root).
+- Do not add the service user to the `docker` group. The agent uses rootless
+  Podman; the rootful Penpot stack is the updater's job.
 - The systemd hardening blocks writes outside `<dir>/data`; do not add
   `ReadWritePaths` casually.
 - If the host also holds other projects' secrets, prefer a VM: the agent can

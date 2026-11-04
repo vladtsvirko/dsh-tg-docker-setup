@@ -1,15 +1,13 @@
 # Optional design stack: Penpot for design work.
 #
-# Started by install.sh --design docker (or by re-running install.sh later).
+# Started by install.sh --design penpot (or by re-running install.sh later).
 # It is a separate compose project on purpose: it has its own lifecycle, its own
 # data, and it can be removed without touching the runtime.
 #
-#   docker compose --project-directory design -f design/compose.yaml up -d
+#   cd design && podman-compose -f compose.yaml up -d
 #
 # Everything is LAN-only: the frontend is published on DSH_BIND_IP, and the
 # runtime reaches it with the `penpot` CLI over that address.
-name: dsh-design
-
 x-penpot: &penpot
   PENPOT_PUBLIC_URI: http://${DSH_BIND_IP:-127.0.0.1}:${DSH_DESIGN_PORT:-8090}
   PENPOT_DATABASE_URI: postgresql://penpot:${PENPOT_DB_PASSWORD:?set PENPOT_DB_PASSWORD}@design-postgres:5432/penpot
@@ -27,7 +25,7 @@ x-penpot: &penpot
 
 services:
   design-postgres:
-    image: postgres:15
+    image: docker.io/library/postgres:15
     restart: unless-stopped
     environment:
       POSTGRES_INITDB_ARGS: --data-checksums
@@ -44,12 +42,12 @@ services:
       retries: 10
 
   design-redis:
-    image: redis:7.2
+    image: docker.io/library/redis:7.2
     restart: unless-stopped
     networks: [design]
 
   design-backend:
-    image: penpotapp/backend:2.18
+    image: docker.io/penpotapp/backend:2.18
     restart: unless-stopped
     depends_on:
       design-postgres:
@@ -65,7 +63,7 @@ services:
     networks: [design]
 
   design-exporter:
-    image: penpotapp/exporter:2.18
+    image: docker.io/penpotapp/exporter:2.18
     restart: unless-stopped
     depends_on: [design-redis]
     environment:
@@ -77,7 +75,7 @@ services:
     networks: [design]
 
   design-frontend:
-    image: penpotapp/frontend:2.18
+    image: docker.io/penpotapp/frontend:2.18
     restart: unless-stopped
     depends_on: [design-backend, design-exporter]
     environment:
@@ -85,10 +83,7 @@ services:
     ports:
       # LAN-only. Never 0.0.0.0: the instance has real accounts.
       - "${DSH_BIND_IP:-127.0.0.1}:${DSH_DESIGN_PORT:-8090}:8080"
-    networks: [design, dsh-design]
+    networks: [design]
 
 networks:
   design:
-  dsh-design:
-    external: true
-    name: dsh-design

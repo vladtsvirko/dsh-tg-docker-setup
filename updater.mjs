@@ -4,7 +4,7 @@
  *
  * Slice 1: validates an update request against the release-tag policy and
  * exposes the contract on the internal ops network. It deliberately does not
- * touch Docker yet; the apply path is added in slice 2.
+ * touch Podman yet; the apply path is added in slice 2.
  *
  * POST /update   compatible | available | exact
  * GET  /status

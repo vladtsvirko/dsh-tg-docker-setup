@@ -26,7 +26,7 @@ Have these ready; the installer asks for them:
 
 | You need | Why |
 |---|---|
-| A Linux host (Ubuntu 24.04 / Debian 12 tested) with `sudo` | the installer adds Node 22 and the systemd units (Docker only for the optional Penpot stack) |
+| A Linux host (Ubuntu 24.04 / Debian 12 tested) with `sudo` | the installer adds Node 22, rootless Podman for the agent and the systemd units |
 | A provider API key | the agent cannot answer without one |
 | A Telegram bot token | from [@BotFather](https://t.me/BotFather) → `/newbot` |
 | Privacy mode **off** for that bot | BotFather → `/setprivacy` → Disable, or it never sees plain messages in topics |
@@ -214,5 +214,5 @@ chat.
 - [README.md](../README.md) — every knob and the operating reference.
 - [UPGRADE.md](UPGRADE.md) — upgrades, the health gate, and the rollback drill.
 - [GIT.md](GIT.md) — repository access for the agent.
-- [HOST.md](HOST.md) — the host deployment: units, tiers, resource limits, update authority.
+- [HOST.md](HOST.md) — the host deployment: units, containers, resource limits, update authority.
 - [LIMITS.md](LIMITS.md) — what still needs a host shell, and why.

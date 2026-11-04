@@ -62,8 +62,8 @@ exploit. Expect an answer within a few days.
 - Keep `.env` at `0640 root:dsh` and `secrets/` at `0700`.
 - List only your own Telegram ids in `ALLOWED_USER_IDS`, and set
   `DSH_ADMIN_USER_ID`.
-- Keep the `sandbox` tier unless you need the agent to reach Docker; `privileged`
-  adds the docker group, i.e. root-equivalent access.
+- Keep `--containers podman` (rootless). Do not add `dsh` to the `docker`
+  group; the rootful Penpot stack belongs to the updater.
 - Set a resource share (`DSH_RESOURCE_PERCENT`) so a runaway command cannot take
   the host down.
 - Revoke and replace a token if it ever appears in logs or a repository.

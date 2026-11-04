@@ -7,6 +7,37 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.10.0
+
+**Docker is gone.** The setup installs Podman instead: rootless for the agent,
+rootful for the optional Penpot stack. There is no `docker` dependency, no
+docker group and no Docker install path left.
+
+### Added
+
+- `--containers podman|none` (default `podman`): rootless Podman for the agent,
+  with `/etc/subuid`/`/etc/subgid` and `uidmap` set up by the installer. The
+  agent can `podman run --rm …` as `dsh`; the unit keeps all of its hardening.
+- `docs/CONTAINERS.md`: recipes, limits, cleanup and the rootless boundary.
+
+### Changed
+
+- **Penpot runs on Podman.** `--design penpot` (was `--design docker`) starts
+  the same compose stack through rootful `podman-compose`; images are fully
+  qualified (`docker.io/...`), the old `dsh-design` external network is gone.
+  `DESIGN=docker` in an existing `.env` is migrated to `penpot` with a warning.
+- `--tier sandbox|privileged` is removed. The unit is always hardened; Docker
+  access is no longer a tier and no longer drops `ProtectSystem`.
+- The design component (`/system components`, `update.sh --component`) drives
+  `podman-compose` instead of `docker compose`.
+- CI validates `design/compose.yaml` as YAML instead of running
+  `docker compose config`.
+
+### Removed
+
+- `ensure_docker`, the docker apt repository, `docker_ready`/`docker_usable`,
+  `DOCKER_REQUIRED`, the docker group and every `docker compose` call.
+
 ## 0.2.1-rc.5-0.9.5
 
 Connector feature: Telegram prompts identify their channel; the setup pin moves.

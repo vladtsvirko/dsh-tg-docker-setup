@@ -217,7 +217,7 @@ test('components: the endpoint runs the real update.sh and wires the runtime', a
     await writeFile(join(repo, '.env'), 'DSH_BIND_IP=127.0.0.1\n')
 
     await mkdir(bins, { recursive: true })
-    await writeFile(join(bins, 'docker'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    await writeFile(join(bins, 'podman-compose'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
     await writeFile(join(bins, 'curl'), '#!/bin/sh\nprintf 200\n', { mode: 0o755 })
     await writeFile(join(bins, 'systemctl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
     process.env.PATH = `${bins}:${originalPath}`
