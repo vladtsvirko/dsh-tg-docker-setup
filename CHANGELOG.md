@@ -7,6 +7,25 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.10.6
+
+### Fixed
+
+- **Podman DNS is installed.** `apt_install` runs with
+  `--no-install-recommends`, so `podman` did not pull `aardvark-dns`; compose
+  containers started without DNS and Penpot never became healthy. The installer
+  now installs `netavark` and `aardvark-dns` explicitly.
+- **`set_env` preserves the file's owner and mode.** Rewriting `.env` through a
+  temporary file used to leave it `root:root 0600`; the deployed `root:dsh 0640`
+  is kept. `design_apply` also restores it after writing the Penpot keys.
+- The installer warns when Ubuntu's AppArmor restriction
+  (`kernel.apparmor_restrict_unprivileged_userns=1`) makes rootless Podman fail
+  with `newuidmap: Operation not permitted`, and `docs/CONTAINERS.md` gives the
+  fix.
+- `--uninstall` no longer reads an unreadable `.env` before its root check.
+- Tests strip the deployment environment (the agent's shell inherits
+  `DESIGN`/`CONTAINERS`), so the suite is host-independent.
+
 ## 0.2.1-rc.5-0.10.5
 
 ### Fixed

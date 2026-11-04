@@ -40,6 +40,29 @@ podman system prune -f
 compose file use `podman-compose` after installing it yourself, or plain
 `podman run`.
 
+## Host prerequisites
+
+The installer adds the pieces rootless Podman needs:
+
+- `uidmap` (`newuidmap`/`newgidmap`) and a subordinate id range for `dsh`
+  (`/etc/subuid`, `/etc/subgid`);
+- `netavark` + `aardvark-dns` — without the DNS binary, containers start but
+  cannot resolve each other, so a compose stack (Penpot) never becomes healthy;
+- `slirp4netns`/`passt` and `fuse-overlayfs` for rootless networking and builds.
+
+On Ubuntu 24.04+ the kernel may restrict unprivileged user namespaces
+(`kernel.apparmor_restrict_unprivileged_userns=1`). Rootless Podman then fails
+with `newuidmap: write to uid_map failed: Operation not permitted`. Either load
+the shipped `/etc/apparmor.d/podman` profile or relax the restriction:
+
+```sh
+echo 'kernel.apparmor_restrict_unprivileged_userns=0' | sudo tee /etc/sysctl.d/99-podman-userns.conf
+sudo sysctl --system
+```
+
+That weakens a kernel mitigation; do it only if you need rootless containers on
+that host.
+
 ## Penpot
 
 `--design penpot` runs the design stack through **rootful** `podman-compose`

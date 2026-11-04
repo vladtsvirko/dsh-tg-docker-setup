@@ -148,10 +148,16 @@ NATIVE_DATA="$DEPLOY_DIR/data"
 
 # Write one key into .env without touching anything else.
 set_env() {
-  local key="$1" value="$2" file="$3" tmp
+  local key="$1" value="$2" file="$3" tmp owner="" mode=""
   tmp="$(mktemp)"
-  [ -f "$file" ] && grep -v "^${key}=" "$file" > "$tmp" || true
+  if [ -f "$file" ]; then
+    owner="$(stat -c '%u:%g' "$file" 2>/dev/null || true)"
+    mode="$(stat -c '%a' "$file" 2>/dev/null || true)"
+    grep -v "^${key}=" "$file" > "$tmp" || true
+  fi
   printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  [ -z "$owner" ] || chown "$owner" "$tmp" 2>/dev/null || true
+  [ -z "$mode" ] || chmod "$mode" "$tmp" 2>/dev/null || true
   mv "$tmp" "$file"
 }
 

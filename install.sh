@@ -724,7 +724,7 @@ cpu_count() {
 # working deployment ends up with two keys and no way to tell which one is live).
 read_existing_env() {
   local key value provider key_var
-  [ -f "$DIR/.env" ] || return 0
+  [ -r "$DIR/.env" ] || return 0
   for key in DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PROVIDER DSH_MODEL DSH_RESOURCE_PERCENT DSH_TELEGRAM_BOT_TOKEN \
              ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT CONTAINERS \
              DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN \
@@ -1143,7 +1143,8 @@ ensure_podman() {
     apt_install podman || die "could not install podman"
   fi
   # Rootless helpers; best effort because the distro names vary.
-  apt_install uidmap slirp4netns fuse-overlayfs || warn "some rootless podman helpers are missing; check 'podman info'"
+  apt_install uidmap slirp4netns fuse-overlayfs netavark aardvark-dns \
+    || warn "some podman helpers are missing (DNS needs aardvark-dns); check 'podman info'"
   # Only the Penpot stack needs compose; the agent's `podman run` does not.
   if [ "$DESIGN" = penpot ] && ! podman_compose_ready; then
     [ "$DEPS" = 1 ] || die "podman-compose is missing and --no-deps was given"
@@ -1170,6 +1171,10 @@ podman_user_setup() {
     log "podman ready for $SERVICE_USER (rootless)"
   else
     warn "rootless podman is not usable as $SERVICE_USER yet — check /etc/subuid, uidmap, and re-login"
+    if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = 1 ]; then
+      warn "Ubuntu restricts unprivileged user namespaces (AppArmor). Either load the podman profile"
+      warn "or set kernel.apparmor_restrict_unprivileged_userns=0, then re-login."
+    fi
   fi
 }
 
@@ -1219,12 +1224,18 @@ write_git_identity() {
 
 # --- shared: write the deployment .env -------------------------------------
 set_env() {
-  local key="$1" value="$2" file="$3" tmp
+  local key="$1" value="$2" file="$3" tmp owner="" mode=""
   tmp="$(mktemp)"
   if [ -f "$file" ]; then
+    owner="$(stat -c '%u:%g' "$file" 2>/dev/null || true)"
+    mode="$(stat -c '%a' "$file" 2>/dev/null || true)"
     grep -v "^${key}=" "$file" > "$tmp" || true
   fi
   printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  # A rewrite must not turn .env into root:root 0600: the service reads it
+  # through systemd, but the doctor and the operator need the deployed mode.
+  [ -z "$owner" ] || chown "$owner" "$tmp" 2>/dev/null || true
+  [ -z "$mode" ] || chmod "$mode" "$tmp" 2>/dev/null || true
   mv "$tmp" "$file"
 }
 
@@ -1384,6 +1395,9 @@ design_apply() {
   local token
   token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
   if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$DIR/.env"; fi
+  # set_env preserves the mode, but a first run may have created .env here.
+  chown root:"$SERVICE_USER" "$DIR/.env" 2>/dev/null || true
+  chmod 640 "$DIR/.env" 2>/dev/null || true
   log "restarting the runtime so the Penpot plugin loads"
   run systemctl restart dsh.service
 

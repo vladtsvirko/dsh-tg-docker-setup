@@ -24,21 +24,41 @@ const exec = promisify(execFile)
 
 /** Run the installer, returning status and output instead of throwing. */
 async function install(args, { env = {}, cwd = here } = {}) {
+  // A --check without an explicit directory would read the developer's live
+  // deployment. Give it a scratch one so the suite is host-independent.
+  const hasTarget = args.some((arg) => arg === '--dir' || arg.startsWith('--dir=') || arg === '--config' || arg.startsWith('--config='))
+  const scratch = (args.includes('--check') || args.includes('--uninstall')) && !hasTarget
+    ? await mkdtemp(join(tmpdir(), 'install-scratch-'))
+    : undefined
+  const argv = scratch === undefined ? args : [...args, '--dir', scratch]
   try {
-    // `undefined` in `env` deletes the variable: a test must not inherit
-    // the runner's ALLOWED_USER_IDS and silently test another deployment.
+    // The test process may itself be running under the deployment (the agent's
+    // shell inherits the service environment). Strip every deployment key so a
+    // test cannot silently read the live DESIGN/CONTAINERS/ALLOWED_USER_IDS.
     const merged = { ...process.env }
+    for (const key of [
+      'DIR', 'SERVICE_USER', 'DESIGN', 'CONTAINERS', 'DSH_DESIGN_ENABLED',
+      'PENPOT_ENABLED', 'PENPOT_API_URL', 'PENPOT_PLUGIN_REF', 'PENPOT_ACCESS_TOKEN',
+      'DSH_SETUP_VERSION', 'DSH_PORT', 'DSH_BIND_IP', 'DSH_PUBLIC_URL',
+      'DSH_PROVIDER', 'DSH_MODEL', 'DSH_RESOURCE_PERCENT', 'DSH_TELEGRAM_BOT_TOKEN',
+      'ALLOWED_USER_IDS', 'DSH_ADMIN_USER_ID', 'DSH_UPDATER_TOKEN',
+      'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_PROVIDER', 'GIT_TOKEN',
+      'GIT_HOST', 'GIT_AUTH', 'GIT_KEY', 'GIT_KNOWN_HOSTS', 'GIT_PROFILES_FILE',
+      'PROVIDER_KEY', 'DSH_TELEGRAM_PUBLISHER_TOKENS',
+    ]) delete merged[key]
     for (const [key, value] of Object.entries(env)) {
       if (value === undefined) delete merged[key]
       else merged[key] = value
     }
-    const { stdout, stderr } = await exec('bash', [join(here, 'install.sh'), ...args], {
+    const { stdout, stderr } = await exec('bash', [join(here, 'install.sh'), ...argv], {
       cwd,
       env: merged,
     })
     return { code: 0, out: stdout + stderr }
   } catch (error) {
     return { code: error.code ?? 1, out: String(error.stdout ?? '') + String(error.stderr ?? '') }
+  } finally {
+    if (scratch !== undefined) await rm(scratch, { recursive: true, force: true })
   }
 }
 
