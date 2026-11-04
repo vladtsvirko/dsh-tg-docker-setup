@@ -7,7 +7,7 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
-## 0.2.1-rc.5-0.8.0
+## 0.2.1-rc.5-0.8.1
 
 > **After updating from 0.7.0, run `sudo ./install.sh --yes` once.** This release
 > changes the systemd units (resource limits, `dsh-updater.service`

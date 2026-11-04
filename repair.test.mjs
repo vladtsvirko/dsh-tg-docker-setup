@@ -37,6 +37,10 @@ const credentials = join(here, 'scripts', 'credentials.mjs')
  */
 const shimDir = await mkdtemp(join(tmpdir(), 'repair-docker-shim-'))
 await writeFile(join(shimDir, 'docker'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+// A CI runner has systemctl but no running systemd. The doctor's service check
+// is about the deployment, so the tests provide an "active" unit instead of
+// reading the machine they run on.
+await writeFile(join(shimDir, 'systemctl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
 const shimEnv = { PATH: `${shimDir}:${process.env.PATH ?? ''}` }
 
 async function run(args, { env = {}, cwd = here } = {}) {
@@ -432,6 +436,12 @@ test('entrypoint serve writes a parseable instance marker with this pid and id',
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test('the health probe asks the configured bind first', async () => {
+  const source = await readFile(join(here, 'healthcheck.sh'), 'utf8')
+  assert.match(source, /host="\$\{DSH_BIND_IP:-\}"/)
+  assert.match(source, /for host in "\$host" 127\.0\.0\.1; do/)
 })
 
 test('the runtime binds DSH_BIND_IP directly, loopback included', async () => {

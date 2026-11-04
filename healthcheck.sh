@@ -1,24 +1,20 @@
 #!/bin/sh
-# Container readiness probe.
+# Runtime readiness probe.
 #
-# dsh binds its own interface (wildcard binds are rejected), so the probe targets
-# the container IP rather than loopback. HTTP is preferred because it proves the
+# dsh binds one interface (wildcard binds are rejected). Probe the address the
+# deployment configured; when the caller did not pass it, fall back to the
+# default-route address, then loopback. HTTP is preferred because it proves the
 # carrier is dispatching, not just that a socket accepts; a bare TCP connect is
-# the fallback for the case where curl itself is unusable (proxy env, missing
-# CA, ...), which would otherwise keep the container "starting" forever.
+# the fallback for a host without a usable curl.
 set -u
 port="${DSH_PORT:-4310}"
-# Must match the entrypoint's choice: the default-network address, not whatever
-# `hostname -I` happens to list first (Docker can order the ops network first).
-ip=""
-if command -v ip >/dev/null 2>&1; then
-  ip="$(ip -4 route get 1.1.1.1 2>/dev/null \
+host="${DSH_BIND_IP:-}"
+if [ -z "$host" ] && command -v ip >/dev/null 2>&1; then
+  host="$(ip -4 route get 1.1.1.1 2>/dev/null \
     | awk '{ for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }')"
 fi
-[ -n "$ip" ] || ip="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | head -n1)"
-# Probe the address the runtime advertises, then loopback: a native install
-# with no default route binds 127.0.0.1 and has no other address to try.
-for host in "$ip" 127.0.0.1; do
+[ -n "$host" ] || host="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | head -n1)"
+for host in "$host" 127.0.0.1; do
   [ -n "$host" ] || continue
   code="$(curl --noproxy '*' -s -o /dev/null -m 4 -w '%{http_code}' "http://${host}:${port}/" 2>/dev/null || true)"
   case "$code" in
