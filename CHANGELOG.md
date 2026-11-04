@@ -7,6 +7,15 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.10.2
+
+Connector UX fixes; the setup pin moves with them.
+
+- Take over asks for confirmation and says it restarts dsh (all sessions).
+- Publisher-token errors include Telegram's reason and the fix.
+- Unconfirmed delivery is explained, with "check the chat before resending".
+- The update card drops Cancel as soon as nothing is draining.
+
 ## 0.2.1-rc.5-0.10.1
 
 Test-only fix for the 0.10.0 tag build: the CI runner already has Podman, so the
