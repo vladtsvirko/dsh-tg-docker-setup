@@ -279,6 +279,51 @@ needsExec('a docker update rewrites the deployed version before starting', async
   }
 })
 
+needsExec('--self-to refuses a cross-major target without the incompatibility flag', async () => {
+  const { dir } = await dockerDeployment()
+  try {
+    const git = (...args) => exec('git', ['-C', dir, ...args])
+    await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-1.0.0\n')
+    await git('add', '-A')
+    await git('commit', '-qm', 'major release')
+    await git('tag', 'v0.2.1-rc.2-1.0.0')
+    await git('checkout', '-q', '--detach', 'v0.2.1-rc.2-0.4.11')
+
+    const failure = await exec('bash', [join(dir, 'update.sh'), '--self-to', 'v0.2.1-rc.2-1.0.0'], {
+      cwd: dir,
+      env: { ...process.env, ASSUME_YES: '1' },
+      timeout: 30000,
+    }).then(() => undefined, (error) => error)
+    assert.ok(failure, 'the crossing must be refused')
+    assert.match(String(failure.stderr), /crosses a DSH line or a product major/)
+    assert.match(String(failure.stderr), /--i-know-versions-are-incompatible/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+needsExec('--self-to accepts a cross-major target with the flag, like --self', async () => {
+  const { dir, bin } = await dockerDeployment()
+  try {
+    const git = (...args) => exec('git', ['-C', dir, ...args])
+    await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-1.0.0\n')
+    await git('add', '-A')
+    await git('commit', '-qm', 'major release')
+    await git('tag', 'v0.2.1-rc.2-1.0.0')
+    await git('checkout', '-q', '--detach', 'v0.2.1-rc.2-0.4.11')
+
+    await exec('bash', [join(dir, 'update.sh'), '--self-to', 'v0.2.1-rc.2-1.0.0', '--i-know-versions-are-incompatible'], {
+      cwd: dir,
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ASSUME_YES: '1', HEALTH_TIMEOUT: '2', WEB_READY_TIMEOUT: '2' },
+      timeout: 30000,
+    })
+    const env = await readFile(join(dir, '.env'), 'utf8')
+    assert.match(env, /^DSH_SETUP_VERSION=0\.2\.1-rc\.2-1\.0\.0$/m)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 needsExec('a docker update that fails its health gate restores the old version', async () => {
   const { dir, bin, calls } = await dockerDeployment({ healthy: false })
   try {

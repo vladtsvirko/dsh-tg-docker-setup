@@ -639,7 +639,7 @@ rerun_as_root() {
   local -a keep=() pair
   while IFS= read -r pair; do
     case "$pair" in
-      DSH_*=*|PROVIDER_KEY=*|ALLOWED_USER_IDS=*|SERVICE_USER=*) keep+=("$pair") ;;
+      DSH_*=*|PROVIDER_KEY=*|ALLOWED_USER_IDS=*|SERVICE_USER=*|MODE=*|TIER=*|DESIGN=*) keep+=("$pair") ;;
     esac
   done < <(env 2>/dev/null || true)
   # Remember where the download lives, so the installer can say it is not the
@@ -782,12 +782,24 @@ if [ "$CHECK" != 1 ]; then
     ask DSH_TELEGRAM_PUBLISHER_TOKENS \
       "Extra publisher bot tokens to raise the rate limit (comma separated, blank = main bot only)" ""
   fi
-  # The agent commits; a commit without an author fails. Default to the host's
-  # own identity when there is one, so the answer is usually one Enter.
-  default_git_name="$(git config --global user.name 2>/dev/null || true)"
-  [ -n "$default_git_name" ] || default_git_name="$(id -un)"
-  default_git_email="$(git config --global user.email 2>/dev/null || true)"
-  [ -n "$default_git_email" ] || default_git_email="$(id -un)@$(hostname 2>/dev/null || echo localhost)"
+  # The agent commits; a commit without an author fails. A repair must keep the
+  # identity the agent already commits as: the deployed .gitconfig wins over the
+  # invoking user's global one, so re-running under sudo does not silently
+  # switch the author to root. Fall back to the user who invoked sudo, not root.
+  deployed_gitconfig="$DIR/data/home/.gitconfig"
+  invoking_user="${SUDO_USER:-$(id -un)}"
+  default_git_name="$(git config --file "$deployed_gitconfig" user.name 2>/dev/null || true)"
+  default_git_email="$(git config --file "$deployed_gitconfig" user.email 2>/dev/null || true)"
+  [ -n "$default_git_name" ] || default_git_name="$(git config --global user.name 2>/dev/null || true)"
+  [ -n "$default_git_email" ] || default_git_email="$(git config --global user.email 2>/dev/null || true)"
+  if [ -z "$default_git_name" ] && [ -n "${SUDO_USER:-}" ]; then
+    default_git_name="$(sudo -u "$SUDO_USER" git config --global user.name 2>/dev/null || true)"
+  fi
+  if [ -z "$default_git_email" ] && [ -n "${SUDO_USER:-}" ]; then
+    default_git_email="$(sudo -u "$SUDO_USER" git config --global user.email 2>/dev/null || true)"
+  fi
+  [ -n "$default_git_name" ] || default_git_name="$invoking_user"
+  [ -n "$default_git_email" ] || default_git_email="$invoking_user@$(hostname 2>/dev/null || echo localhost)"
   ask GIT_AUTHOR_NAME "Git author name for the agent's commits (blank = skip)" "$default_git_name"
   if [ -n "$GIT_AUTHOR_NAME" ]; then
     ask GIT_AUTHOR_EMAIL "Git author email" "$default_git_email"
@@ -1208,6 +1220,19 @@ write_env() {
   sync_stored_credential "$file"
 }
 
+# The signed URL the runtime prints on boot. The bare origin answers 401; this is
+# the link a browser can actually use, and a restart mints a new one. Read it
+# from the runtime's own log so a fresh install ends with something clickable.
+web_url() {
+  local logs
+  if [ "$MODE" = docker ]; then
+    logs="$(docker compose logs dsh 2>/dev/null || true)"
+  else
+    logs="$(journalctl -u dsh.service --no-pager -o cat 2>/dev/null || true)"
+  fi
+  printf '%s\n' "$logs" | grep -oE 'https?://[^[:space:]]*[?&]token=[^[:space:]]*' | tail -1
+}
+
 wait_health() {
   local timeout="${1:-180}"
   local deadline=$((SECONDS + timeout)) i
@@ -1547,7 +1572,17 @@ if [ "$MODE" = docker ]; then docker_apply; else native_apply; fi
 
 echo
 log "installed: $SETUP_VERSION ($MODE mode)"
-printf '    web:     %s\n' "http://$DSH_BIND_IP:$DSH_PORT/ (send /web in the bot chat for a signed link)"
+signed_url="$(web_url)"
+if [ -n "$signed_url" ]; then
+  printf '    web:     %s\n' "$signed_url"
+else
+  printf '    web:     %s\n' "http://$DSH_BIND_IP:$DSH_PORT/ — the signed ?token= link is in the log (grep 'dsh web:')"
+fi
+if [ -n "$DSH_TELEGRAM_BOT_TOKEN" ]; then
+  printf '    bot:     configured — send /web in the chat for a fresh signed link\n'
+else
+  printf '    bot:     not configured (web-only) — add DSH_TELEGRAM_BOT_TOKEN to %s/.env, then restart\n' "$DIR"
+fi
 case "$MODE" in
   docker) printf '    logs:    docker compose logs -f dsh\n' ;;
   native) printf '    logs:    journalctl -u dsh.service -f\n' ;;

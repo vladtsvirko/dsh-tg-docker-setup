@@ -3,9 +3,9 @@
 The setup repo ships one aligned release together with DSH and the connector:
 
 ```
-VERSION:      0.2.1-rc.5-0.6.4
-git tag:      v0.2.1-rc.5-0.6.4
-image:        dsh-backend:0.2.1-rc.5-0.6.4
+VERSION:      0.2.1-rc.5-0.6.5
+git tag:      v0.2.1-rc.5-0.6.5
+image:        dsh-backend:0.2.1-rc.5-0.6.5
 Dockerfile:   ARG DSH_VERSION=0.2.1-rc.5
 ```
 
@@ -41,8 +41,11 @@ Dockerfile:   ARG DSH_VERSION=0.2.1-rc.5
    `cp .env.example .env`, never overwrite a deployed one).
 4. Commit and tag the matching **connector** release first; the setup image must
    resolve that tag while it builds.
-5. Commit, tag and push the setup. CI runs `scripts/check-version.mjs`; both
-   repositories' tags must agree.
+5. Commit, tag and push the setup. CI runs `scripts/check-version.mjs`
+   (VERSION, image tags, Dockerfile args) and, on a tag build, proves the
+   matching connector tag exists with `git ls-remote`. It does not compare the
+   connector's `package.json`; the connector's own CI checks its half, so the
+   version *values* still have to be kept in step by this checklist.
 
 `/system update all` is the normal no-SSH path: it drains agents, then the
 `updater` sidecar runs `update.sh --self-to <target>`, which rebuilds and starts

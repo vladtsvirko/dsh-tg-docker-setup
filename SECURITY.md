@@ -34,7 +34,10 @@ run the runtime itself as root.
   (the `data/` volume and `.env` are ignored).
 - `/data` is the only persistent path. Back it up; anyone with it has the session
   history and the profile.
-- `ALLOWED_USER_IDS` is the only gate on Telegram. Empty refuses everyone.
+- `ALLOWED_USER_IDS` is the gate for using the bot; `DSH_ADMIN_USER_ID` is the
+  separate gate for changing the deployment (restart, update, rollback, plugins,
+  workspaces). Empty allowlist refuses everyone. The connector's inline buttons
+  currently check the allowlist only — see its `SECURITY.md`.
 - The supervisor's control socket is loopback-only and bearer-authenticated; its
   token is generated per container start.
 - The one-shot `init` service runs as root only to chown `./data` to `DSH_UID`.

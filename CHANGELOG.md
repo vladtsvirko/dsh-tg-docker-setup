@@ -7,21 +7,49 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
+## 0.2.1-rc.5-0.6.5
+
+A fixes release: one security hole closed in the connector, and the installer
+now ends with a usable link instead of an origin that answers 401.
+
+### Fixed
+
+- **`--self-to` no longer bypasses the version policy.** The host path checked
+  only "newer tag and descendant", so it could cross a DSH line or a product
+  major with no flag while `/system update all` and `--self` refused. It now
+  enforces the same rule and accepts
+  `--i-know-versions-are-incompatible`; the updater passes that flag only after
+  its own `/update` check accepted the crossing.
+- **A repair keeps the deployed git author.** The prompt defaulted to the
+  invoking user's global identity — `root` when the installer ran under `sudo` —
+  and rewrote `data/home/.gitconfig` on every run. It now prefers the deployed
+  config, then the `SUDO_USER`'s identity, so an ordinary re-run keeps the
+  agent's commits as they were.
+- **The sudo re-exec keeps the mode answer.** `MODE`, `TIER` and `DESIGN` are
+  passed through, so a native install no longer re-asks the mode with the docker
+  default after escalating.
+
+### Changed
+
+- **The install summary prints the signed web URL.** The runtime's `?token=`
+  link is read back from its own log; the bare origin (401) is only the fallback
+  when the log cannot be read. The summary also says whether Telegram is
+  configured, instead of always telling a web-only deployment to send `/web`.
+- The compose `updater` service now receives
+  `DSH_UPDATE_TIMEOUT_SECONDS` (default 1800), so the apply deadline is tunable
+  from `.env` without handing it the whole environment.
+- `image-build.yml` builds the updater image too; a tag build checks that the
+  matching connector tag exists (`git ls-remote`), the one coupling rule no
+  local script could verify.
+- `components.json` pins `dsh-penpot-plugin#v0.1.1`, whose release documents the
+  setup's design component as the primary install path.
+
 ## 0.2.1-rc.5-0.6.4
 
 ### Fixed
 
-- **The instance marker was invalid JSON.** An editing pass collapsed `$` to
-  `# Changelog
-
-The setup repo ships in lockstep with `dsh-telegram-connector`: `VERSION` is the
-tag, the image tag and the connector tag at once. Connector-side changes are in
-that repository's changelog; this file records what the installer, the
-supervisor, the updater and the entrypoint changed.
-
-Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
-
- in `entrypoint.sh`, so the marker read
+- **The instance marker was invalid JSON.** An editing pass dropped the `$` in
+  `entrypoint.sh`, so the marker read
   `{"id":"…","mode":"native","pid":,"version":"…"}` — no process id, unparseable.
   Nothing failed visibly: the flock guard still held, but the doctor could not
   name the holder (`stale marker from pid ?`) and the connector could not tell

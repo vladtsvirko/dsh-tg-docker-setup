@@ -11,8 +11,11 @@ Telegram → connector → dsh runtime / supervisor
                     └→ updater sidecar → docker → host
 ```
 
-Telegram is the **only** ordinary control path. There is no systemd unit, no
-host shell exposed to the bot, and no Docker socket in the runtime container.
+Telegram is the **only** ordinary control path. There is no host shell exposed to
+the bot, and no Docker socket in the runtime container. In docker mode the bot
+container also has no systemd unit; in native mode it is a systemd service, but
+still with no shell or Docker socket for the bot (the updater service is the only
+privileged unit).
 
 ### Covered without a host shell
 
@@ -127,7 +130,9 @@ See [HOST.md](HOST.md) for the layout, tiers and switching.
 - `DSH_UPDATER_TOKEN` empty disables apply; `/system update all` degrades to
   diagnostics/host instructions.
 - `DSH_BIND_IP` publishes the web UI on one host interface. Never use `0.0.0.0`;
-  the UI drives a shell. `127.0.0.1` means host-only, normally via an SSH tunnel.
+  the UI drives a shell. `127.0.0.1` means host-only, normally via an SSH tunnel,
+  and requires `DSH_PUBLIC_URL=http://127.0.0.1:<port>/` as well — without it the
+  UI advertises the container's own address and reconnects forever.
 - `ALLOWED_USER_IDS` is the only Telegram authorization gate. Empty refuses
   everyone, including the owner.
 - The web URL token and its signed cookie are credentials. Do not paste them into
@@ -157,6 +162,11 @@ See [HOST.md](HOST.md) for the layout, tiers and switching.
   threads inside topics.
 - The web UI is plain HTTP on the LAN unless a proxy provides TLS. The token and
   cookie cross that LAN in clear text.
+- TLS is a proxy's job: the image ships no certificate mount, and the entrypoint
+  does not pass `--tls-cert`/`--tls-key`. Terminate TLS in front, set
+  `DSH_PUBLIC_URL` to the **https** root, and keep one authority: the entrypoint
+  derives the single trusted host from `DSH_PUBLIC_URL`, so a second proxy
+  hostname answers 403 until it is the configured one.
 
 ## Version restrictions
 

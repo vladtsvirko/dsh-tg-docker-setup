@@ -43,6 +43,11 @@ for a provider and a token, and writes `secrets/git/profiles.json` (0600, owned 
 the runtime user) with that identity and token. Native installs keep the same file
 inside the deployment (`<dir>/secrets/git`) and point `DSH_GIT_SECRETS` at it.
 
+What the installer writes is deliberately the simple half: **one HTTPS `default`
+profile**. SSH keys, `token_file`, per-workspace profiles and custom hosts are
+manifest-only — write those by hand, the installer will not overwrite a manifest
+it did not generate with those fields.
+
 Create it by hand instead, from the example:
 
 ```sh
@@ -279,6 +284,33 @@ docker compose exec dsh /usr/local/bin/dsh-git-credentials
 
 A restart does the same thing. If generation fails, the entrypoint warns and the
 runtime still boots; the last good files stay in place.
+
+## Adding a project over SSH
+
+A workspace is a directory under `/data/workspace`, and the manifest key is that
+directory's name — so create the workspace first, then put the repository in it.
+
+```sh
+# 1. register the workspace: /workspace new web-app in Telegram, or the web UI
+# 2. clone from inside the runtime, where the generated gitconfig applies
+docker compose exec dsh git clone git@github.com:you/private-repo.git /data/workspace/web-app
+# native: run as the service user with HOME=<dir>/data/home so the same
+#         gitconfig is read
+```
+
+A clone run from the **host** uses the host's own git and never reads the
+manifest, so the credential helper and key do not apply; the agent's bash tool
+(inside the runtime) and `docker compose exec` do. The SSH profile supplies the
+key and `known_hosts`, and git runs ssh with them via `core.sshCommand`, so no
+`~/.ssh/config` entry is needed. Two things bite:
+
+- the private key must be readable by the **runtime user** — mode `0600`, owned
+  by it, and inside `secrets/git/` (mounted read-only at `/run/secrets/git`);
+- `known_hosts` is required; there is no `StrictHostKeyChecking=no` fallback.
+
+A clone one level deeper (`web-app/private-repo`) still inherits the workspace
+profile, because the `includeIf` matches the workspace directory, not the
+repository.
 
 ## Verify
 

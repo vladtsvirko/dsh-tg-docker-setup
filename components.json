@@ -3,7 +3,7 @@
   "components": {
     "design": {
       "label": "Design (Penpot)",
-      "description": "Penpot and the headless MCP bridge",
+      "description": "Penpot and the penpot CLI",
       "compose": "design/compose.yaml",
       "projectDir": "design",
       "envFile": "design/.env",
@@ -33,7 +33,7 @@
         "cli": "penpot"
       },
       "plugin": {
-        "ref": "github:vladtsvirko/dsh-penpot-plugin#v0.1.0",
+        "ref": "github:vladtsvirko/dsh-penpot-plugin#v0.1.1",
         "package": "dsh-penpot-plugin"
       },
       "network": "dsh-design"

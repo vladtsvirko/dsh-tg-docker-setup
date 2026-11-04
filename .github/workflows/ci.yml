@@ -58,3 +58,14 @@ jobs:
 
       - name: Validate release tag
         run: node scripts/check-version.mjs
+
+      # check-version.mjs only validates this repository's half. A setup tag
+      # without a matching connector tag leaves the bot uninstalled, so a tag
+      # build also proves the connector side exists.
+      - name: Connector tag exists
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="$(cat VERSION)"
+          git ls-remote --exit-code --tags https://github.com/vladtsvirko/dsh-telegram-connector.git "refs/tags/v${tag}" >/dev/null \
+            || { echo "::error::connector has no tag v${tag}"; exit 1; }
+          echo "connector tag v${tag} exists"

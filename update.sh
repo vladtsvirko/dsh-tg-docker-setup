@@ -8,8 +8,9 @@
 #   ./update.sh --self-check # latest compatible tag? change nothing
 #   ./update.sh --self [--i-know-versions-are-incompatible]
 #                            # jump to the latest compatible tag, build, health gate, rollback
-#   ./update.sh --self-to <tag>
-#                            # exact target (used by the updater sidecar)
+#   ./update.sh --self-to <tag> [--i-know-versions-are-incompatible]
+#                            # exact target (used by the updater sidecar);
+#                            # crossing a DSH line or a product major needs the flag
 #
 # Run it from this directory (next to compose.yaml and .env).
 #
@@ -545,7 +546,7 @@ restore_state() {
 }
 
 self_update() {
-  local allow=${1:-0} override=${2:-} cur target all prev_image snapshot
+  local allow=${1:-0} override=${2:-} override_allow=${3:-0} cur target all prev_image snapshot
   [ -z "$(git status --porcelain)" ] || die "working tree is dirty — commit or stash first"
   git fetch --tags --quiet origin || die "git fetch failed"
   cur="$(current_tag)" || die "cannot determine the deployed tag — check out the tag that is running"
@@ -556,6 +557,13 @@ self_update() {
     [ "$target" != "$cur" ] || die "target is already running"
     grep -Fqx -- "$target" <<<"$all" || die "target $target is not a newer aligned tag"
     git merge-base --is-ancestor "$cur" "$target" || die "target $target is not a descendant of $cur"
+    # --self-to is the raw explicit path, but it is not a policy bypass: the same
+    # rule as --self applies unless the caller says it means to cross. The
+    # updater passes the flag only after its own /update check accepted it.
+    if [ "$allow" != 1 ] && [ "$override_allow" != 1 ] &&
+       { [ "$(tag_dsh "$target")" != "$(tag_dsh "$cur")" ] || [ "$(tag_major "$target")" != "$(tag_major "$cur")" ]; }; then
+      die "target $target crosses a DSH line or a product major — pass --i-know-versions-are-incompatible"
+    fi
   else
     if [ -z "$all" ]; then
       log "no newer tag after $cur — nothing to do"
@@ -917,8 +925,12 @@ case "${1:---status}" in
     else self_update 0; fi
     ;;
   --self-to)
-    [ -n "${2:-}" ] || die "usage: ./update.sh --self-to <tag>"
-    self_update 0 "$2"
+    [ -n "${2:-}" ] || die "usage: ./update.sh --self-to <tag> [--i-know-versions-are-incompatible]"
+    case "${3:-}" in
+      "") self_update 0 "$2" 0 ;;
+      --i-know-versions-are-incompatible) self_update 0 "$2" 1 ;;
+      *) die "unknown option for --self-to: ${3}" ;;
+    esac
     ;;
   *)
     sed -n '3,14p' "$0" | sed 's/^# \{0,1\}//'

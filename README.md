@@ -15,6 +15,10 @@ off — a nested sandbox inside a container is unreliable and *fails closed*, wh
 would break the bash tool. What the agent can touch is exactly what the image and
 the `/data` volume expose; nothing else on the server is mounted.
 
+**First time here?** [docs/FIRST-RUN.md](docs/FIRST-RUN.md) is the short
+walkthrough — one command, the web link, the Telegram group, and how to move a
+session between the two. This page is the reference behind it.
+
 ## Files
 
 | File | Purpose |
@@ -27,8 +31,16 @@ the `/data` volume expose; nothing else on the server is mounted.
 | `.env.example` | Every knob, with comments |
 | `update.sh` | Check / apply / roll back dsh updates, refresh the adapter |
 | `updater.mjs`, `updater.Dockerfile` | Privileged sidecar for `/system update all`; no published port |
+| `docs/FIRST-RUN.md` | The guided first run: install, web link, Telegram group, switching clients |
 | `docs/VERSIONS.md` | Version scheme, release coupling and update rules |
+| `docs/UPGRADE.md` | Upgrading, the health gate vs. a trial, and the rollback drill |
+| `docs/SELF-UPDATE.md` | `update.sh --self` in detail, including native mode |
+| `docs/UPDATER.md` | The privileged sidecar behind `/system update all` |
+| `docs/GIT.md` | Repository access: HTTPS tokens and SSH keys, per workspace |
+| `docs/UAT.md` | The acceptance run for a release, both modes |
 | `docs/LIMITS.md` | What works without a host shell, what still needs one, and the hard limits |
+| `install.example.env` | Every answer `install.sh --config` accepts, in one file |
+| `host-install/` | **Superseded** (pre-`install.sh` host setup); kept for reference only |
 | `SECURITY.md` | Reporting, and the deployment's own rules |
 | `LICENSE` | MIT |
 | `.github/workflows/ci.yml` | Supervisor tests and shell syntax checks |
@@ -49,14 +61,14 @@ working runtime and no bot.
 | You need | Why | Where |
 |---|---|---|
 | A fresh Ubuntu 24.04 / Debian 12 host (or any distro with the packages below) | the installer targets these | your VPS or machine |
-| Docker + Compose (docker mode) or Node ≥ 22 + systemd (native) | the runtime | **the installer installs them** — Docker via apt, Node via NodeSource — unless you pass `--no-deps` |
+| Docker + Compose (docker mode) or Node ≥ 22.19 + systemd (native) | the runtime | **the installer installs them** — Docker via apt, Node via NodeSource — unless you pass `--no-deps` |
 | A provider API key | the agent cannot answer without one | the installer now asks for it |
 | A bot token | the Telegram surface | [@BotFather](https://t.me/BotFather) → `/newbot` |
 | **Privacy mode off** for that bot | otherwise it never sees plain messages in topics, which is the whole input path | `/setprivacy` → Disable |
 | A group with **Topics enabled**, bot as admin with *Manage Topics* | groups are workspaces, topics are sessions | group settings |
 | Your numeric Telegram id | the allow-list is empty by default and the bot refuses everyone else | [@userinfobot](https://t.me/userinfobot) |
 
-The bot cannot create the group; `workspace new` prints a one-tap
+The bot cannot create the group; `/workspace new` prints a one-tap
 `?startgroup=` link, and you create it.
 
 ## Install
@@ -97,10 +109,15 @@ curl -fsSL …/install.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.6.4`, and put the checkout elsewhere with `--dir`. If Docker or
-Node is already installed and you would rather manage it yourself, pass
-`--no-deps`: the installer then fails with the exact command to run instead of
-touching apt.
+v0.2.1-rc.5-0.6.5`. `--dir` moves where the one-liner checks the release out
+(default `/opt/dsh-setup` as root, `~/dsh-setup` otherwise); in docker mode the
+deployment then runs from that checkout, so it is not a "data elsewhere" flag —
+native mode is the one with a separate `/srv/dsh` default. If Docker or Node is
+already installed and you would rather manage it yourself, pass `--no-deps`: the
+installer then fails with the exact command to run instead of touching apt.
+
+`--check` needs `git` to fetch the release it is going to describe; on a host
+without git it can only say so and exit.
 
 ### From a checkout
 
@@ -133,7 +150,63 @@ Switching modes stops the other mode first (one poller per bot token) but does
 native, so point both at the same directory with `--dir`, or copy the data over
 yourself, before switching. [docs/HOST.md](docs/HOST.md) walks through it.
 
-## Quick start
+## First run
+
+Use the installer — it asks the questions, writes `.env`, installs the
+connector at the pinned tag, starts the runtime under the supervisor, creates an
+updater token, and finishes with a health check:
+
+```sh
+./install.sh
+```
+
+Then:
+
+1. **Open the web UI.** The installer reads the runtime's log and prints the
+   signed URL (it carries a `?token=`). If it could not read the log, the bare
+   origin it falls back to answers **401** on purpose — the signed link is in
+   the runtime log:
+
+   ```sh
+   docker compose logs dsh | grep 'dsh web:'      # native: journalctl -u dsh.service | grep 'dsh web:'
+   ```
+
+   That URL is a credential, and a restart mints a new one.
+2. **Bind a Telegram group.** In the bot chat: `/workspace new web-app`, tap the
+   `?startgroup=` link, and pick a group with **Topics** enabled and the bot as
+   admin. `/new` in its General topic starts a session; a topic is a session.
+3. **Check both sides.** `/system status` reports the runtime, the web port, the
+   key, and how many workspaces the registry and Telegram each know.
+
+[docs/FIRST-RUN.md](docs/FIRST-RUN.md) walks the same steps with the failure
+modes; [docs/UAT.md](docs/UAT.md) is the exhaustive acceptance run.
+
+### Switching between Telegram and the web UI
+
+One runtime, one profile, one session store: the two clients are views of the
+same thing, not two installations.
+
+- `/web` in the bot chat prints a signed link into the same sessions. Treat it
+  like a password.
+- A prompt sent in the browser is echoed into that session's topic (`💬 you
+  (web) · …`), and its answer appears in both places.
+- A session has **one live agent**. If a browser tab holds it, a Telegram prompt
+  is refused and a **Take over** button appears; the message is queued, and
+  taking over restarts the runtime — releasing *every* handle, not just that
+  session's — then delivers it. Closing the tab is the cheaper move.
+- A session created in Telegram is an ordinary DSH session, so the web UI lists
+  it. The other direction needs `/sync` in the group to give each web session a
+  topic.
+
+There is no export/import between the surfaces; the runtime is the only store.
+
+## Manual install (advanced, compose only)
+
+`install.sh` is the supported path because it also does what this section does
+not: an updater token (without one `/system update all` is only a diagnostic), a
+git author for the agent's commits, the profile repair pass, and the mode
+switch. Use the manual path only when building an image by hand or debugging
+the stack.
 
 ### Stage 1 — local only (no Telegram)
 
@@ -266,17 +339,18 @@ container is disposable and disappears with the container.
 |---|---|
 | `DSH_PROVIDER` / `DSH_MODEL` | Model route. Default `opencode-go` / `deepseek-v4.1-flash`; `deepseek-official` / `deepseek-v4-flash` also supported. |
 | `OPENCODE_GO_API_KEY` | Key for the default route. The entrypoint warns at boot if the matching variable is empty. |
-| `DSH_PUBLIC_URL` | The root the browser dials for API + WebSocket. Defaults to `http://$DSH_BIND_IP:$DSH_PORT/`; set it when you use a hostname, proxy or VPN name. |
-| `DSH_BIND_IP` | The web UI is published only on this host interface. `127.0.0.1` = host-only (use an SSH tunnel). Never publish on `0.0.0.0` — the UI drives a shell. |
+| `DSH_PUBLIC_URL` | The root the browser dials for API + WebSocket, and the only authority trusted for the web app. Defaults to `http://$DSH_BIND_IP:$DSH_PORT/`; set it when you use a hostname, proxy or VPN name. With `DSH_BIND_IP=127.0.0.1` you **must** set it (see below). |
+| `DSH_BIND_IP` | The web UI is published only on this host interface. `127.0.0.1` = host-only, normally via `ssh -L <port>:127.0.0.1:<port>`; also set `DSH_PUBLIC_URL=http://127.0.0.1:<port>/`, otherwise the UI advertises the container address and reconnects forever. Never publish on `0.0.0.0` — the UI drives a shell. |
 | `DSH_UID` / `DSH_GID` | Must match the owner of `./data`, or the container can't write. `id -u; id -g`, then rebuild. |
-| `ALLOWED_USER_IDS` | The only gate on Telegram. Empty rejects everyone (including you). |
+| `ALLOWED_USER_IDS` | Who may use the bot. Empty rejects everyone (including you). |
+| `DSH_ADMIN_USER_ID` | The one account allowed to restart, update, roll back, install plugins and create/bind workspaces. Blank means the control-chat owner, so an upgraded deployment cannot lock itself out. |
 | `DSH_TELEGRAM_ENABLED` | `auto` / `on` / `off`. Leave `auto`: the adapter is on exactly when a token is set. |
 | `DSH_MEM_LIMIT` / `DSH_CPUS` / `pids_limit` | What stops one runaway command from taking the host down. |
 | `DSH_PERMISSION_MODE` | Keep `danger-full-access`. Setting `workspace-write` re-enables the nested sandbox, which will fail closed in here. |
 | `DSH_TRIAL_SECONDS` | Rollback window for a trial, default `300` (5 min). Waiting longer is safer for slow checks; shorter is easier on a broken bot. |
 | `DSH_BOOT_GRACE_SECONDS` | How long a trial runtime may stay up without checking in, default `120`. After that it is rolled back. |
-| `DSH_UPDATE_TIMEOUT_SECONDS` | How long `/system update connector` may spend in `reset-plugin`, default `900`. |
-| `DSH_UPDATER_TOKEN` | Shared bearer token for the updater sidecar. Empty disables apply; `/system update all` becomes a diagnostic that prints the host fallback. |
+| `DSH_UPDATE_TIMEOUT_SECONDS` | One variable, two deadlines: the supervisor's connector/component jobs default to `900` (15 min), the updater's setup apply to `1800` (30 min). The compose updater does not read `.env` (no `env_file`), so in docker mode the apply deadline is fixed at 30 min unless you add the variable to that service. |
+| `DSH_UPDATER_TOKEN` | Shared bearer token for the updater sidecar. Empty makes the sidecar answer `503` and `/system update all` degrade to a diagnostic that prints the host fallback — but the socket-mounted sidecar still runs. Stop or remove the `updater` service if you do not want that surface at all. |
 | `DSH_DOCKER_GID` | GID of the host docker group; lets the updater use the socket without root. `getent group docker \| cut -d: -f3`. |
 
 ## Versioning and compatibility
@@ -284,7 +358,7 @@ container is disposable and disappears with the container.
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.6.4
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.6.5
          DSH part          product part
 ```
 
@@ -296,8 +370,11 @@ The connector and the setup ship as **one tag**:
 - Crossing a DSH line or product major requires the explicit
   `--i-know-versions-are-incompatible`; neither `/system` nor a scheduled update
   crosses on its own.
-- Tags are immutable. The setup `VERSION`, image tags, Dockerfile args and the
-  connector `package.json` must agree; CI enforces this.
+- Tags are immutable. The setup `VERSION`, image tags and Dockerfile args must
+  agree, and this repository's CI checks exactly those on a `v*` tag. The
+  connector `package.json` must carry the same version, but each repository only
+  checks its own half — the pair is enforced by the release checklist, not by a
+  cross-repository gate.
 
 The entrypoint does not float the connector. It forces
 `github:vladtsvirko/dsh-telegram-connector#v${DSH_SETUP_VERSION}` (the setup tag)
@@ -450,6 +527,14 @@ From the bot chat:
 | `/system update all` | drain all agents, then update the setup image through the updater sidecar; automatic rollback on failed health |
 | `/system confirm` | commit the trial: this state becomes the new rollback point |
 | `/system rollback` | restore the last committed **profile** state and restart (does not move the image) |
+| `/system cancel` | abandon a pending update and unblock the bot; after acceptance it stops the updater job |
+| `/system manage` | optional components (the design stack): a card with Enable/Disable/Port buttons |
+| `/web` | a signed link into the web UI for the same sessions (bot chat only) |
+| `/firewall` | native only: whether ufw lets the web UI through, and the `/firewall allow <port>` fix |
+
+This table is the short version; the connector's
+[`docs/COMMANDS.md`](https://github.com/vladtsvirko/dsh-telegram-connector/blob/main/docs/COMMANDS.md)
+is the full command reference, and `/man` in the bot prints the same text.
 
 The trial announcement carries **Commit** and **Roll back** buttons; the
 commands do the same thing. Every confirmed plugin change opens a trial *before*
@@ -502,9 +587,23 @@ procedure, not `/system rollback`. The full boundary is in
 ### Repairing and diagnosing
 
 Re-running `./install.sh` is the repair path: it reads the deployment's `.env`,
-keeps every value it already has (including the provider key) and re-applies the
-units, the launcher and the runtime. Two commands answer "what is wrong right
-now?" without changing anything:
+keeps the values it already has (including the provider key) and re-applies the
+units, the launcher and the runtime.
+
+Two caveats before you rely on it:
+
+- **A failed repair is not rolled back.** `.env`, the units and the profile
+  config are written before the build and the health check, so a health failure
+  exits with the deployment stopped and no previous state to return to. Copy
+  `.env` (and, if in doubt, `data/`) first, or keep a recent
+  `backups/self-*.tgz`.
+- **The git author is preserved by default.** The prompt offers the identity
+  already in `data/home/.gitconfig` (then the invoking user's, then the
+  `sudo` user's), so a re-run keeps the agent's commits as they were; answer
+  differently, or set `GIT_AUTHOR_NAME`/`GIT_AUTHOR_EMAIL`, only when you mean
+  to change it.
+
+Two commands answer "what is wrong right now?" without changing anything:
 
 ```sh
 ./install.sh --doctor          # or ./update.sh --doctor — same checks
@@ -611,9 +710,12 @@ deliberate — a container that silently changes the software running your shell
 a worse failure mode than a Monday morning bump you can roll back.
 
 The updater sidecar is the one privileged component: it mounts the Docker socket
-(no published port, internal `ops` network, bearer token) because rebuilding an
-image from inside the runtime is impossible otherwise. The bot container never
-gets the socket. Keep `DSH_UPDATER_TOKEN` empty if you do not want that surface.
+(no published port; reachable on the internal `ops` network with a bearer token,
+plus `default`/`design` for egress) because rebuilding an image from inside the
+runtime is impossible otherwise. The bot container never gets the socket.
+`DSH_UPDATER_TOKEN` empty makes the sidecar refuse work, but it still runs with
+the socket mounted; to remove that surface, stop and delete the `updater`
+service (then `/system update all` reports the host fallback).
 
 Telegram is still the only **normal** control path. If the bot cannot load, the
 updater is wedged, Docker is down, or the host needs a `.env`/disk/ownership
@@ -640,18 +742,19 @@ container's subnet. Worth doing if you ever expose the bot to a group chat.
 | `adapter install failed` in log | no egress during first boot, or the version gate | check `docker compose exec dsh cat /tmp/plugin-install.log`; then `docker compose run --rm dsh init` |
 | Web UI 200 but API calls 403 | opened the bare origin instead of the `?token=` URL | use the URL from the log, or set `--trusted-host` |
 | `failed to bind host port …: cannot assign requested address` | `DSH_BIND_IP` isn't an address of this host | derive it with `ip route get 1.1.1.1`, fix `.env`, `docker compose up -d` |
-| Connection refused on the web port after a container recreate | old images bound the first `hostname -I` address, which can be the internal `ops` network instead of the published default network | update to `0.1.10` or newer; the entrypoint now binds the default-route address and the updater verifies the published port |
+| Connection refused on the web port after a container recreate | old images bound the first `hostname -I` address, which can be the internal `ops` network instead of the published default network | upgrade to a current release; the entrypoint now binds the default-route address and the updater verifies the published port |
 | `docker compose ps` shows `(health: starting)` for a long time | the probe runs every 10s; the first ones land before the runtime is listening | `docker compose exec dsh /usr/local/bin/dsh-healthcheck; echo $?` — `0` means it is serving, whatever `ps` says |
 | UI loads but keeps saying **reconnecting** | the browser dials the address the container advertises (`172.x`), which it cannot reach | set `DSH_PUBLIC_URL` to the root you actually use, e.g. `http://192.0.2.10:4310/` (a documentation address; use your own) |
 | Bot silent after a dsh upgrade | adapter no longer mounts | re-grant the exemption, or move to the previous setup tag |
 | Bot says `⛔ You are not authorized` | your id isn't in `allowedUserIds` | add it to `ALLOWED_USER_IDS` in `.env`, then `docker compose up -d dsh` |
 | `no space left on device` | sessions + pnpm store in `/data/home` | prune old sessions, move `DSH_HOME` to a bigger volume |
 | `/system update all` says updater unreachable | updater not running, token mismatch, or wrong `DSH_DOCKER_GID` | `docker compose ps updater`; `docker compose logs updater` |
-| `/system update all` says `canApply` false | `DSH_UPDATER_TOKEN` is empty | set it in `.env` and `docker compose up -d updater` |
+| `/system update all` says the updater is disabled / answers `503` | `DSH_UPDATER_TOKEN` is empty | set it in `.env` and `docker compose up -d updater`; `canApply` is only ever false when the sidecar runs with `--no-apply` |
 | Updater can't access Docker | `DSH_DOCKER_GID` does not match `getent group docker` | fix `.env`, `docker compose up -d updater` |
 | Model calls fail after re-running the installer | the runtime prefers a key stored by the web UI over `.env` (or `.env` has two copies) | `./install.sh --doctor --fix`, then restart |
 | Web UI lists no workspace after a restart, Telegram still does | the connector's bindings and the runtime's registry disagree | `/sync` in the group repairs it; the connector retries at boot |
 | Telegram: "this session is held by another client" right after a restart | a second runtime over the same data directory holds the lock | `./install.sh --doctor` names it; stop the other mode, then `/system restart now` |
+| Telegram: "this session is open in a web UI tab…" | a browser tab owns the session's write handle | the prompt is queued; tap **Take over** (restarts the runtime) or close the tab and resend |
 
 If you are validating a release, [`docs/UAT.md`](docs/UAT.md) is the
 step-by-step acceptance run for both modes.

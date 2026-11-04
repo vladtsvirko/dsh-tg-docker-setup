@@ -16,7 +16,7 @@ services:
   # on `mkdir /data/home`. This container chowns the mount, then exits; it has no
   # network, a read-only rootfs, and only the two capabilities chown needs.
   init:
-    image: dsh-backend:0.2.1-rc.5-0.6.4
+    image: dsh-backend:0.2.1-rc.5-0.6.5
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -56,7 +56,7 @@ services:
       args:
         DSH_UID: ${DSH_UID:-1000}
         DSH_GID: ${DSH_GID:-1000}
-    image: dsh-backend:0.2.1-rc.5-0.6.4
+    image: dsh-backend:0.2.1-rc.5-0.6.5
     container_name: dsh
     depends_on:
       init:
@@ -120,7 +120,7 @@ services:
     build:
       context: .
       dockerfile: updater.Dockerfile
-    image: dsh-updater:0.2.1-rc.5-0.6.4
+    image: dsh-updater:0.2.1-rc.5-0.6.5
     restart: unless-stopped
     stop_grace_period: 10s
     user: "${DSH_UID:-1000}:${DSH_GID:-1000}"
@@ -137,6 +137,10 @@ services:
       DSH_UPDATER_PORT: "8787"
       DSH_UPDATER_TOKEN: ${DSH_UPDATER_TOKEN:-}
       DSH_TELEGRAM_BOT_TOKEN: ${DSH_TELEGRAM_BOT_TOKEN:-}
+      # The updater's own apply deadline (its default is 1800 when unset).
+      # Passed explicitly so .env can tune it without an env_file (which would
+      # hand the updater every secret in the file).
+      DSH_UPDATE_TIMEOUT_SECONDS: ${DSH_UPDATE_TIMEOUT_SECONDS:-1800}
     volumes:
       # Same absolute path inside the container, so `docker compose` run by the
       # updater resolves ./data to the real host paths.

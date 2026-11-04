@@ -40,6 +40,11 @@ The data layout is the same directory tree, so a deployment can be moved between
 modes by pointing `--dir` at it (data is not converted, and the other mode is
 stopped first).
 
+Not every key is shared: `DSH_CPUS`, `DSH_MEM_LIMIT`, `DSH_DOCKER_GID` and
+`pids_limit` are compose-only (native has no cgroup wrapper; hardening comes from
+the systemd unit), and the native unit pins `DSH_PERMISSION_MODE` itself. Both
+modes read the same `.env`, but a compose-only key is simply ignored natively.
+
 ## What is intentionally different
 
 | Area | Native | Docker | Why |

@@ -23,10 +23,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build the runtime image
+      - name: Build the runtime and updater images
         run: |
           cp .env.example .env
-          docker compose build dsh
+          docker compose build dsh updater
 
       - name: The image carries the penpot CLI
         run: docker run --rm --entrypoint /usr/local/bin/penpot dsh-backend:$(cat VERSION) --help | head -5

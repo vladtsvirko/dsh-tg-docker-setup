@@ -14,19 +14,22 @@ repository.
 
 ```
 <dsh-version>-<major>.<minor>.<patch>          tag: v<same>
-v0.2.1-rc.5-0.6.4
+v0.2.1-rc.5-0.6.5
 ```
 
 - **DSH part** (`0.2.1-rc.5`) is the exact DSH release the pair was built and
   tested against. Prerelease suffixes are part of the version.
-- **Product part** (`0.3.1`) is ours.
+- **Product part** (`0.6.4`) is ours.
   - It resets to `0.0.0` when the pair aligns to a new DSH line.
   - `0.x` is the compatible line. A patch is a fix, a minor is a compatible
     feature, and `1.0.0` (or any new major) marks an incompatible change.
   - Never ship a breaking change in the `0.x` line.
 - Tags are immutable. Do not move, delete, or reuse a released tag.
-- The tag, connector `package.json`, setup `VERSION`, the image tags and the
-  Dockerfile build args must agree; CI checks this on the tag.
+- The tag, setup `VERSION`, the image tags and the Dockerfile build args must
+  agree; this repository's CI (`scripts/check-version.mjs`) checks exactly those
+  on a `v*` tag. The connector `package.json` must carry the same version, but
+  that half is checked by the connector's own CI: nothing in this repository
+  reads the connector, so the pair is a release-checklist rule, not a gate.
 
 ## Why the versions are coupled
 

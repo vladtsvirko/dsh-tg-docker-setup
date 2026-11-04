@@ -15,11 +15,12 @@ docs) to a release tag. Neither pulls `main`.
 ./update.sh --self-check   # fetch tags, show the target and its commits; change nothing
 ./update.sh --self         # latest compatible tag, build, health gate, rollback
 ./update.sh --self --i-know-versions-are-incompatible   # allow a major/DSH jump
-./update.sh --self-to v0.2.1-rc.5-0.6.4                # exact target, used by the updater
+./update.sh --self-to <newer tag>                      # exact target, used by the updater
 ```
 
-`--self-check` exits `0` when there is no newer compatible tag, `2` when there is,
-and `1` on an error. `--self` asks for confirmation unless `ASSUME_YES=1`.
+`--self-check` exits `0` when there is no newer tag at all, `2` when a newer tag
+exists (compatible or only incompatible — it prints which), and `1` on an error.
+`--self` asks for confirmation unless `ASSUME_YES=1`.
 
 Every successful update ends with the same health check an install runs
 (`scripts/repair.sh --fix`, exposed as `./update.sh --doctor`). It catches the
@@ -27,16 +28,19 @@ files an update rewrites — `.env`, the profile patch, the stored credential �
 so a half-applied change is repaired before the next boot instead of surfacing
 as a model call that fails for no visible reason.
 `--self-to` requires the target to be a newer aligned tag and a descendant of the
-running one.
+running one, and it enforces the same compatibility rule as `--self`: crossing a
+DSH line or a product major needs `--i-know-versions-are-incompatible`. The
+updater passes that flag only after its own `/update` check accepted the
+crossing, so an unattended update cannot cross on its own.
 
 ## Tag convention
 
 Tags match `<dsh>-<major>.<minor>.<patch>`, for example
-`v0.2.1-rc.5-0.6.4`, and the target must be a descendant of the current one:
+`v0.2.1-rc.5-0.6.5`, and the target must be a descendant of the current one:
 
 ```sh
-git tag v0.2.1-rc.5-0.6.4
-git push origin v0.2.1-rc.5-0.6.4
+git tag v0.2.1-rc.5-0.6.5
+git push origin v0.2.1-rc.5-0.6.5
 ```
 
 - Product `0.x` is the compatible line; `1.0.0` marks a break.
@@ -107,8 +111,12 @@ There is no `self-previous` image to return to. Native updates need root
 - `data/workspace` is never snapshotted or restored. Changes a failed deployment
   made there are not undone, and files written there after the snapshot survive a
   rollback.
-- `/system update all` has no timeout or cancel after acceptance; a stuck session
-  blocks it. `/system rollback` is a profile rollback, not an image rollback.
+- `/system update all` has a job deadline: the updater stops a job that runs
+  longer than `DSH_UPDATE_TIMEOUT_SECONDS` (default 30 minutes) with `SIGTERM`,
+  then `SIGKILL` after ten seconds, and `/system cancel` stops a running job.
+  The card's **✖ Cancel** button exists only while it is still draining. A stuck
+  session blocks the drain, not the apply. `/system rollback` is a profile
+  rollback, not an image rollback.
 - No systemd and no Docker socket in the runtime: host `--self` still needs a
   shell. The normal path is the updater sidecar, which has the socket and is
   reachable only from the connector. See [`LIMITS.md`](LIMITS.md).

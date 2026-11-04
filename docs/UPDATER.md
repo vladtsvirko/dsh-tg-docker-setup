@@ -96,8 +96,9 @@ bump is a break. The product part resets to `0.0.0` on a new DSH alignment.
 - `available`: latest overall. Reached only with the explicit
   `/system update all --i-know-versions-are-incompatible`; it may cross a DSH
   line or product major.
-- `exact`: the updater's explicit target; must be a newer descendant tag, never
-  an older one.
+- `exact`: the updater's explicit target; must be newer than the current tag,
+  never an older one. The apply step (`update.sh --self-to`) additionally
+  refuses a tag that is not a descendant of the running one.
 - `rollback` mode is deliberately not exposed. A failed health gate rolls back
   automatically; a manual image rollback is a host operation.
 
@@ -116,15 +117,19 @@ The connector:
 4. calls `/update` only then.
 
 The connector first asks `/target` and posts one editable card in the control
-chat: `from → target`, live blocker count/list, and a **Cancel** button. Cancel
-deletes the update state and edits the card to “cancelled”; once `/update`
-returns 202 the button is removed and cancellation is refused. Older updaters
-without `/target` fall back to `/update` and update the card with the accepted
-target.
+chat: `from → target`, live blocker count/list, and a **Cancel** button. While
+the card is still draining, Cancel deletes the update state and edits the card
+to “cancelled”. Once `/update` returns 202 the **button** is removed (the
+connector's restart is imminent), but the job remains cancellable: `/system
+cancel` calls the updater's `POST /cancel`, which stops the job with `SIGTERM`
+and `SIGKILL` after ten seconds. Older updaters without `/target` fall back to
+`/update` and update the card with the accepted target.
 
-There is no timeout and no cancel after the request. `/system status` lists the
-sessions still running. A web turn can still start in the instant before the
-updater stops the container; that best-effort race is accepted.
+A running job also has a deadline, `DSH_UPDATE_TIMEOUT_SECONDS` (default 30
+minutes): on expiry it is stopped the same way and reported as timed out.
+`/system status` lists the sessions still running. A web turn can still start in
+the instant before the updater stops the container; that best-effort race is
+accepted.
 
 After a restart, the first Telegram update batch is treated as “arrived during
 the update”: each allowed sender gets one “update finished — send it again”
@@ -215,7 +220,9 @@ Real stack, disposable setup:
 ## Limits
 
 - Best-effort drain race with a new web turn.
-- No timeout/cancel after the request; a stuck session blocks the update.
+- The job deadline and `/system cancel` stop the apply, but neither can undo a
+  half-applied checkout; the snapshot and `self-previous` image are the recovery
+  inputs. A stuck session blocks the drain, not the apply.
 - The updater **code** reloads from the mounted checkout, but its **image** is not
   rebuilt by `--self`. A change to `updater.Dockerfile`, Node, Docker CLI/compose,
   git or curl needs a host `docker compose build updater && docker compose up -d

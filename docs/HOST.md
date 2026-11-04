@@ -83,11 +83,14 @@ below. `--no-deps` keeps the installer away from apt when Node is managed
 elsewhere; `--check` shows the whole plan, including what it would install.
 
 The installer is idempotent: re-running repairs the units, the symlinks and the
-`.env`, and keeps every value the deployment already has — including the
-provider key, which is `--rotate-key` away from being replaced. It refuses to
-clobber the other mode silently — switching is explicit (see below). A native
-install run as a normal user re-executes itself under `sudo` before asking
-anything, so the questions are asked once.
+`.env`, and keeps the deployed values — including the provider key, which is
+`--rotate-key` away from being replaced, and the git author, which is read from
+the deployed `.gitconfig` as the prompt default. A failed re-run is still not
+rolled back: the files are written before the health check. It refuses to clobber the other mode silently — switching is
+explicit (see below). A native install run as a normal user re-executes itself
+under `sudo`, and the mode answer does not survive that re-exec: pass
+`--mode native` (or `MODE=native` in `--config`) instead of relying on the
+prompt.
 
 `./install.sh --doctor` (and `./update.sh --doctor`) check the same things in
 both modes; `--fix` repairs the safe subset: duplicate or CRLF `.env` lines, a

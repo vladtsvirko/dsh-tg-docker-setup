@@ -27,7 +27,7 @@ and the connector tag are always identical.
 ## Which upgrades are allowed
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.0.0
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.6.5
 ```
 
 - **Compatible** (the default): same DSH part, same product major. Any newer
@@ -48,7 +48,8 @@ What happens, in order:
 1. The bot reports the drain and waits for every agent to go idle (a web UI turn
    counts too; `/system status` shows who is blocked).
 2. The updater runs `update.sh --self-to <latest compatible tag>` on the host.
-3. The runtime stops, the image builds, the new one starts under a trial.
+3. The runtime stops, the image builds, and the new one must pass the health
+   gate (container healthy **and** the published web port answering).
 4. The updater reports the result in the chat: `✅ setup update finished: vA → vB`.
 
 If it fails, the report says so and the previous setup is running again. If the
@@ -60,25 +61,34 @@ updater job).
 ```sh
 ./update.sh --self-check    # what a compatible upgrade would do; changes nothing
 ./update.sh --self          # do it, with the first prompt asking to confirm
-./update.sh --self-to v0.2.1-rc.5-0.0.0   # an exact target (what the updater uses)
+./update.sh --self-to v0.2.1-rc.5-0.6.5   # an exact target (what the updater uses)
 ```
 
 Use this for a broken bot, a first install of the updater, or a deliberate
 manual upgrade. It is the same code path the updater runs.
 
-## The trial, and confirming it
+## Trials and health gates are not the same thing
 
-Every upgrade opens a trial: the supervisor watches the new runtime, and the
-bot posts a card with **Commit** and **Roll back** plus a deadline
-(`DSH_TRIAL_SECONDS`, 5 minutes by default).
+Two mechanisms look alike and are not:
 
-- `/system confirm` (or **Commit**) keeps the new release and makes it the
-  rollback point.
-- `/system rollback` (or **Roll back**) restores the previous checkout, image and
-  profile.
+**A profile change** — `/system restart`, `/system update connector`, a plugin
+install — opens a supervisor **trial**. The bot posts a card with **Commit** and
+**Roll back** and a deadline (`DSH_TRIAL_SECONDS`, 5 minutes by default).
+
+- `/system confirm` (or **Commit**) keeps the change and makes it the rollback
+  point.
+- `/system rollback` (or **Roll back**) restores the previous profile state and
+  restarts. It does not move the image or the setup tag.
 - Doing nothing until the deadline rolls back automatically.
-- A new runtime that never comes up rolls back after `DSH_BOOT_GRACE_SECONDS`
+- A runtime that never comes up rolls back after `DSH_BOOT_GRACE_SECONDS`
   (120 s), or immediately if it exits.
+
+**An image upgrade** — `/system update all` or `./update.sh --self` — opens no
+trial and posts no Commit/Roll back card. It has a **health gate** instead: the
+new image must be healthy *and* answer on the published web port. If either
+fails, the updater restores the previous image, the snapshot and the previous
+tag checkout by itself, then reports the rollback in the chat. There is nothing
+to confirm and no deadline: success is final, failure is automatic.
 
 ## The drill: prove the rollback works
 
@@ -96,9 +106,14 @@ Run this once, on a quiet deployment:
 #    "Rolled back to the last committed state: no confirmation within N minutes."
 ```
 
-A rollback that works here is the same one an upgrade uses. If the card never
-arrives, the supervisor or its token is misconfigured — fix that before you need
-a rollback for real (`/system status` reports both).
+That proves the supervisor, the bot and the trial card. It does **not** exercise
+the image rollback, which is the updater's health gate, not a trial: to drill
+that one, break a disposable deployment on purpose (a bad healthcheck, or a tag
+whose entrypoint exits) and watch `update.sh --self` restore the previous image
+and report `rolled back`; the apply path it exercises is
+[`SELF-UPDATE.md`](SELF-UPDATE.md) step 7. If the
+card never arrives, the supervisor or its token is misconfigured — fix that
+before you need a rollback for real (`/system status` reports both).
 
 `./update.sh --self-to <current tag>` is **not** a no-op drill: an exact-or-older
 target is refused on purpose, so the drill has to be the trial above.
@@ -122,9 +137,9 @@ Nothing has to be done by hand:
 | Card says `⚠️ the supervisor is busy` | another operation held it | wait, then `/system rollback` again |
 | Card says `no trial is running` | it expired or was already committed | `/system status` shows the last event |
 | `Rollback failed (…)` | the profile could not be restored | the runtime restarted on the current files; `docker compose logs dsh`, and `backups/self-*.tgz` is the manual restore input |
-| Bot does not come back after an update | the trial rolled back but the runtime is unhealthy | `docker compose ps`, `docker compose logs dsh`, then `./update.sh --self-to <previous tag>` |
+| Bot does not come back after an update | the automatic rollback ran, or the health gate never passed, and the runtime is unhealthy | `docker compose ps`, `docker compose logs dsh`; then check out the previous tag, retag `dsh-backend:self-previous` as that tag's image, set `DSH_SETUP_VERSION` back in `.env`, and `docker compose up -d dsh`. `--self-to` cannot do this: it refuses older tags on purpose |
 | Updater unreachable | token mismatch or the sidecar is down | `docker compose ps updater`, `docker compose logs updater` |
-| Half-applied checkout | stopped between build and start | `git -C <dir> checkout --detach v$(docker inspect --format '{{.Config.Image}}' dsh | cut -d: -f2)` then `docker compose up -d dsh` |
+| Half-applied checkout | stopped between build and start | `git -C <dir> checkout --detach v$(docker inspect --format '{{.Config.Image}}' dsh \| cut -d: -f2)` then `docker compose up -d dsh` |
 
 Native mode has no image: the same steps apply, but the previous release is a
 tag, not `dsh-backend:self-previous`, and `journalctl -u dsh.service -f` replaces
