@@ -770,6 +770,12 @@ read_existing_env() {
         if [ -n "$value" ]; then printf -v "$key" '%s' "$value"; fi
         continue
       fi
+      # An explicit flag/config already decided; do not warn about the
+      # environment variable it replaced.
+      if { [ "$key" = DESIGN ] && [ "$DESIGN_SET" = 1 ]; } \
+         || { [ "$key" = CONTAINERS ] && [ "$CONTAINERS_SET" = 1 ]; }; then
+        continue
+      fi
       # An exported variable silently winning over the deployed value is how a
       # repair run rewrites a working allowlist by accident.
       if [ -n "$value" ] && [ "${!key}" != "$value" ]; then
@@ -1627,16 +1633,17 @@ TasksMax=512"
   local sandbox_lines
   sandbox_lines="$(cat <<'EOF'
 ProtectSystem=strict
-ProtectHome=yes
+ProtectHome=read-only
 PrivateTmp=yes
 NoNewPrivileges=yes
-ReadWritePaths=/srv/dsh/data
+ReadWritePaths=/srv/dsh/data /run/user/__SERVICE_UID__
 # NETLINK is not a network service: `ip route`, `hostname -I` and
 # getifaddrs() need it to discover the interface the runtime binds.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 EOF
 )"
   # ReadWritePaths must match the configured directory.
+  sandbox_lines="${sandbox_lines//__SERVICE_UID__/$service_uid}"
   sandbox_lines="${sandbox_lines/\/srv\/dsh\/data/$DIR\/data}"
 
   log "writing $unit"
@@ -1668,9 +1675,6 @@ Environment=TMPDIR=$DIR/data/.cache/tmp
 # filesystem and out of /tmp (which some hosts mount noexec).
 Environment=NARB_NATIVE_CACHE_DIR=$DIR/data/.cache/native
 ExecStart=/usr/local/bin/dsh-entrypoint serve
-# Rootless Podman needs its standard runtime dir; pasta refuses anything else.
-# ProtectHome=yes hides /run/user, so bind that one path back.
-BindPaths=-/run/user/$service_uid
 Restart=on-failure
 RestartSec=3
 KillMode=mixed

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1-rc.5-0.12.7
+
+### Fixed
+
+- **`ProtectHome=read-only` plus an explicit writable runtime path.** BindPaths
+  did not pierce `ProtectHome=yes`, so the service still saw `/run/user/995` as
+  inaccessible. The unit now keeps home read-only and lists
+  `ReadWritePaths=<dir>/data /run/user/<uid>`; rootless Podman can create its
+  netns there without hiding the rest of the home directories.
+
 ## 0.2.1-rc.5-0.12.6
 
 ### Fixed
