@@ -6,7 +6,7 @@ once the release is tagged.
 | Repository | Branch | Version | Commit |
 |---|---|---|---|
 | `dsh-tg-docker-setup` | `feat/standalone-plugins` | `0.2.1-rc.5-0.13.0` | branch head (this file) |
-| `dsh-telegram-connector` | `feat/standalone-plugins` | `0.13.0` | `49c6a78` |
+| `dsh-telegram-connector` | `feat/standalone-plugins` | `0.13.0` | branch head |
 | `dsh-penpot-plugin` | `feat/standalone-plugins` | `0.3.0` | `683da88` |
 
 Nothing is tagged or merged. `main` is untouched.
@@ -78,7 +78,7 @@ Run and green:
 
 ```sh
 # connector
-npm run typecheck && npm test && npm run build          # 228 passed, 1 todo
+npm run typecheck && npm test && npm run build          # 232 passed, 1 todo
 # penpot
 npm run typecheck && npm test && npm run build          # 10 passed
 # setup
@@ -98,16 +98,16 @@ Penpot registered its tools.
    tags exist, a fresh install of setup `0.13.0` cannot install them. Suggested
    order: review → tag connector `v0.13.0` → tag penpot `v0.3.0` → tag setup
    `v0.2.1-rc.5-0.13.0`.
-2. **Set the GitHub topics** (one of):
+2. **Set the GitHub topics.** `scripts/github-topics.mjs --check` shows the
+   current state and exits 1 while they are missing. To set them, run the same
+   script with a token that has repository administration:
    ```sh
-   gh repo edit vladtsvirko/dsh-telegram-connector \
-     --add-topic dsh-plugin,deepseek-harness,telegram,cordis
-   gh repo edit vladtsvirko/dsh-penpot-plugin \
-     --add-topic dsh-plugin,deepseek-harness,penpot,cordis
+   GITHUB_TOKEN=... node scripts/github-topics.mjs
    ```
-   or run the same `PUT /repos/{owner}/{repo}/topics` call with a token that has
-   repository administration. The connector description is also empty on
-   GitHub; a PATCH would fill it.
+   The runtime's git-push token is fine-grained and returns 403 on the topics
+   endpoint (`Resource not accessible by personal access token`). The GitHub UI,
+   `gh repo edit --add-topic`, or an admin-scoped token works. The connector
+   description is also empty on GitHub; a PATCH or the About box can fill it.
 3. **UAT the new update commands.** The unit/integration suite covers discovery,
    range checks, argument parsing and the supervisor ref hand-off, but a real
    Telegram update of the connector and of Penpot still needs a deployment with
