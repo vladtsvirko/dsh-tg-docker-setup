@@ -192,7 +192,7 @@ cd "$SRC_DIR"
 SETUP_VERSION="$(tr -d '\n' < "$SRC_DIR/VERSION")"
 DSH_VERSION="$(printf '%s' "$SETUP_VERSION" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+$//')"
 
-CONTAINERS="" DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0 DEPS=1 CLEAN_SOURCE=0
+CONTAINERS="" CONTAINERS_SET=0 DESIGN_SET=0 DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0 DEPS=1 CLEAN_SOURCE=0
 DOCTOR=0 FIX=0 ROTATE_KEY=0
 SERVICE_USER="${SERVICE_USER:-dsh}"
 DSH_PORT="${DSH_PORT:-}"
@@ -282,6 +282,10 @@ load_config() {
       *) die "unknown key in $file: $key" ;;
     esac
     printf -v "$key" '%s' "$value"
+    case "$key" in
+      DESIGN) DESIGN_SET=1 ;;
+      CONTAINERS) CONTAINERS_SET=1 ;;
+    esac
   done < "$file"
 }
 
@@ -300,10 +304,10 @@ set -- "${ARGS[@]}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --containers) CONTAINERS="${2:?--containers needs a value}"; shift 2 ;;
-    --containers=*) CONTAINERS="${1#*=}"; shift ;;
-    --design) DESIGN="${2:?--design needs a value}"; shift 2 ;;
-    --design=*) DESIGN="${1#*=}"; shift ;;
+    --containers) CONTAINERS="${2:?--containers needs a value}"; CONTAINERS_SET=1; shift 2 ;;
+    --containers=*) CONTAINERS="${1#*=}"; CONTAINERS_SET=1; shift ;;
+    --design) DESIGN="${2:?--design needs a value}"; DESIGN_SET=1; shift 2 ;;
+    --design=*) DESIGN="${1#*=}"; DESIGN_SET=1; shift ;;
     --ref)    REF="${2:?--ref needs a value}"; shift 2 ;;
     --ref=*)  REF="${1#*=}"; shift ;;
     --dir)    DIR="${2:?--dir needs a value}"; shift 2 ;;
@@ -758,6 +762,14 @@ read_existing_env() {
     # and Node's .env loader agree), so the installer agrees too.
     value="$(sed -n "s/^${key}=//p" "$DIR/.env" | tail -1)"
     if [ -n "${!key:-}" ]; then
+      # DESIGN/CONTAINERS are structural: an inherited environment value (the
+      # agent's shell carries the service env) must not disable a deployed
+      # Penpot stack. Only an explicit flag or config file may change them.
+      if { [ "$key" = DESIGN ] && [ "$DESIGN_SET" != 1 ]; } \
+         || { [ "$key" = CONTAINERS ] && [ "$CONTAINERS_SET" != 1 ]; }; then
+        if [ -n "$value" ]; then printf -v "$key" '%s' "$value"; fi
+        continue
+      fi
       # An exported variable silently winning over the deployed value is how a
       # repair run rewrites a working allowlist by accident.
       if [ -n "$value" ] && [ "${!key}" != "$value" ]; then
@@ -1598,7 +1610,8 @@ ensure_user() {
 
 native_units() {
   local env_file="$DIR/.env" unit=/etc/systemd/system/dsh.service
-  local node_bin node_dir
+  local node_bin node_dir service_uid
+  service_uid="$(id -u "$SERVICE_USER" 2>/dev/null || echo 0)"
   node_bin="$(command -v node || echo /usr/local/bin/node)"
   node_dir="$(dirname "$node_bin")"
   # CPU/RAM share chosen at install time. MemoryMax takes a percentage of RAM;
@@ -1640,7 +1653,7 @@ Group=$SERVICE_USER
 WorkingDirectory=$DATA_WORKSPACE
 EnvironmentFile=-$env_file
 Environment=HOME=$DATA_HOME
-Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=XDG_RUNTIME_DIR=/run/user/$service_uid
 Environment=DSH_HOME=$DATA_HOME
 Environment=DSH_WORKSPACE=$DATA_WORKSPACE
 Environment=DSH_SUPERVISOR_STATE=$SUPERVISOR_STATE
@@ -1657,7 +1670,7 @@ Environment=NARB_NATIVE_CACHE_DIR=$DIR/data/.cache/native
 ExecStart=/usr/local/bin/dsh-entrypoint serve
 # Rootless Podman needs its standard runtime dir; pasta refuses anything else.
 # ProtectHome=yes hides /run/user, so bind that one path back.
-BindPaths=-/run/user/%U
+BindPaths=-/run/user/$service_uid
 Restart=on-failure
 RestartSec=3
 KillMode=mixed

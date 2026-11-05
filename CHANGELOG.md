@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1-rc.5-0.12.6
+
+### Fixed
+
+- **The unit uses the service user's numeric UID.** `%U` expands to `0` in a
+  system unit, so `XDG_RUNTIME_DIR` and `BindPaths` pointed at `/run/user/0`
+  and rootless Podman failed with `lstat /run/user/0: permission denied`. The
+  installer now writes `id -u dsh` into the unit.
+- **An inherited `DESIGN`/`CONTAINERS` environment variable no longer overrides
+  the deployed `.env`.** Running `sudo ./install.sh --containers podman` from a
+  shell that carried the service environment could rewrite `DESIGN=penpot` as
+  `none` and disable Penpot. Only `--design`, `--containers` or a config file
+  may change those two on a repair.
+
 ## 0.2.1-rc.5-0.12.5
 
 ### Fixed
