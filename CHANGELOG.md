@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1-rc.5-0.11.1
+
+Maintenance release; installer and updater unchanged. Aligned with connector
+0.11.1, which keeps the typed `confirm` fallback for scripted workspace removal
+and unbinding.
+
 The setup repo ships in lockstep with `dsh-telegram-connector`: `VERSION` is the
 tag and the connector tag at once. Connector-side changes are in
 that repository's changelog; this file records what the installer, the
