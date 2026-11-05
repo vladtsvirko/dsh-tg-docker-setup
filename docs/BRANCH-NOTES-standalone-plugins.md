@@ -68,9 +68,10 @@ Nothing is tagged or merged. `main` is untouched.
 - Confirmed the upstream line: the topic is GitHub repository metadata (the
   About box), not a file. Neither repository had any topics.
 - Added a maintainer instruction to both plugin `AGENTS.md`.
-- **Not set yet:** the available GitHub token can read the repositories but
-  returns 403 on `PATCH /repos/...` and `PUT /repos/.../topics` (no repository
-  administration permission). See “Pending decisions”.
+- **Set on 2026-11-05** after the fine-grained token was granted repository
+  Administration write. Both repositories now carry `dsh-plugin` plus their
+  product topics; the GitHub descriptions were synced with the package
+  manifests at the same time.
 
 ## Verification
 
@@ -131,18 +132,7 @@ Penpot registered its tools.
    plugin tag before the setup tag”; that is expected before the plugin tags and
    must be green before the setup tag.
 
-2. **Set the GitHub topics.** `scripts/github-topics.mjs --check` shows the
-   current state and exits 1 while they are missing. To set them, run the same
-   script with a token that has repository administration:
-   ```sh
-   GITHUB_TOKEN=... node scripts/github-topics.mjs
-   ```
-   The runtime's git-push token is fine-grained and returns 403 on the topics
-   endpoint (`Resource not accessible by personal access token`). The GitHub UI,
-   `gh repo edit --add-topic`, or an admin-scoped token works. The connector
-   description is also empty on GitHub; a PATCH or the About box can fill it.
-
-3. **UAT on the owner's box.** The unit/integration suite covers discovery,
+2. **UAT on the owner's box.** The unit/integration suite covers discovery,
    range checks, argument parsing, the supervisor ref hand-off and the plugin
    manager sequence. Still manual: a real Telegram update of the connector and
    of Penpot, a live Penpot 2.18.6 import round trip, and the first boot after

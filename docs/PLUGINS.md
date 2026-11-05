@@ -83,14 +83,13 @@ tags; npm publication waits for `1.0.0`. See [`VERSIONS.md`](VERSIONS.md).
 
 The upstream DSH README asks plugin repositories to carry the GitHub topic
 `dsh-plugin`; GitHub topics are repository metadata (the "About" box), not a
-file in the repository. Both plugin repositories must carry it, plus product
-topics (`deepseek-harness`, `telegram` / `penpot`). The setup repository is not
-a plugin and does not carry it.
+file in the repository. Both plugin repositories carry it, plus product topics
+(`deepseek-harness`, `telegram` / `penpot`). The setup repository is not a
+plugin and does not carry it.
 
-`scripts/github-topics.mjs --check` reports the current state (unauthenticated)
-and exits non-zero while a topic is missing. Applying it needs a token with
-repository administration; the deployment's fine-grained git token cannot edit
-topics and answers 403.
+`scripts/github-topics.mjs --check` verifies the state; both repositories are
+green as of 2026-11-05. Applying it needs a token with repository
+administration, so the deployment token was granted that permission once.
 
 ## What is deliberately not shared
 
