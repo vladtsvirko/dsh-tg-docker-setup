@@ -47,6 +47,8 @@ penpot plugin:  0.3.0                     tag v0.3.0
 4. Run `node --test *.test.mjs`, `bash -n update.sh install.sh entrypoint.sh
    healthcheck.sh scripts/repair.sh`, and
    `node scripts/check-version.mjs` with `GITHUB_REF_NAME=v<VERSION>`.
+   `node scripts/plugin-preflight.mjs` checks the sibling versions against
+   `plugins.json`; after tagging the plugins, `--remote` proves the tags exist.
 5. Commit, tag and push the setup. CI runs `scripts/check-version.mjs`; it does
    not look for a connector tag.
 

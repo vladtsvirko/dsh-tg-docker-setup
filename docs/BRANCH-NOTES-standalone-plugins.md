@@ -85,6 +85,8 @@ npm run typecheck && npm test && npm run build          # 10 passed
 node --test entrypoint.test.mjs supervisor.test.mjs plugins.test.mjs install.test.mjs update.test.mjs
 bash -n update.sh install.sh entrypoint.sh healthcheck.sh scripts/repair.sh
 GITHUB_REF_NAME=v0.2.1-rc.5-0.13.0 node scripts/check-version.mjs
+node scripts/plugin-preflight.mjs            # local versions match the pins
+node scripts/plugin-preflight.mjs --remote   # fails until the plugin tags exist
 ```
 
 Standalone check (both plugins composed and booted in a temp `DSH_HOME`):
@@ -95,8 +97,10 @@ Penpot registered its tools.
 
 1. **Tag the plugins before the setup.** `plugins.json` asks for
    `dsh-telegram-connector#v0.13.0` and `dsh-penpot-plugin#v0.3.0`. Until those
-   tags exist, a fresh install of setup `0.13.0` cannot install them. Suggested
-   order: review → tag connector `v0.13.0` → tag penpot `v0.3.0` → tag setup
+   tags exist, a fresh install of setup `0.13.0` cannot install them.
+   `node scripts/plugin-preflight.mjs --remote` currently fails with
+   “has no tag … — push the plugin tag before the setup tag”. Suggested order:
+   review → tag connector `v0.13.0` → tag penpot `v0.3.0` → tag setup
    `v0.2.1-rc.5-0.13.0`.
 2. **Set the GitHub topics.** `scripts/github-topics.mjs --check` shows the
    current state and exits 1 while they are missing. To set them, run the same

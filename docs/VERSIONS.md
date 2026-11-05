@@ -129,8 +129,9 @@ the target must be a descendant of the running tag. Ordering is release-aware
 3. If the release needs newer plugin behaviour, bump that plugin's `minimum` in
    `plugins.json` (and usually its `ref`).
 4. Run `node --test *.test.mjs`, `bash -n update.sh install.sh entrypoint.sh
-   healthcheck.sh scripts/repair.sh` and `node scripts/check-version.mjs` with
-   `GITHUB_REF_NAME=v<VERSION>`.
+   healthcheck.sh scripts/repair.sh`, `node scripts/check-version.mjs` with
+   `GITHUB_REF_NAME=v<VERSION>`, and `node scripts/plugin-preflight.mjs`
+   (`--remote` after the plugin tags are pushed).
 5. Commit, tag and push the setup. CI validates the tag; it does not look for a
    connector tag.
 
