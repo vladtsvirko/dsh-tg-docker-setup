@@ -53,6 +53,10 @@ loaded both plugins without a mount error (the connector used a fake token, so
 Telegram answered 401 — expected). This is the check to repeat after a change
 that touches `inject`, the bundle patch or a config schema.
 
+Automated coverage: `entrypoint.test.mjs` (floor, explicit target, reset) and the
+connector's `tests/updates.integration.test.ts` (the update commands through the
+real handlers with a fake plugin manager).
+
 ## Update model
 
 The setup pins each plugin's recommended tag and a minimum in `plugins.json`:
@@ -79,9 +83,14 @@ Plugin versions are independent of the setup `VERSION`. See
 
 The upstream DSH README asks plugin repositories to carry the GitHub topic
 `dsh-plugin`; GitHub topics are repository metadata (the "About" box), not a
-file in the repository. Both plugin repositories carry it, plus product topics
-(`deepseek-harness`, `telegram` / `penpot`). The setup repository is not a
-plugin and does not carry it.
+file in the repository. Both plugin repositories must carry it, plus product
+topics (`deepseek-harness`, `telegram` / `penpot`). The setup repository is not
+a plugin and does not carry it.
+
+`scripts/github-topics.mjs --check` reports the current state (unauthenticated)
+and exits non-zero while a topic is missing. Applying it needs a token with
+repository administration; the deployment's fine-grained git token cannot edit
+topics and answers 403.
 
 ## What is deliberately not shared
 
