@@ -3,8 +3,8 @@
 The setup repo ships one aligned release together with DSH and the connector:
 
 ```
-VERSION:      0.2.1-rc.5-0.11.1
-git tag:      v0.2.1-rc.5-0.11.1
+VERSION:      0.2.1-rc.5-0.12.0
+git tag:      v0.2.1-rc.5-0.12.0
 ```
 
 - The DSH part is the runtime the release installs. It is the prefix of

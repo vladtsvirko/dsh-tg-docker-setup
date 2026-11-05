@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1-rc.5-0.12.0
+
+Maintenance release; installer, updater and supervisor unchanged. Aligned with
+connector 0.12.0, the words-only control surface (no emoji outside Telegram
+reactions).
+
 ## 0.2.1-rc.5-0.11.1
 
 Maintenance release; installer and updater unchanged. Aligned with connector

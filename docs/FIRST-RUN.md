@@ -113,7 +113,7 @@ The management commands move there; session topics then take plain text (plus
 `/commands`, `/skills`, `/run`, `/skill` and `//text`).
 
 If the bot ignores plain messages, privacy mode is still on. If it says
-`⛔ You are not authorized`, your id is missing from `ALLOWED_USER_IDS`.
+`You are not authorized`, your id is missing from `ALLOWED_USER_IDS`.
 
 ## 4. Move between the two clients
 
@@ -123,7 +123,7 @@ One runtime means the handover is mostly automatic:
   same sessions. A session started in Telegram is an ordinary DSH session, so
   the web UI lists it.
 - **Browser → Telegram:** a prompt sent in the browser is echoed into that
-  session's topic (`💬 you (web) · …`) and answered in both places. A session
+  session's topic (`you (web) · …`) and answered in both places. A session
   that has no topic yet gets one from `/sync` in the group.
 - **Both at once:** a session has **one live agent**. If a browser tab holds it,
   a Telegram prompt is refused and a **Take over** button appears; the message is
@@ -137,12 +137,12 @@ a mistake is expensive have buttons:
 
 | Flow | What you get |
 |---|---|
-| `/dashboard` in the group | **➕ New session** · **🔄 Sync** · **📊 Status** · **📋 Sessions** |
-| `/dashboard` in the bot chat | **📊 Status** · **🌐 Web link** · **⬆️ Update setup** · **♻️ Restart** · **🧩 Plugins** · **⚙️ Components** |
-| Trial after a restart / connector update / plugin change | **✅ Commit** and **↩️ Roll back**, plus a deadline |
-| `/system update setup` while draining | **✖ Cancel update** (after acceptance, `/system cancel` still stops the job) |
+| `/dashboard` in the group | **New session** · **Sync** · **Status** · **Sessions** |
+| `/dashboard` in the bot chat | **Status** · **Web link** · **Update setup** · **Restart** · **Plugins** · **Components** |
+| Trial after a restart / connector update / plugin change | **Commit** and **Roll back**, plus a deadline |
+| `/system update setup` while draining | **Cancel update** (after acceptance, `/system cancel` still stops the job) |
 | `/system components` (design stack) | one row per component: Enable/Disable and Port |
-| A session held by a browser tab | **↪️ Take over** |
+| A session held by a browser tab | **Take over** |
 
 Everything else is a command, and the bot is self-documenting: `/help` lists
 what the current chat accepts, `/man` prints the full manual, and

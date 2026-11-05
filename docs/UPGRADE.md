@@ -50,7 +50,7 @@ What happens, in order:
 3. The target tag is checked out and the matching DSH installed while the old
    runtime runs; `dsh.service` is restarted, and the new runtime must pass the
    health gate (the unit active **and** the web port answering).
-4. The updater reports the result in the chat: `✅ setup update finished: vA → vB`.
+4. The updater reports the result in the chat: `setup update finished: vA → vB`.
 
 If it fails, the report says so and the previous tag and the data snapshot are
 back in place. If the drain never finishes, `/system cancel` cancels it (it also
@@ -135,7 +135,7 @@ Nothing has to be done by hand:
 
 | Symptom | What it means | What to do |
 |---|---|---|
-| Card says `⚠️ the supervisor is busy` | another operation held it | wait, then `/system rollback` again |
+| Card says `the supervisor is busy` | another operation held it | wait, then `/system rollback` again |
 | Card says `no trial is running` | it expired or was already committed | `/system status` shows the last event |
 | `Rollback failed (…)` | the profile could not be restored | the runtime restarted on the current files; `journalctl -u dsh.service`, and `backups/self-*.tgz` is the manual restore input |
 | Bot does not come back after an update | the automatic rollback ran, or the health gate never passed, and the runtime is unhealthy | `systemctl status dsh.service`, `journalctl -u dsh.service -n 100`; then use [Manual recovery](#manual-recovery) below |

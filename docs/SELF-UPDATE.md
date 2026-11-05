@@ -39,11 +39,11 @@ crossing, so an unattended update cannot cross on its own.
 ## Tag convention
 
 Tags match `<dsh>-<major>.<minor>.<patch>`, for example
-`v0.2.1-rc.5-0.11.1`, and the target must be a descendant of the current one:
+`v0.2.1-rc.5-0.12.0`, and the target must be a descendant of the current one:
 
 ```sh
-git tag v0.2.1-rc.5-0.11.1
-git push origin v0.2.1-rc.5-0.11.1
+git tag v0.2.1-rc.5-0.12.0
+git push origin v0.2.1-rc.5-0.12.0
 ```
 
 - Product `0.x` is the compatible line; `1.0.0` marks a break.
@@ -98,7 +98,7 @@ The previous release is a tag plus the data snapshot.
 - `/system update setup` has a job deadline: the updater stops a job that runs
   longer than `DSH_UPDATE_TIMEOUT_SECONDS` (default 30 minutes) with `SIGTERM`,
   then `SIGKILL` after ten seconds, and `/system cancel` stops a running job.
-  The card's **✖ Cancel** button exists only while it is still draining. A stuck
+  The card's **Cancel** button exists only while it is still draining. A stuck
   session blocks the drain, not the apply. `/system rollback` is a profile
   rollback, not a setup-tag rollback.
 - A host `--apply` needs a root shell. The normal path is the updater service,

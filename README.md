@@ -105,7 +105,7 @@ curl -fsSL …/install.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.11.1`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.12.0`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -166,7 +166,7 @@ same thing, not two installations.
 
 - `/web` in the bot chat prints a signed link into the same sessions. Treat it
   like a password.
-- A prompt sent in the browser is echoed into that session's topic (`💬 you
+- A prompt sent in the browser is echoed into that session's topic (`you
   (web) · …`), and its answer appears in both places.
 - A session has **one live agent**. If a browser tab holds it, a Telegram prompt
   is refused and a **Take over** button appears; the message is queued, and
@@ -234,7 +234,7 @@ different name is never touched. The setup currently ships:
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.11.1
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.12.0
          DSH part          product part
 ```
 
@@ -567,7 +567,7 @@ full list is in [`docs/LIMITS.md`](docs/LIMITS.md).
 | `failed to bind …: cannot assign requested address` | `DSH_BIND_IP` isn't an address of this host | fix `.env`, `sudo systemctl restart dsh.service` |
 | UI loads but keeps saying **reconnecting** | the browser dials an address it cannot reach | set `DSH_PUBLIC_URL` to the root you actually use |
 | Bot silent after a dsh upgrade | adapter no longer mounts | re-grant the exemption, or move to the previous setup tag |
-| Bot says `⛔ You are not authorized` | your id isn't in `allowedUserIds` | add it to `ALLOWED_USER_IDS` in `.env`, then restart |
+| Bot says `You are not authorized` | your id isn't in `allowedUserIds` | add it to `ALLOWED_USER_IDS` in `.env`, then restart |
 | `no space left on device` | sessions + pnpm store in `data/home` | prune old sessions, move the data directory |
 | `/system update setup` says updater unreachable | updater not running, or token mismatch | `systemctl status dsh-updater.service`; `journalctl -u dsh-updater.service` |
 | Model calls fail after re-running the installer | the runtime prefers a key stored by the web UI over `.env` (or `.env` has two copies) | `./install.sh --doctor --fix`, then restart |
