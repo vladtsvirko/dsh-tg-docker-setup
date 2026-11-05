@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1-rc.5-0.12.5
+
+### Fixed
+
+- **Rootless Podman uses `/run/user/<uid>` again, exposed through
+  `ProtectHome`.** `/run/dsh` was still refused by pasta; the standard runtime
+  dir works. The unit now sets `XDG_RUNTIME_DIR=/run/user/%U` and
+  `BindPaths=-/run/user/%U`, so the path is available despite
+  `ProtectHome=yes`. Lingering keeps the user manager and the directory alive.
+
 ## 0.2.1-rc.5-0.12.4
 
 ### Fixed
