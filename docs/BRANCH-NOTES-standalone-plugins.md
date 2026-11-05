@@ -5,7 +5,7 @@ once the release is tagged.
 
 | Repository | Branch | Version | Commit |
 |---|---|---|---|
-| `dsh-tg-docker-setup` | `feat/standalone-plugins` | `0.2.1-rc.5-0.13.0` | `5fabe6a` + this note |
+| `dsh-tg-docker-setup` | `feat/standalone-plugins` | `0.2.1-rc.5-0.13.0` | branch head (this file) |
 | `dsh-telegram-connector` | `feat/standalone-plugins` | `0.13.0` | `49c6a78` |
 | `dsh-penpot-plugin` | `feat/standalone-plugins` | `0.3.0` | `683da88` |
 
