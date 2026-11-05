@@ -76,8 +76,8 @@ The setup pins each plugin's recommended tag and a minimum in `plugins.json`:
 - **Standalone:** the plugin manager has no supervisor; use `dsh plugin remove`
   then `add`. The same commands explain this.
 
-Plugin versions are independent of the setup `VERSION`. See
-[`VERSIONS.md`](VERSIONS.md).
+Plugin versions are independent of the setup `VERSION`. Distribution is GitHub
+tags; npm publication waits for `1.0.0`. See [`VERSIONS.md`](VERSIONS.md).
 
 ## Discoverability
 

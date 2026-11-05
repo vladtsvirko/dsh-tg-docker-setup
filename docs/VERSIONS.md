@@ -47,6 +47,8 @@ Plain semver, one tag per plugin repository:
   compatibility check.
 - Tags are immutable and every tag is a candidate for `/system update`; do not
   push a tag you would not install.
+- Distribution is GitHub tags. npm publication is deliberately deferred until
+  `1.0.0`; until then there is no registry path in the update resolver.
 
 ## `plugins.json`
 

@@ -97,15 +97,40 @@ Standalone check (both plugins composed and booted in a temp `DSH_HOME`):
 no mount errors, connector reached Telegram with a fake token (401 expected),
 Penpot registered its tools.
 
-## Pending decisions / actions
+## Decisions (2026-11-05)
 
-1. **Tag the plugins before the setup.** `plugins.json` asks for
-   `dsh-telegram-connector#v0.13.0` and `dsh-penpot-plugin#v0.3.0`. Until those
-   tags exist, a fresh install of setup `0.13.0` cannot install them.
-   `node scripts/plugin-preflight.mjs --remote` currently fails with
-   “has no tag … — push the plugin tag before the setup tag”. Suggested order:
-   review → tag connector `v0.13.0` → tag penpot `v0.3.0` → tag setup
-   `v0.2.1-rc.5-0.13.0`.
+- **Plugin versions are plain semver.** Only the setup keeps the
+  `<dsh-version>-<product>` prefix. The current proposals are the next minor,
+  not `1.0.0`: connector `0.13.0`, Penpot `0.3.0`, setup `0.13.0`.
+- **npm waits for `1.0.0`.** Until then both plugins are distributed as GitHub
+  tags and updated from tags; no registry path is added to the resolver.
+- **Update channel:** newest tag. Stable/prerelease channels stay a follow-up.
+- **Release owner:** merge to the default branch (GitHub calls it `main`; the
+  discussion said "master"), cut the tags, then UAT on the owner's box.
+
+## Remaining actions
+
+1. **Merge and tag (owner).** No tags exist yet; the branches are review-only.
+   ```sh
+   # each repository, in this order
+   git switch main
+   git merge --no-ff feat/standalone-plugins
+   git push
+
+   # connector first
+   git tag v0.13.0 && git push origin v0.13.0
+   # then Penpot
+   git tag v0.3.0 && git push origin v0.3.0
+   # prove the pins resolve before tagging the setup
+   cd dsh-tg-docker-setup && node scripts/plugin-preflight.mjs --remote
+
+   # setup last
+   git tag v0.2.1-rc.5-0.13.0 && git push origin v0.2.1-rc.5-0.13.0
+   ```
+   `plugin-preflight.mjs --remote` currently fails with “has no tag … — push the
+   plugin tag before the setup tag”; that is expected before the plugin tags and
+   must be green before the setup tag.
+
 2. **Set the GitHub topics.** `scripts/github-topics.mjs --check` shows the
    current state and exits 1 while they are missing. To set them, run the same
    script with a token that has repository administration:
@@ -116,21 +141,13 @@ Penpot registered its tools.
    endpoint (`Resource not accessible by personal access token`). The GitHub UI,
    `gh repo edit --add-topic`, or an admin-scoped token works. The connector
    description is also empty on GitHub; a PATCH or the About box can fill it.
-3. **UAT the new update commands.** The unit/integration suite covers discovery,
-   range checks, argument parsing and the supervisor ref hand-off, but a real
-   Telegram update of the connector and of Penpot still needs a deployment with
-   a newer tag. The Penpot import tool has fake-server coverage, not a live
-   Penpot 2.18.6 round trip.
-4. **Version numbers are a proposal.** Connector `0.13.0` continues the product
-   minor line as plain semver; Penpot `0.3.0` adds a tool; setup `0.13.0` is a
-   minor. If the first public release should be `1.0.0`, say so before tagging.
-5. **npm publication** was not added. Both plugins install from GitHub tags and
-   the bot updates from tags. Publishing to npm would add a registry path to the
-   update code and is a separate decision.
-6. **Update policy:** `/system update connector` currently prefers the newest
-   tag. If releases should go through a channel (stable/prerelease) or a
-   manifest instead of “newest tag”, that is a follow-up; the resolver is one
-   module (`src/updates.ts`).
+
+3. **UAT on the owner's box.** The unit/integration suite covers discovery,
+   range checks, argument parsing, the supervisor ref hand-off and the plugin
+   manager sequence. Still manual: a real Telegram update of the connector and
+   of Penpot, a live Penpot 2.18.6 import round trip, and the first boot after
+   the setup tag (which enforces the new floors).
+
 
 ## Live deployment
 
