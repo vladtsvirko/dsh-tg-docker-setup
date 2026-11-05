@@ -59,7 +59,8 @@ The setup pins each plugin's recommended tag and a minimum in `plugins.json`:
 
 - **Fresh install / repair:** install `ref`.
 - **Boot:** if the installed version is below `minimum`, reinstall; otherwise
-  leave it. A newer version installed from the bot is never downgraded.
+  leave it. A newer version installed from the bot is never downgraded. A
+  legacy `.env` pin below `minimum` is overridden by the catalog ref.
 - **Update from Telegram:**
   - `/system update connector [to <version>] [now]` resolves the newest tag in
     the connector repository, checks its declared DSH range, and lets the

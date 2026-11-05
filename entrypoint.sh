@@ -339,6 +339,14 @@ profile_dependency() {
   ' "$PROFILE_DIR/package.json" "$1" 2>/dev/null
 }
 
+# The version part of a git ref (`github:o/r#v1.2.3`), or empty.
+ref_version() {
+  case "${1:-}" in
+    *'#'v*) printf '%s' "${1##*#v}" ;;
+    *) return 1 ;;
+  esac
+}
+
 # True when $1 (a package version) is at least $2. Prereleases sort below their
 # stable release, which matters because DSH tags carry an rc suffix.
 version_gte() {
@@ -383,11 +391,20 @@ install_plugin() {
   # A newer compatible connector installed from the bot must survive a reboot,
   # so the checkout pin is a floor, not a ceiling. Only a missing package, a
   # package below `minimum`, or an explicit target triggers a reinstall.
-  local stamp="$PROFILE_DIR/.telegram-plugin-ref" target desired installed_version min
+  local stamp="$PROFILE_DIR/.telegram-plugin-ref" target desired installed_version min override_version
   target="$PLUGIN_TARGET_REF"
   desired="${target:-$PLUGIN_REF}"
   min="$PLUGIN_MIN"
   [ "$PLUGIN_PKG" = "dsh-telegram-connector" ] || min=""
+  # An old .env override must not keep a deployment below the release floor.
+  if [ -z "$target" ] && [ -n "$min" ] && [ "$PLUGIN_REF_FROM_ENV" = 1 ]; then
+    override_version="$(ref_version "$PLUGIN_REF" || true)"
+    if ! version_gte "$override_version" "$min"; then
+      desired="$(catalog_value dsh-telegram-connector ref || true)"
+      warn "DSH_TELEGRAM_PLUGIN is below the required $min; using $desired"
+      PLUGIN_REF="$desired"
+    fi
+  fi
   if [ -f "$PROFILE_DIR/node_modules/$PLUGIN_PKG/package.json" ] && [ -z "$target" ]; then
     installed_version="$(node -p "require('$PROFILE_DIR/node_modules/$PLUGIN_PKG/package.json').version" 2>/dev/null || true)"
     if [ -z "$min" ] || version_gte "$installed_version" "$min"; then
@@ -508,8 +525,17 @@ install_penpot() {
   # Same shape as the Telegram adapter: the checkout pin installs a missing
   # plugin and enforces a minimum, but never downgrades a newer version the bot
   # installed through the plugin manager.
-  local stamp="$PROFILE_DIR/.penpot-plugin-ref" installed_version
+  local stamp="$PROFILE_DIR/.penpot-plugin-ref" installed_version desired override_version
   [ -n "$PENPOT_REF" ] || { warn "PENPOT_PLUGIN_REF is empty — design tools stay off"; return 1; }
+  desired="$PENPOT_REF"
+  # A legacy pin below the release floor is upgraded, not obeyed forever.
+  if [ -n "$PENPOT_MIN" ] && [ "$PENPOT_REF_FROM_ENV" = 1 ]; then
+    override_version="$(ref_version "$PENPOT_REF" || true)"
+    if ! version_gte "$override_version" "$PENPOT_MIN"; then
+      desired="$(catalog_value dsh-penpot-plugin ref || true)"
+      warn "PENPOT_PLUGIN_REF is below the required $PENPOT_MIN; using $desired"
+    fi
+  fi
   if [ -f "$PROFILE_DIR/node_modules/$PENPOT_PKG/package.json" ]; then
     installed_version="$(node -p "require('$PROFILE_DIR/node_modules/$PENPOT_PKG/package.json').version" 2>/dev/null || true)"
     if [ -z "$PENPOT_MIN" ] || version_gte "$installed_version" "$PENPOT_MIN"; then
@@ -524,9 +550,9 @@ install_penpot() {
   log "installing the Penpot plugin (needs network)"
   local out attempt key
   for attempt in 1 2 3; do
-    if dsh plugin --profile web add "$PENPOT_REF" >/tmp/penpot-install.log 2>&1; then
+    if dsh plugin --profile web add "$desired" >/tmp/penpot-install.log 2>&1; then
       log "Penpot plugin installed"
-      printf '%s\n' "$PENPOT_REF" > "$stamp"
+      printf '%s\n' "$desired" > "$stamp"
       return 0
     fi
     out="$(cat /tmp/penpot-install.log)"

@@ -72,6 +72,9 @@ Plain semver, one tag per plugin repository:
   is left alone, even when it is newer than `ref`.
 - A setup release raises `minimum` only when it genuinely needs newer plugin
   behaviour. Bumping `ref` alone does not downgrade an existing deployment.
+- An explicit `.env` override (`DSH_TELEGRAM_PLUGIN` / `PENPOT_PLUGIN_REF`) is
+  honoured, except when it points below `minimum`: the catalog ref wins and the
+  boot warns. A stale pin cannot keep a deployment on an unsupported plugin.
 
 ## How updates move
 
