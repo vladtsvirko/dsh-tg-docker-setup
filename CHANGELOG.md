@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1-rc.5-0.12.10
+
+### Changed
+
+- **Penpot plugin pinned at `v0.2.0`.** That release removes the optional MCP
+  backend: the plugin is API-only, so the managed row no longer writes
+  `backend: auto` and a locally registered MCP server cannot silently replace
+  the API (and break export). The plugin now loads even before a token is set;
+  `penpot_status` says `none` until `PENPOT_ACCESS_TOKEN` is present.
+
 ## 0.2.1-rc.5-0.12.9
 
 ### Fixed

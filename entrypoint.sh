@@ -463,7 +463,6 @@ set_penpot_patch() {
   config:
     apiUrl: !!js process.env.PENPOT_API_URL ?? ''
     token: !!js process.env.PENPOT_ACCESS_TOKEN ?? ''
-    backend: auto
 # <<< dsh-penpot
 BLOCK
   elif [ "$mode" = off ]; then

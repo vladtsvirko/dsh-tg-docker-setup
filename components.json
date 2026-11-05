@@ -33,7 +33,7 @@
         "cli": "penpot"
       },
       "plugin": {
-        "ref": "github:vladtsvirko/dsh-penpot-plugin#v0.1.2",
+        "ref": "github:vladtsvirko/dsh-penpot-plugin#v0.2.0",
         "package": "dsh-penpot-plugin"
       }
     }
