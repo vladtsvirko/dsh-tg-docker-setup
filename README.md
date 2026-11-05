@@ -35,10 +35,12 @@ session between the two.
 | `scripts/credentials.mjs` | Reads and reconciles `data/home/.credentials.yaml` without printing a secret |
 | `scripts/git-manifest.mjs` | Builds or merges `secrets/git/profiles.json` from the installer's accounts |
 | `components.json` | Optional components (the Penpot design stack) |
+| `plugins.json` | Recommended plugin tags and the minimum each boot enforces |
 | `design/` | Penpot compose stack on Podman + the `penpot` CLI (`--design penpot`) |
 | `docs/FIRST-RUN.md` | The guided first run |
 | `docs/HOST.md` | The host deployment: layout, containers, resource limits, security boundary |
-| `docs/VERSIONS.md` | Version scheme, release coupling and update rules |
+| `docs/VERSIONS.md` | Version scheme and update rules |
+| `docs/PLUGINS.md` | Plugins standalone vs. in the setup, and the update model |
 | `docs/UPGRADE.md` | Upgrading, the health gate vs. a trial, and the rollback drill |
 | `docs/SELF-UPDATE.md` | `update.sh --apply` in detail |
 | `docs/UPDATER.md` | The privileged updater service |
@@ -105,7 +107,7 @@ curl -fsSL …/install.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.12.11`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.13.0`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -231,40 +233,46 @@ different name is never touched. The setup currently ships:
 
 ## Versioning and compatibility
 
-The connector and the setup ship as **one tag**:
+Three artifacts, two release tracks:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.12.11
-         DSH part          product part
+setup          0.2.1-rc.5-0.13.0      tag v0.2.1-rc.5-0.13.0
+connector      0.13.0                 tag v0.13.0
+penpot plugin  0.3.0                  tag v0.3.0
 ```
 
-- The DSH part is the exact tested runtime. It is derived from `VERSION` and
-  installed with `npm install -g @deepseek-ai/dsh@<dsh part>`; there is no
-  `DSH_VERSION` `.env` knob.
-- Product `0.x` is compatible. A new major is a break. The product part resets to
-  `0.0.0` when the pair moves to a new DSH line.
-- Same DSH part and same product major may jump (`0.1.1 → 0.4.2`).
-- Crossing a DSH line or product major requires the explicit
-  `--i-know-versions-are-incompatible`; neither `/system` nor a scheduled update
-  crosses on its own.
-- Tags are immutable. The setup `VERSION` and the connector `package.json` must
-  carry the same version; each repository's CI checks its own half, and a setup
-  tag build also proves the connector tag exists.
+**Setup.** The DSH part is the exact tested runtime. It is derived from
+`VERSION` and installed with `npm install -g @deepseek-ai/dsh@<dsh part>`; there
+is no `DSH_VERSION` `.env` knob. Product `0.x` is compatible; a new major is a
+break, and the product part resets to `0.0.0` when the setup moves to a new DSH
+line. Crossing a DSH line or product major requires the explicit
+`--i-know-versions-are-incompatible`; neither `/system` nor a scheduled update
+crosses on its own.
 
-The entrypoint does not float the connector. It forces
-`github:vladtsvirko/dsh-telegram-connector#v${DSH_SETUP_VERSION}` (the setup tag)
-and reinstalls when that ref changes. Therefore:
+**Plugins.** The connector and the Penpot plugin are versioned on their own,
+with plain semver and their own release checklists. `plugins.json` pins a
+recommended `ref` and a `minimum` for each. There is no matching-tag rule: a
+setup release does not need a connector or plugin tag, and a plugin release does
+not need a setup release.
 
-- a setup release **needs** a matching connector tag — even when only setup code
-  changed;
-- a connector change you want a deployment to use **needs** a setup release with
-  the same version;
-- `/system update connector` reinstalls the **pinned** connector; it does not
-  select a newer connector tag.
+The entrypoint follows one rule: **install the pin when absent, enforce the
+minimum, never downgrade.**
 
-The full policy, release checklist and coupling rules are in
-[`docs/VERSIONS.md`](docs/VERSIONS.md). Inside the bot, `/system status` reports the
-connector version, runtime version and updater state.
+- A fresh install or a repair adds the `plugins.json` ref.
+- A boot compares the installed version with `minimum`; only a version below it
+  is reinstalled.
+- A newer compatible tag installed from the bot (`/system update connector`,
+  `/system update penpot`) stays installed across reboots and setup updates.
+- If a release genuinely needs a newer plugin, it raises `minimum`; that is the
+  only remaining coupling.
+
+`/system update connector` resolves the newest tag in the connector repository
+(or `to <version>`), checks the tag's declared DSH range, and asks the
+supervisor to install that exact ref inside a trial. `/system update penpot`
+does the same for the design plugin through the host plugin manager. The full
+policy and release checklists are in [`docs/VERSIONS.md`](docs/VERSIONS.md) and
+[`docs/PLUGINS.md`](docs/PLUGINS.md). Inside the bot, `/system status` reports
+the connector version, runtime version and updater state.
 
 ## Choosing the connector
 
@@ -273,7 +281,7 @@ connector version, runtime version and updater state.
 
 | Ref | Model |
 |---|---|
-| *(empty)* | group = workspace, topic = session, control chat = private, version = setup tag |
+| *(empty)* | group = workspace, topic = session, control chat = private, version from `plugins.json` |
 | `github:ben7am1n/dsh-telegram` | one chat = one session, flat |
 
 The package name is derived from the ref (or set `DSH_TELEGRAM_PACKAGE`), because
@@ -373,9 +381,10 @@ From the bot chat:
 |---|---|
 | `/system restart` | restart into a trial: the new state is live and the previous one is kept for rollback |
 | `/system restart now` | restart without a trial; the current state becomes the rollback point |
-| `/system update connector` | reinstall the pinned connector: stop, run `reset-plugin`, start in a trial |
+| `/system update connector` | move the connector to its newest compatible tag: stop, run `reset-plugin` with that ref, start in a trial |
 | `/system update connector now` | same, without the trial |
 | `/system update setup` | drain all agents, then update the setup through the updater; automatic rollback on failed health |
+| `/system update penpot` · `/system update plugin <name>` | move a bundle to its newest compatible tag through the plugin manager, in a trial |
 | `/system confirm` | commit the trial: this state becomes the new rollback point |
 | `/system rollback` | restore the last committed **profile** state and restart (does not move the checkout) |
 | `/system cancel` | abandon a pending update and unblock the bot; after acceptance it stops the updater job |
@@ -491,7 +500,7 @@ commands remain the bootstrap, break-glass and deliberate manual path:
 ./update.sh --check        # latest compatible setup tag, change nothing
 ./update.sh --apply        # latest compatible tag, health gate, rollback
 ./update.sh --to <tag>     # exact target (what the updater service uses)
-./update.sh --tg-connector # re-resolve the pinned Telegram connector
+./update.sh --tg-connector # reinstall the connector at its installed spec
 ```
 
 
@@ -543,7 +552,8 @@ one-step rollback. `ASSUME_YES=1` makes it unattended:
 |---|---|---|
 | dsh itself | setup release tag (`VERSION`, DSH part) | The only version that matters for compatibility |
 | Node | host package manager | ≥ 22.19; the installer uses NodeSource when it must |
-| Telegram connector | setup release tag (`VERSION`); `/system update connector` re-runs the boot install | It tracks the setup tag, not a floating branch |
+| Telegram connector | its own semver tag; `/system update connector` installs the newest compatible one inside a trial | `plugins.json` pins a fresh-install floor, not a ceiling |
+| Penpot plugin | its own semver tag; `/system update penpot` through the plugin manager | Same trial/rollback path as any bundle |
 | updater | checkout, restarted by systemd | Its code is the mounted checkout |
 | Other plugins | add via `/plugin add` or `dsh plugin`, pinned in the profile's `pnpm-lock.yaml` | Lives in `data/home`, survives updates |
 | Model names | `DSH_MODEL` in `.env` | Provider models change without any install change |

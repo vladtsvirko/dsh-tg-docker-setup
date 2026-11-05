@@ -96,10 +96,11 @@ bump is a break. The product part resets to `0.0.0` on a new DSH alignment.
 - `rollback` mode is deliberately not exposed. A failed health gate rolls back
   automatically; a manual tag rollback is a host operation.
 
-`VERSION` is the release: its prefix is the DSH part that `update.sh` installs
-globally, and the entrypoint derives the connector tag from
-`DSH_SETUP_VERSION`. CI checks that `VERSION` and the tag agree. The setup
-release and connector release move together — see [`VERSIONS.md`](VERSIONS.md).
+`VERSION` is the setup release: its prefix is the DSH part that `update.sh`
+installs globally. CI checks that `VERSION` and the tag agree. Plugins are
+versioned independently; the entrypoint applies their `plugins.json` floor after
+a setup update but does not force a matching tag — see
+[`VERSIONS.md`](VERSIONS.md).
 
 ## Drain
 

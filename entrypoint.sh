@@ -20,12 +20,39 @@ SETUP_VERSION="${DSH_SETUP_VERSION:-0.0.0}"
 # assets (skills/) sit beside the real file, not beside the symlink.
 SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SETUP_DIR="$(cd "$(dirname "$SELF")" && pwd -P)"
-PLUGIN_REF="${DSH_TELEGRAM_PLUGIN:-github:vladtsvirko/dsh-telegram-connector#v${SETUP_VERSION}}"
-# The setup release owns the connector version: if the configured ref points at
-# this connector, force the matching tag instead of an older user override.
-case "$PLUGIN_REF" in
-  github:vladtsvirko/dsh-telegram-connector*) PLUGIN_REF="github:vladtsvirko/dsh-telegram-connector#v${SETUP_VERSION}" ;;
-esac
+
+# plugins.json is the checkout's recommended pin: what a fresh install or a
+# repair resolves. It is not a ceiling — a newer compatible version installed
+# from the bot (or by hand) stays installed across reboots, and a setup upgrade
+# only forces a reinstall when the installed version is below `minimum`.
+catalog_value() {
+  local key="$1" field="$2"
+  [ -f "$SETUP_DIR/plugins.json" ] || return 1
+  node -e '
+    try {
+      const catalog = require(process.argv[1])
+      const value = catalog.plugins?.[process.argv[2]]?.[process.argv[3]]
+      if (value !== undefined && value !== null) process.stdout.write(String(value))
+    } catch {}
+  ' "$SETUP_DIR/plugins.json" "$key" "$field" 2>/dev/null
+}
+
+# A targeted update from the bot names the exact spec for this one run. It wins
+# over both the .env override and the checkout pin; the next boot falls back to
+# whatever the profile has installed.
+PLUGIN_TARGET_REF="${DSH_PLUGIN_TARGET_REF:-}"
+PLUGIN_REF="${DSH_TELEGRAM_PLUGIN:-}"
+PLUGIN_REF_FROM_ENV=0
+[ -n "$PLUGIN_REF" ] && PLUGIN_REF_FROM_ENV=1
+if [ -z "$PLUGIN_REF" ]; then
+  PLUGIN_REF="$(catalog_value dsh-telegram-connector ref || true)"
+fi
+# Last-resort pin for a checkout whose catalog is missing (a partial copy). Not
+# `main`: a missing catalog must not silently make the bot float.
+if [ -z "$PLUGIN_REF" ]; then
+  PLUGIN_REF="github:vladtsvirko/dsh-telegram-connector#v0.13.0"
+fi
+PLUGIN_MIN="$(catalog_value dsh-telegram-connector minimum || true)"
 # Which package this ref installs. Derived from the ref unless stated, because the
 # patch row id and the install check both key off the package name.
 PLUGIN_PKG="${DSH_TELEGRAM_PACKAGE:-}"
@@ -43,6 +70,12 @@ BOT_TOKEN="${DSH_TELEGRAM_BOT_TOKEN:-}"
 TELEGRAM_ENABLED="${DSH_TELEGRAM_ENABLED:-auto}"
 PENPOT_ENABLED="${PENPOT_ENABLED:-0}"
 PENPOT_REF="${PENPOT_PLUGIN_REF:-}"
+PENPOT_REF_FROM_ENV=0
+[ -n "$PENPOT_REF" ] && PENPOT_REF_FROM_ENV=1
+if [ -z "$PENPOT_REF" ]; then
+  PENPOT_REF="$(catalog_value dsh-penpot-plugin ref || true)"
+fi
+PENPOT_MIN="$(catalog_value dsh-penpot-plugin minimum || true)"
 PENPOT_PKG="dsh-penpot-plugin"
 
 # --- model route ----------------------------------------------------------
@@ -292,17 +325,78 @@ BLOCK
   rm -f "$block"
 }
 
+# The spec the profile currently records for a package, if any. `reset-plugin`
+# uses it so a reinstall keeps the version the bot moved to instead of
+# downgrading to the checkout's recommendation.
+profile_dependency() {
+  [ -f "$PROFILE_DIR/package.json" ] || return 1
+  node -e '
+    try {
+      const pkg = require(process.argv[1])
+      const spec = pkg.dependencies?.[process.argv[2]]
+      if (typeof spec === "string" && spec.length > 0) process.stdout.write(spec)
+    } catch {}
+  ' "$PROFILE_DIR/package.json" "$1" 2>/dev/null
+}
+
+# True when $1 (a package version) is at least $2. Prereleases sort below their
+# stable release, which matters because DSH tags carry an rc suffix.
+version_gte() {
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  node -e '
+    const parse = (text) => {
+      const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(text)
+      return match === null ? undefined : [Number(match[1]), Number(match[2]), Number(match[3]), match[4] === undefined ? [] : match[4].split(".")]
+    }
+    const one = parse(process.argv[1])
+    const two = parse(process.argv[2])
+    if (one === undefined || two === undefined) process.exit(2)
+    for (let index = 0; index < 3; index += 1) {
+      if (one[index] !== two[index]) process.exit(one[index] > two[index] ? 0 : 1)
+    }
+    const left = one[3]
+    const right = two[3]
+    if (left.length === 0 && right.length === 0) process.exit(0)
+    if (left.length === 0) process.exit(0)
+    if (right.length === 0) process.exit(1)
+    for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+      const a = left[index]
+      const b = right[index]
+      if (a === undefined) process.exit(1)
+      if (b === undefined) process.exit(0)
+      if (a === b) continue
+      const an = /^\d+$/.test(a)
+      const bn = /^\d+$/.test(b)
+      if (an && bn) process.exit(Number(a) > Number(b) ? 0 : 1)
+      if (an) process.exit(1)
+      if (bn) process.exit(0)
+      process.exit(a > b ? 0 : 1)
+    }
+    process.exit(0)
+  ' "$1" "$2" 2>/dev/null
+}
+
 install_plugin() {
   # Check the installed copy, not the manifest entry: `reset-plugin` keeps the
   # dependency but wipes node_modules, and that must re-trigger the install.
-  # The ref stamp makes a setup release that pins a new connector reinstall it.
-  local stamp="$PROFILE_DIR/.telegram-plugin-ref"
-  if [ -f "$PROFILE_DIR/node_modules/$PLUGIN_PKG/package.json" ] &&
-     [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$PLUGIN_REF" ]; then
-    return 0
+  #
+  # A newer compatible connector installed from the bot must survive a reboot,
+  # so the checkout pin is a floor, not a ceiling. Only a missing package, a
+  # package below `minimum`, or an explicit target triggers a reinstall.
+  local stamp="$PROFILE_DIR/.telegram-plugin-ref" target desired installed_version min
+  target="$PLUGIN_TARGET_REF"
+  desired="${target:-$PLUGIN_REF}"
+  min="$PLUGIN_MIN"
+  [ "$PLUGIN_PKG" = "dsh-telegram-connector" ] || min=""
+  if [ -f "$PROFILE_DIR/node_modules/$PLUGIN_PKG/package.json" ] && [ -z "$target" ]; then
+    installed_version="$(node -p "require('$PROFILE_DIR/node_modules/$PLUGIN_PKG/package.json').version" 2>/dev/null || true)"
+    if [ -z "$min" ] || version_gte "$installed_version" "$min"; then
+      return 0
+    fi
+    log "connector $installed_version is older than the required $min; reinstalling"
   fi
-  if [ -f "$PROFILE_DIR/node_modules/$PLUGIN_PKG/package.json" ] && [ -f "$stamp" ]; then
-    log "Telegram adapter ref changed; reinstalling it"
+  if [ -f "$PROFILE_DIR/node_modules/$PLUGIN_PKG/package.json" ]; then
+    log "reinstalling the Telegram adapter"
     dsh plugin --profile web remove "$PLUGIN_PKG" >/dev/null 2>&1 || true
     rm -rf "$PROFILE_DIR/node_modules/$PLUGIN_PKG"
   fi
@@ -311,9 +405,9 @@ install_plugin() {
   log "installing the Telegram adapter (needs network)"
   local out attempt
   for attempt in 1 2 3 4; do
-    if dsh plugin --profile web add "$PLUGIN_REF" >/tmp/plugin-install.log 2>&1; then
+    if dsh plugin --profile web add "$desired" >/tmp/plugin-install.log 2>&1; then
       log "adapter installed"
-      printf '%s\n' "$PLUGIN_REF" > "$stamp"
+      printf '%s\n' "$desired" > "$stamp"
       return 0
     fi
     out="$(cat /tmp/plugin-install.log)"
@@ -411,13 +505,19 @@ setup_git_credentials() {
 }
 
 install_penpot() {
-  # Same shape as the Telegram adapter: install once per pinned ref, and only
-  # when the design component is enabled. The stamp makes a ref bump reinstall.
-  local stamp="$PROFILE_DIR/.penpot-plugin-ref"
+  # Same shape as the Telegram adapter: the checkout pin installs a missing
+  # plugin and enforces a minimum, but never downgrades a newer version the bot
+  # installed through the plugin manager.
+  local stamp="$PROFILE_DIR/.penpot-plugin-ref" installed_version
   [ -n "$PENPOT_REF" ] || { warn "PENPOT_PLUGIN_REF is empty — design tools stay off"; return 1; }
-  if [ -f "$PROFILE_DIR/node_modules/$PENPOT_PKG/package.json" ] &&
-     [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$PENPOT_REF" ]; then
-    return 0
+  if [ -f "$PROFILE_DIR/node_modules/$PENPOT_PKG/package.json" ]; then
+    installed_version="$(node -p "require('$PROFILE_DIR/node_modules/$PENPOT_PKG/package.json').version" 2>/dev/null || true)"
+    if [ -z "$PENPOT_MIN" ] || version_gte "$installed_version" "$PENPOT_MIN"; then
+      return 0
+    fi
+    log "Penpot plugin $installed_version is older than the required $PENPOT_MIN; reinstalling"
+    dsh plugin --profile web remove "$PENPOT_PKG" >/dev/null 2>&1 || true
+    rm -rf "$PROFILE_DIR/node_modules/$PENPOT_PKG"
   fi
   command -v pnpm >/dev/null 2>&1 ||
     warn "pnpm is not on PATH — the plugin's build step will fail; install pnpm"
@@ -518,7 +618,15 @@ prepare() {
   [ -f "$PROFILE_DIR/node_modules/$PLUGIN_PKG/package.json" ] && installed=1
 
   if [ "$mode" = on ]; then
-    install_plugin || true
+    if ! install_plugin; then
+      # A repair may leave the web UI up; a targeted update must fail loudly so
+      # the supervisor restores the stable profile instead of booting without a
+      # bot and waiting for the trial deadline.
+      if [ -n "$PLUGIN_TARGET_REF" ]; then
+        warn "targeted connector update failed — refusing to boot without it"
+        exit 1
+      fi
+    fi
     if [ -f "$PROFILE_DIR/node_modules/$PLUGIN_PKG/package.json" ]; then
       ensure_compat
       set_telegram_patch on
@@ -594,6 +702,34 @@ case "${1:-serve}" in
   init)  prepare ;;
   reset-plugin)
     prepare_dirs
+    # The profile is the source of truth for what is installed. Capture both
+    # specs before `dsh plugin remove` rewrites package.json, so a repair of a
+    # deployment the bot updated does not silently downgrade it.
+    if [ -z "$PLUGIN_TARGET_REF" ] && [ "$PLUGIN_REF_FROM_ENV" = 0 ]; then
+      current_connector="$(profile_dependency "$PLUGIN_PKG" || true)"
+      if [ -n "$current_connector" ]; then
+        PLUGIN_TARGET_REF="$current_connector"
+        export DSH_PLUGIN_TARGET_REF="$current_connector"
+        log "reinstalling the connector at its installed spec: $current_connector"
+      fi
+    fi
+    if [ "$PENPOT_REF_FROM_ENV" = 0 ]; then
+      current_penpot="$(profile_dependency "$PENPOT_PKG" || true)"
+      if [ -n "$current_penpot" ]; then PENPOT_REF="$current_penpot"; fi
+    fi
+    # Switching connectors changes PLUGIN_PKG; remove the package the previous
+    # install recorded, or the old poller stays installed beside the new one.
+    old_ref="$(cat "$PROFILE_DIR/.telegram-plugin-ref" 2>/dev/null || true)"
+    old_pkg=""
+    case "$old_ref" in
+      github:*) old_pkg="$(printf '%s' "$old_ref" | sed -e 's|^github:||' -e 's|#.*$||' -e 's|\.git$||' -e 's|/$||')" ;;
+      *) [ -n "$old_ref" ] && old_pkg="$(basename "$old_ref")" ;;
+    esac
+    old_pkg="${old_pkg##*/}"
+    if [ -n "$old_pkg" ] && [ "$old_pkg" != "$PLUGIN_PKG" ]; then
+      log "removing the previous connector package: $old_pkg"
+      dsh plugin --profile web remove "$old_pkg" >/dev/null 2>&1 || true
+    fi
     log "resetting the profile plugin layer"
     dsh plugin --profile web remove "$PLUGIN_PKG" >/dev/null 2>&1 || true
     rm -rf "$PROFILE_DIR/node_modules" "$PROFILE_DIR/pnpm-lock.yaml" "$PROFILE_DIR/compatibility.json"

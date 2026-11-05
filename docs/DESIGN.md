@@ -57,12 +57,14 @@ stack.
 1. Open `http://<DSH_BIND_IP>:<DSH_DESIGN_PORT>/` and create the first account
    (registration is on; email verification is off, a LAN instance has no SMTP).
 2. Settings → **Access tokens** → create one.
-3. Put it in `/srv/dsh/design/.env` as `PENPOT_ACCESS_TOKEN=...` (or in
-   `/srv/dsh/.env`; the installer mirrors it into both). It is stored once and
-   survives updates — re-running `install.sh` or `/system update setup` does not
-   require entering it again.
-4. Re-run the component once so the runtime picks the token up: `/system components`
-   → Enable (idempotent), or `./update.sh --component design enable`.
+3. The host tools ask for it: `./install.sh`, `./update.sh --apply` and
+   `./update.sh --component design enable` write the token to
+   `/srv/dsh/design/.env` and mirror it into `/srv/dsh/.env`. Enter keeps the
+   stored token, so a re-run never requires entering it again.
+4. On a first install the stack is not up yet when the prompt appears, so leave
+   it blank; once the account exists, re-run `./update.sh --component design
+   enable` (or `./install.sh`) and paste it. From Telegram, `/system components`
+   → Enable reuses the stored token — the bot never asks for secrets.
 
 ## Managing it from the control chat
 
@@ -88,12 +90,13 @@ new port. Disable stops the stack and keeps `design/data/`. The runtime env keep
 Enabling the component also installs the DSH plugin
 [dsh-penpot-plugin](https://github.com/vladtsvirko/dsh-penpot-plugin) into the
 profile: the entrypoint runs `dsh plugin --profile web add <ref>` on the next
-boot, where `<ref>` is `PENPOT_PLUGIN_REF` (pinned in `components.json`,
+boot, where `<ref>` is `PENPOT_PLUGIN_REF` (pinned in `plugins.json`,
 overridable in `.env`) and writes a managed `dsh-penpot` row. Disabling sets
 `PENPOT_ENABLED=0`, which leaves the package installed but disables the row.
 
-The plugin is versioned on its own: bumping it means bumping the ref in
-`components.json`, which is a setup release.
+The plugin is versioned on its own. `plugins.json` pins a recommended ref and a
+minimum; a newer compatible tag installed from the bot stays installed, and a
+setup release only raises the floor when it needs newer plugin behaviour.
 
 ## The `penpot` CLI
 

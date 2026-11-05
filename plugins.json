@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "comment": "Recommended plugin pins for a fresh install or repair. `minimum` is the floor a boot enforces; a newer compatible version installed from the bot stays installed. Plugin versions are independent of VERSION.",
+  "plugins": {
+    "dsh-telegram-connector": {
+      "ref": "github:vladtsvirko/dsh-telegram-connector#v0.13.0",
+      "minimum": "0.13.0",
+      "repository": "vladtsvirko/dsh-telegram-connector"
+    },
+    "dsh-penpot-plugin": {
+      "ref": "github:vladtsvirko/dsh-penpot-plugin#v0.3.0",
+      "minimum": "0.3.0",
+      "repository": "vladtsvirko/dsh-penpot-plugin"
+    }
+  }
+}

@@ -6,7 +6,7 @@
 #   ./update.sh --check      what a compatible update would do; change nothing
 #   ./update.sh --apply      latest compatible tag: checkout, install, health gate, rollback
 #   ./update.sh --to <tag>   exact target (used by the updater service)
-#   ./update.sh --tg-connector   re-resolve the pinned Telegram connector
+#   ./update.sh --tg-connector   reinstall the Telegram connector at its installed spec
 #   ./update.sh --doctor     full health check; --fix repairs what it can
 #   ./update.sh --component <name> <enable|disable|configure> [--port N]
 #
@@ -46,6 +46,40 @@ if [ "$UPDATE_SOURCED" = 0 ]; then
 fi
 
 env_get() { sed -n "s/^$1=//p" "$ENV_FILE" | head -1; }
+
+# Prompts: update.sh is run from a terminal, so stdin being a tty is the test.
+# The updater service and the connector call it without one and must not block.
+can_ask() {
+  [ "${ASSUME_YES:-0}" = 1 ] && return 1
+  [ -t 0 ]
+}
+
+read_secret() {
+  local answer=""
+  read -r -s answer || answer=""
+  printf '%s' "$answer"
+}
+
+# The Penpot access token is created inside Penpot (Settings -> Access tokens),
+# so a first start has none yet. On a later run the stored token is the default:
+# Enter keeps it, and the value is never echoed.
+ask_penpot_token() {
+  local answer
+  can_ask || return 0
+  if [ -n "${PENPOT_ACCESS_TOKEN:-}" ]; then
+    printf 'Penpot access token (blank = keep the stored one): ' >&2
+  else
+    printf 'Penpot access token (blank = set it up after the first start): ' >&2
+  fi
+  answer="$(read_secret)"
+  printf '\n' >&2
+  # A paste can carry surrounding whitespace or the whole KEY=value line.
+  answer="${answer#"${answer%%[![:space:]]*}"}"
+  answer="${answer%"${answer##*[![:space:]]}"}"
+  answer="${answer#PENPOT_ACCESS_TOKEN=}"
+  if [ -n "$answer" ]; then PENPOT_ACCESS_TOKEN="$answer"; fi
+}
+
 setup_version() { tr -d '\n' < VERSION; }
 dsh_version() {
   local v
@@ -61,7 +95,7 @@ Move the setup to a release tag; the DSH version moves with it.
   ./update.sh --check          what a compatible update would do; change nothing
   ./update.sh --apply          latest compatible tag: checkout, install, health gate, rollback
   ./update.sh --to <tag>       exact target (used by the updater service)
-  ./update.sh --tg-connector   re-resolve the pinned Telegram connector
+  ./update.sh --tg-connector   reinstall the Telegram connector at its installed spec
   ./update.sh --doctor         full health check; --fix repairs what it can
   ./update.sh --component <name> <enable|disable|configure> [--port N]
 
@@ -236,6 +270,8 @@ run_as_service() {
   local key value
   for key in DSH_PROVIDER DSH_MODEL DSH_PROVIDER_API_KEY_ENV OPENCODE_GO_API_KEY \
              DEEPSEEK_API_KEY DSH_TELEGRAM_BOT_TOKEN DSH_TELEGRAM_ENABLED \
+             DSH_TELEGRAM_PLUGIN DSH_TELEGRAM_PACKAGE PENPOT_PLUGIN_REF \
+             PENPOT_ENABLED DSH_DESIGN_ENABLED \
              ALLOWED_USER_IDS DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PERMISSION_MODE; do
     value="$(env_get "$key")"
     [ -n "$value" ] && pass+=("$key=$value")
@@ -287,8 +323,9 @@ native_rollback() {
   die "rollback failed too — $snapshot remains for recovery"
 }
 
-# Native apply: same tag policy as Docker, but the "artifact" is the checkout
-# plus the connector it installs, and the restart belongs to systemd.
+# Native apply: the "artifact" is the checkout plus the DSH install, and the
+# restart belongs to systemd. Plugins are reconciled by the entrypoint against
+# their own tags and floors.
 native_apply() {
   local cur=$1 target=$2 snapshot=""
   log "snapshotting data/home and data/supervisor"
@@ -521,6 +558,23 @@ self_update() {
     esac
   fi
 
+  # The Penpot token survives the update; ask anyway so rotating it does not
+  # need a separate install. Blank keeps the stored value and is never echoed.
+  if [ "$(env_get DESIGN)" = penpot ]; then
+    local token=""
+    if [ -f design/.env ]; then
+      token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' design/.env | head -1)"
+    fi
+    [ -n "$token" ] || token="$(env_get PENPOT_ACCESS_TOKEN)"
+    PENPOT_ACCESS_TOKEN="$token"
+    ask_penpot_token
+    token="${PENPOT_ACCESS_TOKEN:-}"
+    if [ -n "$token" ]; then
+      set_env PENPOT_ACCESS_TOKEN "$token" "$ENV_FILE"
+      if [ -f design/.env ]; then set_env PENPOT_ACCESS_TOKEN "$token" design/.env; fi
+    fi
+  fi
+
   native_apply "$cur" "$target"
 }
 
@@ -709,16 +763,21 @@ component_apply() {
       # runtime environment needs the API root and the token.
       set_env PENPOT_ENABLED 1 "$ENV_FILE"
       local plugin_ref
-      plugin_ref="$(node -e 'process.stdout.write(require("./components.json").components.design.plugin.ref)' 2>/dev/null || true)"
+      plugin_ref="$(node -e 'process.stdout.write(require("./plugins.json").plugins["dsh-penpot-plugin"].ref)' 2>/dev/null || true)"
       if [ -n "$plugin_ref" ]; then set_env PENPOT_PLUGIN_REF "$plugin_ref" "$ENV_FILE"; fi
       set_env PENPOT_API_URL "http://$bind:$port" "$ENV_FILE"
+      # The token is asked on every interactive enable/configure: a stored one
+      # is the default, so Enter keeps it; a first start has none yet.
       local token
       token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
-      if [ -z "$token" ]; then
-        token="$(env_get PENPOT_ACCESS_TOKEN)"
-        if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$env_file"; fi
+      [ -n "$token" ] || token="$(env_get PENPOT_ACCESS_TOKEN)"
+      PENPOT_ACCESS_TOKEN="$token"
+      ask_penpot_token
+      token="${PENPOT_ACCESS_TOKEN:-}"
+      if [ -n "$token" ]; then
+        set_env PENPOT_ACCESS_TOKEN "$token" "$env_file"
+        set_env PENPOT_ACCESS_TOKEN "$token" "$ENV_FILE"
       fi
-      if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$ENV_FILE"; fi
       log "restarting the runtime so the tools appear"
       restart_runtime || warn "could not restart the runtime"
       ;;

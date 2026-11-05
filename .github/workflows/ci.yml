@@ -44,6 +44,9 @@ jobs:
       - name: Penpot CLI tests
         run: node --test penpot.test.mjs
 
+      - name: Plugin catalog and version-policy tests
+        run: node --test plugins.test.mjs
+
       - name: Shell syntax
         run: bash -n entrypoint.sh healthcheck.sh update.sh install.sh scripts/repair.sh
 
@@ -60,13 +63,15 @@ jobs:
       - name: Validate release tag
         run: node scripts/check-version.mjs
 
-      # check-version.mjs only validates this repository's half. A setup tag
-      # without a matching connector tag leaves the bot uninstalled, so a tag
-      # build also proves the connector side exists.
-      - name: Connector tag exists
-        if: startsWith(github.ref, 'refs/tags/v')
+      # Plugins are versioned independently: the catalog is the only place the
+      # setup names their versions, and a malformed one breaks a boot.
+      - name: Plugin catalog
         run: |
-          tag="$(cat VERSION)"
-          git ls-remote --exit-code --tags https://github.com/vladtsvirko/dsh-telegram-connector.git "refs/tags/v${tag}" >/dev/null \
-            || { echo "::error::connector has no tag v${tag}"; exit 1; }
-          echo "connector tag v${tag} exists"
+          node -e '
+            const catalog = require("./plugins.json")
+            for (const [name, entry] of Object.entries(catalog.plugins ?? {})) {
+              if (!/^github:[^#]+#v\d+\.\d+\.\d+/.test(entry.ref ?? "")) throw new Error(`${name}: bad ref`)
+              if (!/^\d+\.\d+\.\d+/.test(entry.minimum ?? "")) throw new Error(`${name}: bad minimum`)
+            }
+            console.log(`plugin catalog ok: ${Object.keys(catalog.plugins ?? {}).length} plugins`)
+          '

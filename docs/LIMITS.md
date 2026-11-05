@@ -21,7 +21,8 @@ runtime.
 
 - prompts, sessions, topics, `/sync`, model and timezone changes;
 - `/system restart`, trials, `/system confirm`, `/system rollback` (profile);
-- `/system update connector` (reinstall the pinned connector);
+- `/system update connector` (newest compatible connector tag, in a trial);
+- `/system update penpot` / `/system update plugin <name>` (bundles, in a trial);
 - `/system update setup` (drain, setup update, automatic rollback);
 - plugin install/enable/disable/remove through the approval flow;
 - `/system status`, `/system status`, `/status` diagnostics;
@@ -159,10 +160,10 @@ it cannot repair a dead bot, a dead updater, or a dead systemd.
 
 See [`VERSIONS.md`](VERSIONS.md). In short:
 
-- both repositories share one tag;
-- the setup boot pin forces the connector tag derived from `VERSION`;
-- a setup release needs a connector tag, and a deployed connector change needs a
-  setup release;
+- the setup is one tag with DSH; the connector and Penpot plugin are versioned
+  independently and need no matching setup tag;
+- `plugins.json` pins a recommended plugin tag and a minimum; a boot only
+  enforces the minimum and never downgrades a newer compatible plugin;
 - tags are immutable;
 - the updater only moves forward within the same DSH line and product major
   unless the explicit incompatibility flag is given.

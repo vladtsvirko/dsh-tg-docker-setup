@@ -1,6 +1,6 @@
 # Acceptance run: the native install
 
-These steps were written for `v0.2.1-rc.5-0.12.11`; if you are accepting a later
+These steps were written for `v0.2.1-rc.5-0.13.0`; if you are accepting a later
 tag, substitute it everywhere below.
 
 One run, ~20 minutes. The point is not to see it work once, but to see the
@@ -33,8 +33,8 @@ in step 7.
 Install the way a stranger would — one downloaded file:
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.12.11/install.sh | sudo bash -s -- --check --dir /srv/dsh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.12.11/install.sh | sudo bash -s -- --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.13.0/install.sh | sudo bash -s -- --check --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.13.0/install.sh | sudo bash -s -- --dir /srv/dsh
 ```
 
 All `./install.sh` and `./update.sh` checks below run from `/srv/dsh`.
@@ -47,7 +47,7 @@ All `./install.sh` and `./update.sh` checks below run from `/srv/dsh`.
       `Proceed? [Y/n]`
 - [ ] it installs Node 22 (and says so), then `dsh` and `pnpm`; a missing Podman
       daemon is not an error for this run
-- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.12.11`
+- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.13.0`
 - [ ] the self-check that follows reports `clean`: `service`, `web` and
       `data-owner` all ok
 - [ ] `sudo ./install.sh --doctor` (no `--fix`) exits 0 and names the deployed
@@ -76,7 +76,7 @@ All `./install.sh` and `./update.sh` checks below run from `/srv/dsh`.
 - [ ] tap it, add the bot to a new group with Topics enabled: the group gets a
       dashboard
 - [ ] `/new` in the group creates a topic; a message in it gets a streamed answer
-- [ ] `/system status` shows: version `0.2.1-rc.5-0.12.11`, the admin line,
+- [ ] `/system status` shows: version `0.2.1-rc.5-0.13.0`, the admin line,
       `web: 127.0.0.1:<port> answered …`, `key: set`,
       `registry: 1 workspace(s) in the runtime · 1 bound to Telegram`,
       `data: … this runtime`, `last agent error: none`
@@ -137,10 +137,23 @@ All `./install.sh` and `./update.sh` checks below run from `/srv/dsh`.
 - [ ] after the restart, `journalctl -u dsh.service -n 50` has no
       `already owned by an active write handle`
 
-## 9. Connector update
+## 9. Plugin updates
 
-- [ ] `/system update connector` → the connector reinstalls and the bot returns
-- [ ] `/system status` still reports the runtime and the adapter
+- [ ] `/system update connector` → either reports `the connector is current
+      (<version>); v<version> is the newest tag`, or updates and returns in a
+      trial. In both cases `/system status` still reports the runtime and the
+      adapter, and the connector version is **not** the setup `VERSION`
+- [ ] `/system update connector to <older tag>` → refused as a rollback, with
+      the current version named
+- [ ] with the design stack enabled: `/system update penpot` → either current
+      or updates through the plugin manager, in a trial; `penpot_status` still
+      answers after the change
+- [ ] `/system update plugin dsh-penpot-plugin` → the same result as
+      `/system update penpot`
+- [ ] `/plugins` lists both bundles; `/plugin info dsh-penpot-plugin` shows the
+      version and source the update left in place
+- [ ] `cat plugins.json` and `cat VERSION`: the plugin refs are plain semver and
+      are not derived from the setup tag
 
 ## 10. Uninstall
 

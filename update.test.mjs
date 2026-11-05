@@ -324,6 +324,39 @@ needsExec('--check resolves the target without applying it', async () => {
   }
 })
 
+test('the Penpot token prompt keeps the stored token on an empty answer', async () => {
+  const dir = await deployment()
+  try {
+    const out = await source(dir, `
+      can_ask() { return 0; }
+      read_secret() { printf '%s' "$FAKE"; }
+      PENPOT_ACCESS_TOKEN=stored
+      FAKE='' ask_penpot_token
+      printf 'keep=[%s]\\n' "$PENPOT_ACCESS_TOKEN"
+      FAKE='  new-token  ' ask_penpot_token
+      printf 'trim=[%s]\\n' "$PENPOT_ACCESS_TOKEN"
+      FAKE='PENPOT_ACCESS_TOKEN=full-line' ask_penpot_token
+      printf 'line=[%s]\\n' "$PENPOT_ACCESS_TOKEN"
+      PENPOT_ACCESS_TOKEN=''
+      FAKE='' ask_penpot_token
+      printf 'none=[%s]\\n' "$PENPOT_ACCESS_TOKEN"
+    `)
+    assert.equal(out, 'keep=[stored]\ntrim=[new-token]\nline=[full-line]\nnone=[]')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('the Penpot token prompt is a no-op without a terminal', async () => {
+  const dir = await deployment()
+  try {
+    const out = await source(dir, 'PENPOT_ACCESS_TOKEN=stored; ask_penpot_token; printf "%s" "$PENPOT_ACCESS_TOKEN"')
+    assert.equal(out, 'stored')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('--help works without a deployment and exits 0', async () => {
   const result = await exec('bash', [join(here, 'update.sh'), '--help'])
     .then((r) => ({ code: 0, out: r.stdout + r.stderr }), (error) => ({ code: error.code ?? 1, out: String(error.stdout ?? '') + String(error.stderr ?? '') }))

@@ -368,9 +368,9 @@ async function abandonTrial() {
 }
 
 /** Run a command, keep the tail of its output, and give up after a deadline. */
-function runProcess(command, args, timeoutMs) {
+function runProcess(command, args, timeoutMs, extraEnv = {}) {
   return new Promise((resolve) => {
-    const proc = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], env })
+    const proc = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...env, ...extraEnv } })
     let output = ''
     const capture = (chunk) => {
       const text = String(chunk)
@@ -400,12 +400,20 @@ function runProcess(command, args, timeoutMs) {
  * handling that made the first install work — instead of reimplementing pnpm
  * from the supervisor.
  */
-async function runUpdate(trial = true) {
+async function runUpdate(trial = true, ref = undefined) {
   busy = true
   try {
     await stopChild()
-    log('running the entrypoint reset-plugin')
-    const result = await runProcess(entrypoint, ['reset-plugin'], updateTimeoutMs)
+    log(`running the entrypoint reset-plugin${ref === undefined ? '' : ` for ${ref}`}`)
+    // The ref is passed in the environment, not written into .env: an update is
+    // one operation, and a failed one must not leave the next boot pointing at
+    // the version that failed. The entrypoint consumes it for this run only.
+    const result = await runProcess(
+      entrypoint,
+      ['reset-plugin'],
+      updateTimeoutMs,
+      ref === undefined ? {} : { DSH_PLUGIN_TARGET_REF: ref },
+    )
     if (result.code !== 0) {
       log(`update failed (code ${String(result.code)}); restoring the previous state`)
       await restoreStable().catch((error) => log(`restore failed: ${String(error)}`))
@@ -437,7 +445,7 @@ async function runUpdate(trial = true) {
   }
 }
 
-async function beginUpdate(trial = true) {
+async function beginUpdate(trial = true, ref = undefined) {
   if (busy) return { ok: false, code: 409, error: 'another operation is running' }
   if (state.trial !== null) return { ok: false, code: 409, error: 'a trial is already running' }
   if (!await exists(stableDir)) {
@@ -450,7 +458,7 @@ async function beginUpdate(trial = true) {
   state.lastEvent = { kind: 'update', at: now() }
   await saveState()
   // Answer the request before the runtime goes away with the connection.
-  setTimeout(() => void runUpdate(trial), 800)
+  setTimeout(() => void runUpdate(trial, ref), 800)
   return { ok: true, ...(trial ? { trial: { ...state.trial } } : {}) }
 }
 
@@ -566,7 +574,15 @@ const server = createServer((request, response) => {
       return send(response, result.ok ? 200 : result.code, result)
     }
     if (path === '/update') {
-      const result = await beginUpdate(body.trial !== false)
+      // A plugin update may name the exact git ref to install. Validate the
+      // shape here so the entrypoint only ever receives a package spec, never a
+      // shell fragment.
+      const ref = body.ref
+      if (ref !== undefined && (typeof ref !== 'string' || ref.length === 0 || ref.length > 300
+        || !/^(github:|git\+|https:\/\/|http:\/\/)[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+$/.test(ref))) {
+        return send(response, 400, { error: 'invalid plugin ref' })
+      }
+      const result = await beginUpdate(body.trial !== false, ref)
       return send(response, result.ok ? 200 : result.code, result)
     }
     if (path === '/trial/open') {

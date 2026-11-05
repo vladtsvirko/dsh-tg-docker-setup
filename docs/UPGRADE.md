@@ -16,17 +16,18 @@ rules in [`VERSIONS.md`](VERSIONS.md).
 | the checkout (`git` tag) | `git checkout --detach <target>`; the previous tag stays reachable |
 | the installed DSH | `npm install -g @deepseek-ai/dsh@<DSH part>` when the DSH part changes |
 | `data/home`, `data/supervisor` | snapshotted to `backups/self-<stamp>.tgz` |
-| `.env` | `DSH_SETUP_VERSION` is rewritten so the entrypoint installs the matching connector tag |
+| `.env` | `DSH_SETUP_VERSION` is rewritten so the entrypoint knows which setup it is running |
 | `data/workspace` | untouched |
 
-`VERSION` and the connector tag are one release: they only ever move together,
-which is why the setup tag and the connector tag are always identical. The DSH
-part is the prefix of `VERSION`; there is no separate DSH pin to edit.
+The setup is one release with DSH; the connector and Penpot plugin are versioned
+independently and need no matching setup tag. The DSH part is the prefix of
+`VERSION`; there is no separate DSH pin to edit. `plugins.json` pins the
+recommended plugin tags and the minimum floor a boot enforces.
 
 ## Which upgrades are allowed
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.8.0
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.13.0
 ```
 
 - **Compatible** (the default): same DSH part, same product major. Any newer
@@ -61,7 +62,7 @@ cancels a running updater job).
 ```sh
 sudo ./update.sh --check    # what a compatible upgrade would do; changes nothing
 sudo ./update.sh --apply          # do it, with the first prompt asking to confirm
-sudo ./update.sh --to v0.2.1-rc.5-0.8.0   # an exact target (what the updater uses)
+sudo ./update.sh --to v0.2.1-rc.5-0.13.0   # an exact target (what the updater uses)
 ```
 
 Use this for a broken bot, a first install of the updater, or a deliberate
