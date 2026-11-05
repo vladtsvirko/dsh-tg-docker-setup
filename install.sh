@@ -1292,10 +1292,10 @@ podman_user_setup() {
     usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "$SERVICE_USER" \
       || warn "could not add subuid/subgid for $SERVICE_USER; rootless podman may fail"
   fi
-  local runtime="$DATA_HOME/.local/state"
-  run mkdir -p "$DATA_HOME/.config" "$runtime"
-  run chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_HOME/.config" "$runtime"
-  run chmod 700 "$runtime"
+  local runtime=/run/dsh
+  run mkdir -p "$DATA_HOME/.config"
+  run chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_HOME/.config"
+  run install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 700 "$runtime" 2>/dev/null || true
   # A user manager gives rootless Podman its systemd cgroup and removes the
   # "no systemd user session" warnings; it survives without a login.
   if command -v loginctl >/dev/null 2>&1; then
@@ -1639,7 +1639,7 @@ Group=$SERVICE_USER
 WorkingDirectory=$DATA_WORKSPACE
 EnvironmentFile=-$env_file
 Environment=HOME=$DATA_HOME
-Environment=XDG_RUNTIME_DIR=$DATA_HOME/.local/state
+Environment=XDG_RUNTIME_DIR=/run/dsh
 Environment=DSH_HOME=$DATA_HOME
 Environment=DSH_WORKSPACE=$DATA_WORKSPACE
 Environment=DSH_SUPERVISOR_STATE=$SUPERVISOR_STATE
@@ -1654,6 +1654,10 @@ Environment=TMPDIR=$DIR/data/.cache/tmp
 # filesystem and out of /tmp (which some hosts mount noexec).
 Environment=NARB_NATIVE_CACHE_DIR=$DIR/data/.cache/native
 ExecStart=/usr/local/bin/dsh-entrypoint serve
+# Rootless Podman needs a writable runtime dir for its network namespace.
+# /run/user/<uid> is hidden by ProtectHome=yes; /run/dsh is not.
+RuntimeDirectory=dsh
+RuntimeDirectoryMode=0700
 Restart=on-failure
 RestartSec=3
 KillMode=mixed

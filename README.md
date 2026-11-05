@@ -105,7 +105,7 @@ curl -fsSL …/install.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.12.3`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.12.4`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -234,7 +234,7 @@ different name is never touched. The setup currently ships:
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.12.3
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.12.4
          DSH part          product part
 ```
 

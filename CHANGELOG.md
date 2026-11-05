@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.1-rc.5-0.12.4
+
+### Fixed
+
+- **Rootless Podman's runtime dir is `/run/dsh`.** With
+  `XDG_RUNTIME_DIR=$DATA_HOME/.local/state`, pasta failed to open its network
+  namespace (`Couldn't open network namespace ...: Permission denied`), and
+  `/run/user/<uid>` is hidden from the service by `ProtectHome=yes`. The unit
+  now declares `RuntimeDirectory=dsh` (mode 0700) and exports
+  `XDG_RUNTIME_DIR=/run/dsh`; the installer creates the directory too, so a
+  manual `sudo -u dsh` test uses the same path.
+
 ## 0.2.1-rc.5-0.12.3
 
 ### Fixed
