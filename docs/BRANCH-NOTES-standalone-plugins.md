@@ -87,6 +87,10 @@ bash -n update.sh install.sh entrypoint.sh healthcheck.sh scripts/repair.sh
 GITHUB_REF_NAME=v0.2.1-rc.5-0.13.0 node scripts/check-version.mjs
 node scripts/plugin-preflight.mjs            # local versions match the pins
 node scripts/plugin-preflight.mjs --remote   # fails until the plugin tags exist
+./install.sh --check --yes --dir /tmp/x      # plan still resolves (no writes)
+
+# both packages
+npm pack --dry-run  # lib/, cordis.patch.yml, COMPATIBILITY.md, docs/STANDALONE.md
 ```
 
 Standalone check (both plugins composed and booted in a temp `DSH_HOME`):
