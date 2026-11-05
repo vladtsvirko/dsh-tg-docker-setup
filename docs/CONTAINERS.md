@@ -50,7 +50,8 @@ The installer adds the pieces rootless Podman needs:
   (`/etc/subuid`, `/etc/subgid`);
 - `netavark` + `aardvark-dns` — without the DNS binary, containers start but
   cannot resolve each other, so a compose stack (Penpot) never becomes healthy;
-- `slirp4netns`/`passt` and `fuse-overlayfs` for rootless networking and builds.
+- `passt` (the `pasta` binary) and `slirp4netns` for rootless networking, plus `fuse-overlayfs` for builds;
+- `loginctl enable-linger dsh`, so rootless Podman gets a systemd user manager and cgroup.
 
 On Ubuntu 24.04+ the kernel may restrict unprivileged user namespaces
 (`kernel.apparmor_restrict_unprivileged_userns=1`). Rootless Podman then fails

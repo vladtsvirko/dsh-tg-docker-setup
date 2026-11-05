@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1-rc.5-0.12.3
+
+### Fixed
+
+- **Rootless Podman gets `pasta`.** Podman 5 defaults rootless networking to
+  pasta; without the `passt` package a run failed with `could not find pasta,
+  the network namespace can't be configured`. The installer installs `passt`
+  and enables lingering for the service user, so the systemd user manager and
+  its cgroup are available (no more "no systemd user session" warnings).
+
 ## 0.2.1-rc.5-0.12.2
 
 ### Fixed

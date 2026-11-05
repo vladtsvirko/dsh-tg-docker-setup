@@ -1271,6 +1271,9 @@ ensure_podman() {
   # Rootless helpers; best effort because the distro names vary.
   apt_install uidmap slirp4netns fuse-overlayfs netavark aardvark-dns \
     || warn "some podman helpers are missing (DNS needs aardvark-dns); check 'podman info'"
+  # Podman 5 defaults rootless networking to pasta; without it a run fails with
+  # "could not find pasta, the network namespace can't be configured".
+  apt_install passt || warn "passt/pasta is missing — rootless podman cannot configure its network namespace"
   # Only the Penpot stack needs compose; the agent's `podman run` does not.
   if [ "$DESIGN" = penpot ] && ! podman_compose_ready; then
     [ "$DEPS" = 1 ] || die "podman-compose is missing and --no-deps was given"
@@ -1293,6 +1296,13 @@ podman_user_setup() {
   run mkdir -p "$DATA_HOME/.config" "$runtime"
   run chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_HOME/.config" "$runtime"
   run chmod 700 "$runtime"
+  # A user manager gives rootless Podman its systemd cgroup and removes the
+  # "no systemd user session" warnings; it survives without a login.
+  if command -v loginctl >/dev/null 2>&1; then
+    loginctl enable-linger "$SERVICE_USER" 2>/dev/null \
+      && log "enabled lingering for $SERVICE_USER (rootless podman cgroup)" \
+      || warn "could not enable lingering for $SERVICE_USER; rootless podman falls back to cgroupfs"
+  fi
   if run runuser -u "$SERVICE_USER" -- env HOME="$DATA_HOME" XDG_RUNTIME_DIR="$runtime" podman info >/dev/null 2>&1; then
     log "podman ready for $SERVICE_USER (rootless)"
   else
