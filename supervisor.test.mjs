@@ -415,13 +415,13 @@ needsExec('an update runs the entrypoint under a trial', async () => {
   }
 })
 
-needsExec('an update passes the exact plugin ref to reset-plugin', async () => {
+needsExec('an update passes the exact npm spec to reset-plugin', async () => {
   const testRef = await harness()
   try {
-    assert.equal((await testRef.call('/update', { ref: 'github:o/r#v1.2.3' })).status, 200)
+    assert.equal((await testRef.call('/update', { ref: 'dsh-telegram-connector@0.14.0' })).status, 200)
     await waitFor(async () => {
       const ran = await readFile(testRef.entryLog, 'utf8').catch(() => '')
-      return ran.includes('ref:github:o/r#v1.2.3')
+      return ran.includes('ref:dsh-telegram-connector@0.14.0')
     }, { timeout: 15000, what: 'the ref to reach the entrypoint' })
     assert.equal((await testRef.call('/trial/commit', {})).status, 200)
   } finally {
