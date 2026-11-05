@@ -7,7 +7,7 @@ once the release is tagged.
 |---|---|---|---|
 | `dsh-tg-docker-setup` | `feat/standalone-plugins` | `0.2.1-rc.5-0.13.0` | branch head (this file) |
 | `dsh-telegram-connector` | `feat/standalone-plugins` | `0.13.0` | branch head |
-| `dsh-penpot-plugin` | `feat/standalone-plugins` | `0.3.0` | `683da88` |
+| `dsh-penpot-plugin` | `feat/standalone-plugins` | `0.3.0` | branch head |
 
 Nothing is tagged or merged. `main` is untouched.
 
@@ -80,7 +80,7 @@ Run and green:
 # connector
 npm run typecheck && npm test && npm run build          # 232 passed, 1 todo
 # penpot
-npm run typecheck && npm test && npm run build          # 10 passed
+npm run typecheck && npm test && npm run build          # 11 passed
 # setup
 node --test entrypoint.test.mjs supervisor.test.mjs plugins.test.mjs install.test.mjs update.test.mjs
 bash -n update.sh install.sh entrypoint.sh healthcheck.sh scripts/repair.sh
