@@ -31,6 +31,24 @@ updater runs it rootful (the Penpot images need normal container networking),
 while the agent's own containers are rootless. `install.sh` skips the stack with
 a warning when Podman is absent, and the runtime keeps working without it.
 
+## Firewall
+
+Podman does **not** bypass ufw the way Docker does. When ufw is active, the
+installer (and `update.sh --component design enable`) adds the three rules the
+stack needs:
+
+```sh
+ufw allow in on <podman-bridge>
+ufw route allow in on <podman-bridge> out on <podman-bridge>
+ufw allow from <LAN> to any port <DSH_DESIGN_PORT> proto tcp
+```
+
+Without them the containers cannot resolve each other through `aardvark-dns`,
+so the frontend fails with `host not found in upstream "penpot-backend"` and the
+backend with `UnknownHostException: penpot-postgres`. The rules are not removed
+by `install.sh --uninstall`; delete them with `ufw delete` if you remove the
+stack.
+
 ## First run
 
 1. Open `http://<DSH_BIND_IP>:<DSH_DESIGN_PORT>/` and create the first account

@@ -63,6 +63,14 @@ sudo sysctl --system
 That weakens a kernel mitigation; do it only if you need rootless containers on
 that host.
 
+### ufw
+
+Podman does not insert ufw rules like Docker. If ufw is active, the design
+component adds `allow in on <podman bridge>`, `route allow` on the same bridge,
+and the Penpot port from the LAN. Without the bridge rules, containers cannot
+resolve each other (`host not found in upstream`), which looks like a DNS bug
+but is the firewall.
+
 ## Penpot
 
 `--design penpot` runs the design stack through **rootful** `podman-compose`

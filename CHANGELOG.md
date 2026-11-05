@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.1-rc.5-0.12.1
+
+### Fixed
+
+- **ufw and Podman are wired together for the design stack.** Docker used to
+  bypass ufw; Podman does not, so containers could not resolve each other and
+  Penpot failed with `host not found in upstream "penpot-backend"`. When ufw is
+  active, `install.sh --design penpot` and `update.sh --component design enable`
+  now add the bridge allow/route rules and the LAN rule for the Penpot port.
+  The rules outlive `--uninstall`; `docs/DESIGN.md` and `docs/CONTAINERS.md` say
+  so and show how to remove them.
+
 ## 0.2.1-rc.5-0.12.0
 
 Maintenance release; installer, updater and supervisor unchanged. Aligned with

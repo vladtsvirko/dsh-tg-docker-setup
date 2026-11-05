@@ -616,6 +616,28 @@ component_health() {
   return 1
 }
 
+# Podman's bridge is not covered by ufw's default policy; without these rules
+# containers cannot resolve each other (aardvark-dns) or reach the host. Docker
+# bypassed ufw, Podman does not. Only called from the root updater path.
+component_ufw() {
+  local port=$1 project=$2
+  command -v ufw >/dev/null 2>&1 || return 0
+  ufw_state | head -1 | grep -q 'Status: active' || return 0
+  [ "$(id -u)" = 0 ] || return 0
+  local net iface bind cidr
+  net="$(podman network ls --filter "label=io.podman.compose.project=$project" --format '{{.Name}}' 2>/dev/null | head -1)"
+  [ -n "$net" ] || return 0
+  iface="$(podman network inspect "$net" --format '{{.NetworkInterface}}' 2>/dev/null || true)"
+  [ -n "$iface" ] || return 0
+  bind="$(env_get DSH_BIND_IP)"; [ -n "$bind" ] || bind=127.0.0.1
+  cidr="$(lan_network "$bind")"
+  ufw allow in on "$iface" >/dev/null 2>&1 || warn "ufw: could not allow $iface"
+  ufw route allow in on "$iface" out on "$iface" >/dev/null 2>&1 || warn "ufw: could not route $iface"
+  ufw allow from "$cidr" to any port "$port" proto tcp >/dev/null 2>&1 \
+    || warn "ufw: could not allow $port from $cidr"
+  log "ufw: allowed the Podman bridge $iface and port $port from $cidr"
+}
+
 component_apply() {
   local name=$1 action=$2 port=${3:-}
   local names
@@ -675,6 +697,7 @@ component_apply() {
     enable|configure)
       log "starting $name on $bind:$port"
       ( cd "$compose_dir" && podman-compose -f "$compose_file" up -d ) || die "podman-compose failed for $name"
+      component_ufw "$port" "$(basename "$compose_dir")"
       set_env "$flag" 1 "$ENV_FILE"
       # The agent calls design/penpot.mjs from inside the runtime, so the
       # runtime environment needs the API root and the token.

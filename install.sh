@@ -601,6 +601,28 @@ write_git_manifest() {
   chown -R "$owner" "$DIR/secrets" 2>/dev/null || true
 }
 
+# Podman bridge traffic is not covered by ufw's default policy. Without these
+# rules containers cannot resolve each other through aardvark-dns or reach the
+# host gateway, so Penpot never starts. Docker used to bypass ufw; Podman does
+# not. Added only when the operator chose the design stack and ufw is active.
+design_ufw_apply() {
+  [ "$DESIGN" = penpot ] || return 0
+  command -v ufw >/dev/null 2>&1 || return 0
+  ufw_state | head -1 | grep -q 'Status: active' || return 0
+  [ "$(id -u)" = 0 ] || return 0
+  local net iface cidr
+  net="$(podman network ls --filter label=io.podman.compose.project=design --format '{{.Name}}' 2>/dev/null | head -1)"
+  [ -n "$net" ] || net=design_design
+  iface="$(podman network inspect "$net" --format '{{.NetworkInterface}}' 2>/dev/null || true)"
+  [ -n "$iface" ] || iface=podman1
+  cidr="$(lan_network "$DSH_BIND_IP")"
+  ufw allow in on "$iface" >/dev/null 2>&1 || warn "ufw: could not allow $iface"
+  ufw route allow in on "$iface" out on "$iface" >/dev/null 2>&1 || warn "ufw: could not route $iface"
+  ufw allow from "$cidr" to any port "$DSH_DESIGN_PORT" proto tcp >/dev/null 2>&1 \
+    || warn "ufw: could not allow $DSH_DESIGN_PORT from $cidr"
+  log "ufw: allowed the Podman bridge $iface and port $DSH_DESIGN_PORT from $cidr"
+}
+
 # --- firewall advisory ------------------------------------------------------
 # ufw gates the systemd service through its INPUT chain. It cannot be applied
 # from the runtime: the installer only warns, and /firewall (native) explains
@@ -1520,6 +1542,7 @@ design_apply() {
 
   log "starting Penpot on Podman (the first start pulls the images)"
   ( cd "$dir" && run podman-compose -f compose.yaml up -d ) || die "podman-compose failed for the design stack"
+  design_ufw_apply
 
   log "waiting for Penpot on http://$DSH_BIND_IP:$DSH_DESIGN_PORT/"
   local waited=0
