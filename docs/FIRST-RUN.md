@@ -22,7 +22,7 @@ You can start in one and continue in the other.
 
 ## Before you start
 
-Have these ready; the installer asks for them:
+Have these ready; the installer asks for the first four, and offers one `Customize` question for everything else:
 
 | You need | Why |
 |---|---|

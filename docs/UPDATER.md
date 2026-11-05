@@ -65,7 +65,7 @@ Authorization: Bearer <DSH_UPDATER_TOKEN>
 ```
 
 ```
-POST /target   {mode} -> 200 {from, target}   (resolve without applying)
+POST /target   {mode} -> 200 {from, target, crosses, dshFrom, dshTo, commits}   (resolve without applying)
 GET  /health   {ok, tag, canApply}
 GET  /status   {job: {id, state, from, target, exitCode?, logTail?},
                 elapsedSeconds, timeoutSeconds, cancellable}

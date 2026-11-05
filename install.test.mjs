@@ -745,3 +745,42 @@ test('the plan names the git author and the repository access', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('the bootstrap text no longer advertises --tier or Docker', async () => {
+  const source = await readFile(join(here, 'install.sh'), 'utf8')
+  assert.equal(source.includes('--tier'), false, '--tier has no parser branch and must not be documented')
+  assert.equal(source.includes('Docker or Node'), false, 'the bootstrap summary must name Podman, not Docker')
+  const usage = source.slice(source.indexOf('bootstrap_usage() {'), source.indexOf('in_bootstrap() {'))
+  assert.equal(/Docker/.test(usage), false, 'the bootstrap options must not mention Docker')
+})
+
+test('the plan says what a re-run writes and what it keeps', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'install-writes-'))
+  try {
+    const { code, out } = await install(['--check', '--yes', '--dir', join(root, 'deploy')])
+    assert.equal(code, 0)
+    assert.match(out, /writes:\s+.*\.env/)
+    assert.match(out, /keeps:\s+.*data/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('--uninstall refuses a system path even in a dry run', async () => {
+  const system = await install(['--uninstall', '--check', '--dir', '/'])
+  assert.notEqual(system.code, 0)
+  assert.match(system.out, /refusing --dir \//)
+})
+
+test('--uninstall still plans a real deployment', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'install-deploy-'))
+  try {
+    await writeFile(join(dir, 'VERSION'), await readFile(join(here, 'VERSION'), 'utf8'))
+    const { code, out } = await install(['--uninstall', '--check', '--dir', dir])
+    assert.equal(code, 0)
+    assert.match(out, /uninstall plan/)
+    assert.match(out, /keeps:/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

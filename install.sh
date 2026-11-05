@@ -56,7 +56,7 @@ Options (bootstrap):
   -h, --help             this text
 
 Everything else is passed to the installer inside the checkout: --yes,
---config, --design, --tier, --uninstall. Run --help after the checkout for the
+--config, --design, --uninstall. Run --help after the checkout for the
 full list.
 EOF
 }
@@ -120,7 +120,7 @@ bootstrap() {
   printf '    repository: %s\n' "$SETUP_REPO"
   printf '    release:    %s\n' "${ref:-the newest tag on the remote}"
   printf '    directory:  %s\n' "$dir"
-  printf '    needs:      git, curl (installed if missing); Docker or Node are handled\n'
+  printf '    needs:      git, curl (installed if missing); Podman and Node are handled\n'
   printf '                by the installer, once the mode is known\n'
   echo
 
@@ -148,7 +148,7 @@ bootstrap() {
   fi
 
   # git and curl to fetch, and nothing else here: the mode decides whether
-  # Docker or Node is needed, and that question is asked after the checkout.
+  # Podman or Node is needed, and that question is asked after the checkout.
   local -a want=()
   command -v git >/dev/null 2>&1 || want+=(git)
   command -v curl >/dev/null 2>&1 && command -v wget >/dev/null 2>&1 || want+=(curl)
@@ -247,7 +247,8 @@ Options:
   --design penpot|none   optional Penpot design stack, run on Podman
                          (default: ask, else none)
   --ref REF              git ref for the native checkout (default: v<VERSION>)
-  --config FILE          read answers from FILE (KEY=VALUE, no shell)
+  --config FILE          read answers from FILE (KEY=VALUE, no shell);
+                         still prompts unless --yes is passed
   --no-deps              do not install Node or git; they must already exist
   --clean-source         remove the downloaded checkout once installed
   --yes, -y              accept defaults, never prompt
@@ -258,6 +259,7 @@ Options:
                          deployed OPENCODE_GO_API_KEY / DEEPSEEK_API_KEY)
   --uninstall            stop and remove the deployment (keeps data/)
   --purge                with --uninstall: also delete data/, .env and backups/
+  --version              print the setup and DSH versions, then exit
   -h, --help             this text
 EOF
 }
@@ -318,6 +320,7 @@ while [ $# -gt 0 ]; do
     --fix)    FIX=1; shift ;;
     --rotate-key) ROTATE_KEY=1; shift ;;
     -h|--help) usage; exit 0 ;;
+    --version) printf 'dsh-setup %s (DSH %s)\n' "$SETUP_VERSION" "$DSH_VERSION"; exit 0 ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
 done
@@ -861,6 +864,39 @@ fi
 
 read_existing_env
 
+# --- deployment path guard -------------------------------------------------
+# --purge deletes data/ and .env as root. Refuse anything that is not a
+# deployment, and never let a typo in --dir turn into `rm -rf /data`.
+resolved_dir() {
+  realpath -m -- "$1" 2>/dev/null || printf '%s\n' "$1"
+}
+
+assert_safe_dir() {
+  local dir="$1" resolved
+  resolved="$(resolved_dir "$dir")"
+  case "$resolved" in
+    /|/bin|/boot|/dev|/etc|/home|/lib|/lib64|/opt|/proc|/root|/run|/sbin|/srv|/sys|/tmp|/usr|/var)
+      die "refusing --dir $resolved — choose the deployment directory, not a system path" ;;
+  esac
+  case "$resolved" in
+    /*/*) ;;
+    *) die "--dir must be an absolute path below / (got $resolved)" ;;
+  esac
+  if [ "$resolved" = "${HOME:-/nonexistent}" ]; then
+    die "refusing to use $HOME itself as --dir"
+  fi
+  printf '%s\n' "$resolved"
+}
+
+assert_deployment_dir() {
+  local resolved
+  resolved="$(assert_safe_dir "$1")"
+  if [ ! -f "$resolved/VERSION" ] && [ ! -f "$resolved/.env" ]; then
+    die "$resolved does not look like a DSH deployment (no VERSION or .env) — nothing deleted"
+  fi
+  printf '%s\n' "$resolved"
+}
+
 # --- doctor ----------------------------------------------------------------
 # One health check, shared with update.sh, so an install and a repair answer
 # the same questions in the same words. It never installs anything and
@@ -887,6 +923,7 @@ model_default() {
 }
 
 if [ "$UNINSTALL" = 1 ]; then
+  DIR="$(assert_safe_dir "$DIR")"
   echo
   log "uninstall plan"
   uninstall_plan
@@ -898,22 +935,36 @@ if [ "$UNINSTALL" = 1 ]; then
   if [ "$(id -u)" != 0 ]; then
     die "removing the systemd units needs root — run with sudo"
   fi
+  DIR="$(assert_deployment_dir "$DIR")"
   if [ "$YES" != 1 ]; then
     can_ask || die "refusing to uninstall without a terminal — add --yes to confirm"
     printf 'Type "yes" to continue: ' >&2
     answer="$(read_from_terminal)"
     [ "$answer" = yes ] || die "cancelled"
   fi
+  if [ "$PURGE" = 1 ]; then
+    if [ "$YES" != 1 ]; then
+      printf 'Type the deployment path to delete its data (%s): ' "$DIR" >&2
+      answer="$(read_from_terminal)"
+      [ "$answer" = "$DIR" ] || die "path did not match — cancelled"
+    fi
+    backup="/var/backups/dsh-purge-$(date +%Y%m%d-%H%M%S).tgz"
+    log "backing up $DIR/data to $backup before deleting it"
+    run mkdir -p /var/backups
+    run tar czf "$backup" -C "$DIR" data || die "backup failed — nothing was deleted"
+  fi
   uninstall_run
   exit 0
 fi
 
+# --- prompts ---------------------------------------------------------------
+# Required answers first. Everything else has a working default; the plan shows
+# those defaults, and one "Customize" question is the only way to change them.
+# A first run therefore costs four answers, not fifteen.
 if [ "$CHECK" != 1 ]; then
-  ask DSH_PORT "Web UI port" 4310
-  ask DSH_BIND_IP "Web UI address: your LAN IP (phone/browser access) or 127.0.0.1 (host only)" "$(detect_lan_ip)"
   ask DSH_PROVIDER "Model provider (opencode-go or deepseek-official)" opencode-go
-  # the model default follows the provider that was just chosen, not the one
-  # the pre-prompt default guessed
+  # the model default follows the provider that was just chosen, not the
+  # pre-prompt default guessed
   [ -n "$DSH_MODEL" ] || DSH_MODEL="$(model_default "$DSH_PROVIDER")"
   ask DSH_MODEL "Model" "$(model_default "$DSH_PROVIDER")"
   PROVIDER_KEY_ENV="$(provider_key_env "$DSH_PROVIDER")"
@@ -939,7 +990,172 @@ if [ "$CHECK" != 1 ]; then
     # Access and administration are separate questions: everyone allowed may use
     # the agent, one account may update or roll back the deployment.
     first_allowed="$(printf %s "${ALLOWED_USER_IDS%%,*}" | tr -d " ")"
-    ask DSH_ADMIN_USER_ID "Admin user id (may update/restart/roll back)" "$first_allowed"
+    [ -n "$DSH_ADMIN_USER_ID" ] || DSH_ADMIN_USER_ID="$first_allowed"
+  fi
+fi
+
+# Defaults for everything the quick path did not ask. They are what the plan
+# prints; Customize replaces them one by one.
+[ -n "$DSH_PORT" ] || DSH_PORT=4310
+[ -n "$DSH_BIND_IP" ] || DSH_BIND_IP="$(detect_lan_ip)"
+[ -n "$DSH_PROVIDER" ] || DSH_PROVIDER=opencode-go
+[ -n "$DSH_MODEL" ] || DSH_MODEL="$(model_default "$DSH_PROVIDER")"
+# Access and administration are separate answers, but a quick/unattended run
+# still needs an admin: the first allowed id is the safe default.
+if [ -z "$DSH_ADMIN_USER_ID" ] && [ -n "$ALLOWED_USER_IDS" ]; then
+  DSH_ADMIN_USER_ID="$(printf %s "${ALLOWED_USER_IDS%%,*}" | tr -d ' ')"
+fi
+[ -n "$DSH_RESOURCE_PERCENT" ] || DSH_RESOURCE_PERCENT=30
+[ -n "$CONTAINERS" ] || CONTAINERS=podman
+[ -n "$DESIGN" ] || DESIGN=none
+if [ "$DESIGN" = penpot ]; then
+  [ -n "$DSH_DESIGN_PORT" ] || DSH_DESIGN_PORT=8090
+  [ "$CONTAINERS" = none ] && CONTAINERS=podman
+fi
+case "$DSH_RESOURCE_PERCENT" in
+  unlimited|Unlimited|none|None) DSH_RESOURCE_PERCENT=0 ;;
+esac
+case "$DSH_RESOURCE_PERCENT" in
+  ''|*[!0-9]*) die "DSH_RESOURCE_PERCENT must be 0-100 (0 = unlimited)" ;;
+esac
+[ "$DSH_RESOURCE_PERCENT" -le 100 ] || die "DSH_RESOURCE_PERCENT must be 0-100 (0 = unlimited)"
+
+if [ "$ROTATE_KEY" = 1 ] && [ -z "${PROVIDER_KEY:-}" ] && [ "$CHECK" != 1 ]; then
+  die "--rotate-key needs a terminal (drop --yes) or PROVIDER_KEY in the environment / --config"
+fi
+
+if [ "$CHECK" != 1 ] && [ -z "$DSH_UPDATER_TOKEN" ]; then
+  DSH_UPDATER_TOKEN="$(random_token)"
+  log "generated an updater token (stored in the deployment .env)"
+fi
+
+DATA_HOME="$DIR/data/home"
+DATA_WORKSPACE="$DIR/data/workspace"
+SUPERVISOR_STATE="$DIR/data/supervisor"
+UPDATER_URL="http://127.0.0.1:8787"
+[ -n "$REF" ] || REF="v$SETUP_VERSION"
+
+# Reaching here as non-root means --check, or a sudo that was refused: the
+# re-exec above normally handles it.
+[ "$CHECK" != 1 ] && [ "$(id -u)" != 0 ] \
+  && die "this installs a systemd service — run with sudo"
+
+compute_deps_plan() {
+  PODMAN_REQUIRED=0
+  [ "$CONTAINERS" = podman ] && PODMAN_REQUIRED=1
+  if [ "$DEPS" = 0 ]; then
+    DEPS_PLAN="skipped (--no-deps)"
+    return 0
+  fi
+  DEPS_PLAN=""
+  if command -v git >/dev/null 2>&1; then DEPS_PLAN="git present"; else DEPS_PLAN="installs git"; fi
+  if [ "$PODMAN_REQUIRED" = 1 ]; then
+    if podman_ready && { [ "$DESIGN" != penpot ] || podman_compose_ready; }; then
+      DEPS_PLAN="$DEPS_PLAN · podman present"
+    elif [ "$DESIGN" = penpot ]; then
+      DEPS_PLAN="$DEPS_PLAN · installs podman + podman-compose (needs root)"
+    else
+      DEPS_PLAN="$DEPS_PLAN · installs podman (needs root)"
+    fi
+  else
+    DEPS_PLAN="$DEPS_PLAN · podman not requested"
+  fi
+  if node_ready; then DEPS_PLAN="$DEPS_PLAN · node present"; else DEPS_PLAN="$DEPS_PLAN · installs Node 22 (NodeSource)"; fi
+}
+
+warn_exposure() {
+  if [ "$DSH_BIND_IP" != "127.0.0.1" ] && [ "$DSH_BIND_IP" != "localhost" ]; then
+    echo
+    warn "the web UI on http://$DSH_BIND_IP:$DSH_PORT/ is protected only by a sign-in"
+    warn "  token printed in the startup log. Anyone who can read that log, or follow the"
+    warn "  link, drives this agent and runs tools on this host as ${SERVICE_USER:-dsh}."
+    warn "  Keep it on a trusted network, or bind 127.0.0.1 and tunnel with:"
+    warn "  ssh -L $DSH_PORT:127.0.0.1:$DSH_PORT <user>@<host>"
+  fi
+}
+
+print_plan() {
+  echo
+  log "plan"
+  printf '    directory: %s\n' "$DIR"
+  printf '    version:   %s (DSH %s)\n' "$SETUP_VERSION" "$DSH_VERSION"
+  printf '    web:       http://%s:%s/\n' "$DSH_BIND_IP" "$DSH_PORT"
+  printf '    provider:  %s / %s\n' "$DSH_PROVIDER" "$DSH_MODEL"
+  printf '    telegram:  %s\n' "$([ -n "$DSH_TELEGRAM_BOT_TOKEN" ] && echo configured || echo disabled)"
+  if [ -n "$DSH_TELEGRAM_BOT_TOKEN" ]; then
+    printf '    bots:      main%s\n' "$(printf '%s' "$DSH_TELEGRAM_PUBLISHER_TOKENS" | tr ',' '\n' | grep -c . | awk '$1 > 0 { printf " + %d publisher(s)", $1 }')"
+  fi
+  if [ -n "$DSH_ADMIN_USER_ID" ]; then
+    printf '    admin:     %s (may update, restart and roll back)\n' "$DSH_ADMIN_USER_ID"
+  fi
+  if [ "$DESIGN" = penpot ]; then
+    printf '    design:    Penpot on http://%s:%s/ (Podman)\n' "$DSH_BIND_IP" "$DSH_DESIGN_PORT"
+  else
+    printf '    design:    none (re-run with --design penpot to add it later)\n'
+  fi
+  printf '    containers: %s\n' "$(if [ "$CONTAINERS" = podman ]; then printf 'podman (rootless)'; else printf 'none'; fi)"
+  printf '    user:      %s\n' "$SERVICE_USER"
+  printf '    data:      %s\n' "$DATA_HOME"
+  printf '    updater:   %s (127.0.0.1 only, root)\n' "$UPDATER_URL"
+  if [ "$DSH_RESOURCE_PERCENT" = 0 ]; then
+    printf '    resources: unlimited\n'
+  else
+    printf '    resources: %s%% of this machine (memory %s%%, cpu %s%% of %s cores)\n' \
+      "$DSH_RESOURCE_PERCENT" "$DSH_RESOURCE_PERCENT" \
+      "$((DSH_RESOURCE_PERCENT * $(cpu_count)))" "$(cpu_count)"
+  fi
+  printf '    deps:      %s\n' "$DEPS_PLAN"
+  if [ -n "$GIT_AUTHOR_NAME" ]; then
+    printf '    git:       %s <%s>\n' "$GIT_AUTHOR_NAME" "${GIT_AUTHOR_EMAIL:-no email}"
+  else
+    printf '    git:       no author — commits from a workspace will fail until set\n'
+  fi
+  if [ -n "$GIT_PROVIDER" ] && [ -n "$GIT_TOKEN" ]; then
+    printf '    git auth:  %s%s (token stored in %s/secrets/git)\n' "$GIT_PROVIDER" \
+      "${GIT_HOST:+ ($GIT_HOST)}" "$DIR"
+  elif manifest_summary="$(git_manifest_summary)"; then
+    printf '    git auth:  %s (deployed manifest kept)\n' "$manifest_summary"
+  else
+    printf '    git auth:  none — the agent can read public repositories only\n'
+  fi
+  printf '    writes:    %s/.env, the systemd units, /usr/local/bin launchers, the profile\n' "$DIR"
+  printf '    keeps:     %s/data, %s/backups, %s/secrets\n' "$DIR" "$DIR" "$DIR"
+}
+
+# A deployment that already exists gets its health report first: "what would a
+# repair change?" is only answerable together with "what is wrong right now?".
+if [ -f "$DIR/.env" ] && [ -x "$SRC_DIR/scripts/repair.sh" ]; then
+  echo
+  log "existing deployment"
+  bash "$SRC_DIR/scripts/repair.sh" --dir "$DIR" || true
+fi
+
+compute_deps_plan
+print_plan
+
+if [ "$CHECK" = 1 ]; then
+  warn_exposure
+  # Native mode only: a published Docker port never reaches ufw's INPUT chain.
+  ufw_hints "$DSH_PORT" "$DSH_BIND_IP"
+  echo
+  log "check only — nothing was changed"
+  exit 0
+fi
+
+# Offer the advanced answers only after the plan shows what the defaults mean.
+CUSTOMIZE=0
+if can_ask; then
+  printf 'Customize port, address, resources, containers, design or git? [y/N] ' >&2
+  answer="$(read_from_terminal)"
+  case "$answer" in
+    y|Y|yes|Yes) CUSTOMIZE=1 ;;
+  esac
+fi
+if [ "$CUSTOMIZE" = 1 ]; then
+  ask DSH_PORT "Web UI port" 4310
+  ask DSH_BIND_IP "Web UI address: your LAN IP (phone/browser access) or 127.0.0.1 (host only)" "$(detect_lan_ip)"
+  if [ -n "$DSH_TELEGRAM_BOT_TOKEN" ]; then
+    ask DSH_ADMIN_USER_ID "Admin user id (may update/restart/roll back)" "${DSH_ADMIN_USER_ID:-${first_allowed:-}}"
     # One bot has one budget: ~20 messages/minute per group, shared by every
     # topic. Extra bots multiply it, and each must be a member of the group.
     ask_secret_keep DSH_TELEGRAM_PUBLISHER_TOKENS \
@@ -975,139 +1191,27 @@ if [ "$CHECK" != 1 ]; then
     ask DSH_DESIGN_PORT "Penpot port" 8090
   fi
   ask DSH_RESOURCE_PERCENT "CPU/RAM limit for the runtime, percent of this machine (0 = unlimited)" 30
-  if [ -z "$DSH_UPDATER_TOKEN" ]; then
-    DSH_UPDATER_TOKEN="$(random_token)"
-    log "generated an updater token (stored in the deployment .env)"
+  case "$DSH_RESOURCE_PERCENT" in
+    unlimited|Unlimited|none|None) DSH_RESOURCE_PERCENT=0 ;;
+  esac
+  case "$DSH_RESOURCE_PERCENT" in
+    ''|*[!0-9]*) die "DSH_RESOURCE_PERCENT must be 0-100 (0 = unlimited)" ;;
+  esac
+  [ "$DSH_RESOURCE_PERCENT" -le 100 ] || die "DSH_RESOURCE_PERCENT must be 0-100 (0 = unlimited)"
+  if [ "$DESIGN" = penpot ] && [ "$CONTAINERS" = none ]; then
+    CONTAINERS=podman
+    warn "--design penpot needs Podman; containers set to podman"
   fi
-fi
-[ -n "$DSH_RESOURCE_PERCENT" ] || DSH_RESOURCE_PERCENT=30
-case "$DSH_RESOURCE_PERCENT" in
-  unlimited|Unlimited|none|None) DSH_RESOURCE_PERCENT=0 ;;
-esac
-case "$DSH_RESOURCE_PERCENT" in
-  ''|*[!0-9]*) die "DSH_RESOURCE_PERCENT must be 0-100 (0 = unlimited)" ;;
-esac
-[ "$DSH_RESOURCE_PERCENT" -le 100 ] || die "DSH_RESOURCE_PERCENT must be 0-100 (0 = unlimited)"
-
-if [ "$ROTATE_KEY" = 1 ] && [ -z "${PROVIDER_KEY:-}" ] && [ "$CHECK" != 1 ]; then
-  die "--rotate-key needs a terminal (drop --yes) or PROVIDER_KEY in the environment / --config"
-fi
-
-# Unattended runs never asked, so derive both from the provider that applies.
-[ -n "$DSH_PROVIDER" ] || DSH_PROVIDER=opencode-go
-[ -n "$DSH_RESOURCE_PERCENT" ] || DSH_RESOURCE_PERCENT=30
-[ -n "$DSH_MODEL" ] || DSH_MODEL="$(model_default "$DSH_PROVIDER")"
-
-[ -n "$DSH_BIND_IP" ] || DSH_BIND_IP="$(detect_lan_ip)"
-
-DATA_HOME="$DIR/data/home"
-DATA_WORKSPACE="$DIR/data/workspace"
-SUPERVISOR_STATE="$DIR/data/supervisor"
-UPDATER_URL="http://127.0.0.1:8787"
-
-[ -n "$REF" ] || REF="v$SETUP_VERSION"
-# Reaching here as non-root means --check, or a sudo that was refused: the
-# re-exec above normally handles it.
-[ "$CHECK" != 1 ] && [ "$(id -u)" != 0 ] \
-  && die "this installs a systemd service — run with sudo"
-
-# Podman is the only container runtime: rootless for the agent, rootful for the
-# optional Penpot stack. Docker is not installed or used.
-PODMAN_REQUIRED=0
-[ "$CONTAINERS" = podman ] && PODMAN_REQUIRED=1
-
-if [ "$DEPS" = 0 ]; then
-  DEPS_PLAN="skipped (--no-deps)"
-else
-  DEPS_PLAN=""
-  if command -v git >/dev/null 2>&1; then DEPS_PLAN="git present"; else DEPS_PLAN="installs git"; fi
-  if [ "$PODMAN_REQUIRED" = 1 ]; then
-    if podman_ready && { [ "$DESIGN" != penpot ] || podman_compose_ready; }; then
-      DEPS_PLAN="$DEPS_PLAN · podman present"
-    elif [ "$DESIGN" = penpot ]; then
-      DEPS_PLAN="$DEPS_PLAN · installs podman + podman-compose (needs root)"
-    else
-      DEPS_PLAN="$DEPS_PLAN · installs podman (needs root)"
-    fi
-  else
-    DEPS_PLAN="$DEPS_PLAN · podman not requested"
+  if [ "$DESIGN" = penpot ]; then
+    [ -n "$DSH_DESIGN_PORT" ] || DSH_DESIGN_PORT=8090
   fi
-  if node_ready; then DEPS_PLAN="$DEPS_PLAN · node present"; else DEPS_PLAN="$DEPS_PLAN · installs Node 22 (NodeSource)"; fi
+  compute_deps_plan
+  print_plan
 fi
 
-# --- plan ------------------------------------------------------------------
-# A deployment that already exists gets its health report first: "what would a
-# repair change?" is only answerable together with "what is wrong right now?".
-if [ -f "$DIR/.env" ] && [ -x "$SRC_DIR/scripts/repair.sh" ]; then
-  echo
-  log "existing deployment"
-  bash "$SRC_DIR/scripts/repair.sh" --dir "$DIR" || true
-fi
-
-echo
-log "plan"
-printf '    directory: %s\n' "$DIR"
-printf '    version:   %s (DSH %s)\n' "$SETUP_VERSION" "$DSH_VERSION"
-printf '    web:       http://%s:%s/\n' "$DSH_BIND_IP" "$DSH_PORT"
-printf '    provider:  %s / %s\n' "$DSH_PROVIDER" "$DSH_MODEL"
-printf '    telegram:  %s\n' "$([ -n "$DSH_TELEGRAM_BOT_TOKEN" ] && echo configured || echo disabled)"
-if [ -n "$DSH_TELEGRAM_BOT_TOKEN" ]; then
-  printf '    bots:      main%s\n' "$(printf '%s' "$DSH_TELEGRAM_PUBLISHER_TOKENS" | tr ',' '\n' | grep -c . | awk '$1 > 0 { printf " + %d publisher(s)", $1 }')"
-fi
-if [ -n "$DSH_ADMIN_USER_ID" ]; then
-  printf '    admin:     %s (may update, restart and roll back)\n' "$DSH_ADMIN_USER_ID"
-fi
-if [ "$DESIGN" = penpot ]; then
-  printf '    design:    Penpot on http://%s:%s/ (Podman)\n' "$DSH_BIND_IP" "$DSH_DESIGN_PORT"
-else
-  printf '    design:    none (re-run with --design penpot to add it later)\n'
-fi
-printf '    containers: %s\n' "$(if [ "$CONTAINERS" = podman ]; then printf 'podman (rootless)'; else printf 'none'; fi)"
-printf '    user:      %s\n' "$SERVICE_USER"
-printf '    data:      %s\n' "$DATA_HOME"
-printf '    updater:   %s (127.0.0.1 only, root)\n' "$UPDATER_URL"
-if [ "$DSH_RESOURCE_PERCENT" = 0 ]; then
-  printf '    resources: unlimited\n'
-else
-  printf '    resources: %s%% of this machine (memory %s%%, cpu %s%% of %s cores)\n' \
-    "$DSH_RESOURCE_PERCENT" "$DSH_RESOURCE_PERCENT" \
-    "$((DSH_RESOURCE_PERCENT * $(cpu_count)))" "$(cpu_count)"
-fi
-
-printf '    deps:      %s\n' "$DEPS_PLAN"
-if [ -n "$GIT_AUTHOR_NAME" ]; then
-  printf '    git:       %s <%s>\n' "$GIT_AUTHOR_NAME" "${GIT_AUTHOR_EMAIL:-no email}"
-else
-  printf '    git:       no author — commits from a workspace will fail until set\n'
-fi
-if [ -n "$GIT_PROVIDER" ] && [ -n "$GIT_TOKEN" ]; then
-  printf '    git auth:  %s%s (token stored in %s/secrets/git)\n' "$GIT_PROVIDER" \
-    "${GIT_HOST:+ ($GIT_HOST)}" "$DIR"
-elif manifest_summary="$(git_manifest_summary)"; then
-  printf '    git auth:  %s (deployed manifest kept)\n' "$manifest_summary"
-else
-  printf '    git auth:  none — the agent can read public repositories only\n'
-fi
-
-if [ "$DSH_BIND_IP" != "127.0.0.1" ] && [ "$DSH_BIND_IP" != "localhost" ]; then
-  echo
-  warn "the web UI on http://$DSH_BIND_IP:$DSH_PORT/ is protected only by a sign-in"
-  warn "  token printed in the startup log. Anyone who can read that log, or follow the"
-  warn "  link, drives this agent and runs tools on this host as ${SERVICE_USER:-dsh}."
-  warn "  Keep it on a trusted network, or bind 127.0.0.1 and tunnel with:"
-  warn "  ssh -L $DSH_PORT:127.0.0.1:$DSH_PORT <user>@<host>"
-fi
-
+warn_exposure
 # Native mode only: a published Docker port never reaches ufw's INPUT chain.
-# Printing it here means --check answers "will this be reachable?" without
-# installing anything.
 ufw_hints "$DSH_PORT" "$DSH_BIND_IP"
-
-if [ "$CHECK" = 1 ]; then
-  echo
-  log "check only — nothing was changed"
-  exit 0
-fi
 
 # One confirmation for everything the plan above describes, so apt and the unit
 # work do not start while someone is still reading it.
@@ -1357,10 +1461,15 @@ web_url() {
 
 wait_health() {
   local timeout="${1:-180}"
-  local deadline=$((SECONDS + timeout)) i
+  local deadline=$((SECONDS + timeout)) i last_report=-10
   for ((i = 0; i < timeout; i += 2)); do
     if DSH_PORT="$DSH_PORT" "$SRC_DIR/healthcheck.sh" >/dev/null 2>&1; then return 0; fi
     [ "$SECONDS" -ge "$deadline" ] && break
+    if [ $((i - last_report)) -ge 10 ]; then
+      printf '    waiting for dsh on http://%s:%s/ (%ss/%ss)…\n' \
+        "${DSH_BIND_IP:-unknown}" "${DSH_PORT:-4310}" "$i" "$timeout" >&2
+      last_report=$i
+    fi
     sleep 2
   done
   return 1
@@ -1605,12 +1714,12 @@ native_apply() {
     # Same two extras the image installs: pnpm builds the Telegram adapter, and
     # --allow-scripts lets node-pty/koffi/dsh-subprocess-local build, without
     # which the bash tool breaks. Omitting either leaves a half-working install.
-    run npm install -g --silent \
+    run npm install -g --loglevel=error --no-fund --no-audit \
       --allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs \
       "@deepseek-ai/dsh@$DSH_VERSION" pnpm@11
   elif ! command -v pnpm >/dev/null 2>&1; then
     log "installing pnpm (the Telegram adapter builds with it)"
-    run npm install -g --silent pnpm@11
+    run npm install -g --loglevel=error --no-fund --no-audit pnpm@11
   fi
 
   # The unit resolves `dsh` through PATH; make sure the npm prefix is on it.
@@ -1649,7 +1758,7 @@ native_apply() {
   log "waiting for health"
   if ! wait_health 180; then
     journalctl -u dsh.service --no-pager -n 40 2>/dev/null || true
-    die "dsh did not become healthy — inspect: journalctl -u dsh.service -f"
+    die "dsh did not become healthy. The deployment is partially applied and was not rolled back. Fix the cause above, then re-run ./install.sh — it keeps your answers and is safe to repeat. Logs: journalctl -u dsh.service -f"
   fi
   design_apply
   # The port is bound now. Say it again only if the plan did not already have:

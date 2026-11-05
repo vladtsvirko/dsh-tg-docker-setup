@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { test } from 'node:test'
-import { createUpdater, crossesCompat, firewallPorts, networkOf, parseTag, resolveTarget, UpdateError } from './updater.mjs'
+import { commitSubjects, createUpdater, crossesCompat, firewallPorts, networkOf, parseTag, resolveTarget, UpdateError } from './updater.mjs'
 
 const exec = promisify(execFile)
 
@@ -397,4 +397,23 @@ test('an allowed port is reported as allowed, and loopback binds are skipped', (
 test('inactive ufw and a missing status are not applicable', () => {
   assert.match(firewallPorts({ ports: [{ port: 4310, bind: '192.168.2.98' }], status: 'Status: inactive' }).reason, /not active/)
   assert.match(firewallPorts({ ports: [{ port: 4310, bind: '192.168.2.98' }] }).reason, /not installed/)
+})
+
+test('commitSubjects lists the subjects between two tags', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'updater-commits-'))
+  try {
+    const git = (...args) => exec('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { cwd: dir })
+    await git('init', '-q')
+    await writeFile(join(dir, 'a'), '1')
+    await git('add', 'a')
+    await git('commit', '-q', '-m', 'first')
+    await git('tag', 'v0.2.1-rc.2-0.0.1')
+    await writeFile(join(dir, 'b'), '2')
+    await git('add', 'b')
+    await git('commit', '-q', '-m', 'second')
+    await git('tag', 'v0.2.1-rc.2-0.0.2')
+    assert.deepEqual(await commitSubjects(dir, 'v0.2.1-rc.2-0.0.1', 'v0.2.1-rc.2-0.0.2'), ['second'])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })

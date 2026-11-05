@@ -128,7 +128,7 @@ it cannot repair a dead bot, a dead updater, or a dead systemd.
 - Publisher bot tokens only send; the main bot polls and owns buttons. Publishers
   must be added to every group by a human.
 - Plugin code and install scripts run with the runtime's permissions. `/plugin
-  add` inspects, `/plugin confirm` is explicit, and `/plugin approve` allows only
+  add` inspects, the **Confirm** card (or `/plugin confirm`) is explicit, and `/plugin approve` allows only
   the named blocked build scripts.
 
 ## Telegram and web constraints

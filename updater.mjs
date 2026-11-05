@@ -58,6 +58,23 @@ export async function listTags(repo) {
 }
 
 /**
+ * Subject lines between two tags, newest first, for the update card.
+ * Best-effort: a shallow checkout or a missing git binary yields an empty list.
+ */
+export async function commitSubjects(repo, from, target, limit = 10) {
+  try {
+    const { stdout } = await exec(
+      'git',
+      ['--no-pager', 'log', '--format=%s', '-n', String(limit), `${from}..${target}`],
+      { cwd: repo },
+    )
+    return stdout.split('\n').map((line) => line.trim()).filter((line) => line.length > 0)
+  } catch {
+    return []
+  }
+}
+
+/**
  * The network ufw wants ("allow from 10.0.0.0/8"), from `addr/prefix`.
  *
  * The hint has to be copy-pasteable: `192.168.2.98/24` is a host address and
@@ -225,9 +242,12 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
     }
     if (chatId === undefined) return false
     try {
+      const clipped = text.length <= 3800
+        ? text
+        : `${text.slice(0, 3760)}\n… truncated; full log: journalctl -u dsh-updater.service`
       const body = new URLSearchParams({
         chat_id: String(chatId),
-        text: text.slice(0, 3800),
+        text: clipped,
         disable_web_page_preview: 'true',
       })
       const response = await globalThis.fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, { method: 'POST', body })
@@ -292,7 +312,7 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
       if (!toldDown && output.includes('stopping dsh')) {
         toldDown = true
         reachedStop = true
-        void report('dsh is down — update in progress. New messages are queued; send them again when the bot returns.')
+        void report('dsh is down for the update. Prompts you send now are queued and run when it returns; commands are refused — send those again afterwards.')
       }
       for (const line of chunk.toString().split('\n')) {
         if (line.includes('building dsh')) job.state = 'building'
@@ -499,10 +519,15 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
         const from = await current()
         if (from === undefined) throw new UpdateError(409, 'checkout is not on a release tag')
         const target = resolveTarget(from, await tags(), { mode: body.mode, version: body.version })
+        const crosses = crossesCompat(from, target)
         return json(response, 200, {
           from,
           target,
-          incompatible: crossesCompat(from, target),
+          incompatible: crosses,
+          crosses,
+          dshFrom: parseTag(from)?.dsh,
+          dshTo: parseTag(target)?.dsh,
+          commits: await commitSubjects(repo, from, target),
         })
       }
       if (path === '/update' && request.method === 'POST') {

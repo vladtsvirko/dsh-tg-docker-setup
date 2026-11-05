@@ -7,7 +7,47 @@ supervisor, the updater and the entrypoint changed.
 
 Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
 
-## 0.2.1-rc.5-0.10.7
+## 0.2.1-rc.5-0.11.0
+
+### Changed
+
+- **First run is four answers.** Provider, model, provider key and bot token (plus
+  the allowlist when Telegram is enabled) are asked first; everything else uses
+  a default shown in the plan, and one `Customize` question opens the advanced
+  set. The plan is printed before the question and again after customization.
+- **`--config` is documented as review mode.** Without `--yes` the installer
+  still prompts for every value with the file as the default; the example says
+  how to run unattended.
+- **Waits are visible.** The health gate prints elapsed time, npm failures are no
+  longer silenced, and the update health wait does the same.
+- **`update.sh --help` is a real help screen** and exits 0; the usage documents
+  exit codes (`0` no newer tag, `2` newer tag exists, `1` error). The apply
+  prompt is `[Y/n]`, matching the installer.
+- **The updater returns release notes.** `POST /target` includes the DSH delta,
+  recent commit subjects and the cross-version flag, for the card.
+- **The plan lists what a re-run writes and keeps**; `install.sh --version`
+  prints the setup and DSH versions.
+
+### Fixed
+
+- **`--purge` cannot be aimed at a system path or a non-deployment.** The path is
+  resolved and checked, a real purge asks for the path to be typed, and `data/`
+  is tarred to `/var/backups/dsh-purge-*.tgz` before deletion.
+- **Bootstrap help no longer advertises `--tier` or says Docker.**
+- **A failed install names the safe next step** (re-run keeps the answers).
+- **The down-report matches the boot behavior:** prompts are queued, commands are
+  refused and must be sent again.
+- **Truncated updater reports say so** instead of ending mid-sentence.
+
+
+The setup repo ships in lockstep with `dsh-telegram-connector`: `VERSION` is the
+tag and the connector tag at once. Connector-side changes are in
+that repository's changelog; this file records what the installer, the
+supervisor, the updater and the entrypoint changed.
+
+Earlier releases are the git tags; this file starts at `0.2.1-rc.2-0.6.0`.
+
+## 0.2.1-rc.5-0.11.0
 
 ### Fixed
 

@@ -84,8 +84,8 @@ Run it as a normal user with `sudo` available, or as root. It:
    (`/opt/dsh-setup` as root, `~/dsh-setup` otherwise),
 2. downloads that release into a git checkout — which is what makes
    `update.sh --apply` work later,
-3. asks the questions, then shows the plan and asks before changing anything:
-   `Proceed? [Y/n]`,
+3. asks four required answers, shows the plan with working defaults for the
+   rest, offers one `Customize` question, then asks `Proceed? [Y/n]`,
 4. asks what the agent should commit as, and optionally for one or more git
    accounts (GitHub, GitLab, Gitea/Forgejo, self-hosted; HTTPS token or SSH
    key) — stored in `<dir>/secrets/git/profiles.json`, mode 0600,
@@ -105,7 +105,7 @@ curl -fsSL …/install.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.10.7`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.11.0`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -234,7 +234,7 @@ different name is never touched. The setup currently ships:
 The connector and the setup ship as **one tag**:
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.10.7
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.11.0
          DSH part          product part
 ```
 

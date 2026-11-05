@@ -323,3 +323,17 @@ needsExec('--check resolves the target without applying it', async () => {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('--help works without a deployment and exits 0', async () => {
+  const result = await exec('bash', [join(here, 'update.sh'), '--help'])
+    .then((r) => ({ code: 0, out: r.stdout + r.stderr }), (error) => ({ code: error.code ?? 1, out: String(error.stdout ?? '') + String(error.stderr ?? '') }))
+  assert.equal(result.code, 0)
+  assert.match(result.out, /Exit codes:/)
+  assert.match(result.out, /2 {2}a newer tag exists/)
+})
+
+test('the apply prompt defaults to yes', async () => {
+  const source = await readFile(join(here, 'update.sh'), 'utf8')
+  assert.match(source, /apply\? \[Y\/n\]/)
+  assert.doesNotMatch(source, /apply\? \[y\/N\]/)
+})

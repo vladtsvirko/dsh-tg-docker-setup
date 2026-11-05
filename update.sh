@@ -38,7 +38,11 @@ die()  {
 }
 
 if [ "$UPDATE_SOURCED" = 0 ]; then
-  [ -f "$ENV_FILE" ] || die "no $ENV_FILE here — run from the deployment directory"
+  # Help must work without a deployment; every other command needs .env.
+  case "${1:-}" in
+    -h|--help) ;;
+    *) [ -f "$ENV_FILE" ] || die "no $ENV_FILE here — run from the deployment directory" ;;
+  esac
 fi
 
 env_get() { sed -n "s/^$1=//p" "$ENV_FILE" | head -1; }
@@ -47,6 +51,30 @@ dsh_version() {
   local v
   v="$(setup_version)"
   printf '%s\n' "${v%-*}"
+}
+
+usage() {
+  cat <<'EOF'
+Move the setup to a release tag; the DSH version moves with it.
+
+  ./update.sh                  what is installed, and is it healthy
+  ./update.sh --check          what a compatible update would do; change nothing
+  ./update.sh --apply          latest compatible tag: checkout, install, health gate, rollback
+  ./update.sh --to <tag>       exact target (used by the updater service)
+  ./update.sh --tg-connector   re-resolve the pinned Telegram connector
+  ./update.sh --doctor         full health check; --fix repairs what it can
+  ./update.sh --component <name> <enable|disable|configure> [--port N]
+
+--yes (or ASSUME_YES=1) skips the confirmation.
+--check, --apply and --to accept --i-know-versions-are-incompatible.
+
+Exit codes:
+  0  nothing newer, or the operation succeeded
+  2  a newer tag exists (--check); it may require the incompatibility flag
+  1  an error
+
+Run it from this directory (next to VERSION and .env).
+EOF
 }
 
 # --- firewall advisory (native only) ---------------------------------------
@@ -167,6 +195,9 @@ wait_native_healthy() {
   local waited=0
   while [ "$waited" -lt "$HEALTH_TIMEOUT" ]; do
     if service_active && web_ready; then return 0; fi
+    if [ $((waited % 15)) -eq 0 ]; then
+      printf '    waiting for dsh.service (%ss/%ss)…\n' "$waited" "$HEALTH_TIMEOUT" >&2
+    fi
     sleep 3; waited=$((waited + 3))
   done
   warn "dsh.service did not become healthy within ${HEALTH_TIMEOUT}s"
@@ -281,7 +312,7 @@ native_apply() {
   if ! command -v dsh >/dev/null 2>&1 || \
      [ "$(dsh --version 2>/dev/null | tr -d 'v[:space:]')" != "$target_dsh" ]; then
     log "installing @deepseek-ai/dsh@$target_dsh"
-    npm install -g --silent \
+    npm install -g --loglevel=error --no-fund --no-audit \
       --allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs \
       "@deepseek-ai/dsh@$target_dsh" pnpm@11 \
       || warn "could not install dsh $target_dsh — the health gate will decide"
@@ -484,8 +515,10 @@ self_update() {
   log "setup update: $cur → $target"
   git --no-pager log --oneline "$cur..$target" | sed 's/^/    /'
   if [ "${ASSUME_YES:-0}" != 1 ]; then
-    read -r -p "apply? [y/N] " answer
-    [ "$answer" = y ] || { log "cancelled"; return 0; }
+    read -r -p "apply? [Y/n] " answer
+    case "$answer" in
+      n|N|no|No|NO) log "cancelled"; return 0 ;;
+    esac
   fi
 
   native_apply "$cur" "$target"
@@ -698,6 +731,7 @@ done
 set -- "${args[@]}"
 
 case "${1:---status}" in
+  -h|--help)  usage; exit 0 ;;
   --status)   status ;;
   --doctor)
     doctor_fix=0
@@ -748,7 +782,7 @@ case "${1:---status}" in
     esac
     ;;
   *)
-    sed -n '3,14p' "$0" | sed 's/^# \{0,1\}//'
-    exit 1
+    usage >&2
+    exit 2
     ;;
 esac
