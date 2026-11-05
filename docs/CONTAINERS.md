@@ -70,7 +70,9 @@ that host.
 
 Podman does not insert ufw rules like Docker. If ufw is active, the design
 component adds `allow in on <podman bridge>`, `route allow` on the same bridge,
-and the Penpot port from the LAN. Without the bridge rules, containers cannot
+a route from the LAN interface into the bridge (published ports are DNAT'd and
+hit the forward policy, not INPUT), and the Penpot port from the LAN. Without
+the bridge rules, containers cannot
 resolve each other (`host not found in upstream`), which looks like a DNS bug
 but is the firewall.
 

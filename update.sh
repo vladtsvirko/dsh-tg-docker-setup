@@ -631,11 +631,17 @@ component_ufw() {
   [ -n "$iface" ] || return 0
   bind="$(env_get DSH_BIND_IP)"; [ -n "$bind" ] || bind=127.0.0.1
   cidr="$(lan_network "$bind")"
+  local lan_if=""
+  lan_if="$(ip -o route get "$bind" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -1)"
   ufw allow in on "$iface" >/dev/null 2>&1 || warn "ufw: could not allow $iface"
   ufw route allow in on "$iface" out on "$iface" >/dev/null 2>&1 || warn "ufw: could not route $iface"
+  if [ -n "$lan_if" ] && [ "$lan_if" != "$iface" ]; then
+    ufw route allow in on "$lan_if" out on "$iface" >/dev/null 2>&1 \
+      || warn "ufw: could not route $lan_if → $iface"
+  fi
   ufw allow from "$cidr" to any port "$port" proto tcp >/dev/null 2>&1 \
     || warn "ufw: could not allow $port from $cidr"
-  log "ufw: allowed the Podman bridge $iface and port $port from $cidr"
+  log "ufw: allowed the Podman bridge $iface, $lan_if → $iface and port $port from $cidr"
 }
 
 component_apply() {

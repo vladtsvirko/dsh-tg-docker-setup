@@ -40,10 +40,13 @@ stack needs:
 ```sh
 ufw allow in on <podman-bridge>
 ufw route allow in on <podman-bridge> out on <podman-bridge>
+ufw route allow in on <LAN-interface> out on <podman-bridge>
 ufw allow from <LAN> to any port <DSH_DESIGN_PORT> proto tcp
 ```
 
-Without them the containers cannot resolve each other through `aardvark-dns`,
+The LAN-interface route is what lets a remote browser reach the DNAT'd
+container port; without it `localhost` works and the LAN times out. Without the
+bridge rules the containers cannot resolve each other through `aardvark-dns`,
 so the frontend fails with `host not found in upstream "penpot-backend"` and the
 backend with `UnknownHostException: penpot-postgres`. The rules are not removed
 by `install.sh --uninstall`; delete them with `ufw delete` if you remove the

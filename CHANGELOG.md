@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1-rc.5-0.12.9
+
+### Fixed
+
+- **Remote access to Penpot through ufw.** Published container ports are
+  DNAT'd to the podman bridge, so they hit ufw's **forward** policy, not the
+  INPUT rule for the published port. `localhost` worked while the LAN timed out.
+  The design component now also adds
+  `ufw route allow in on <LAN-interface> out on <podman-bridge>`.
+
 ## 0.2.1-rc.5-0.12.8
 
 ### Fixed

@@ -620,11 +620,20 @@ design_ufw_apply() {
   iface="$(podman network inspect "$net" --format '{{.NetworkInterface}}' 2>/dev/null || true)"
   [ -n "$iface" ] || iface=podman1
   cidr="$(lan_network "$DSH_BIND_IP")"
+  local lan_if=""
+  lan_if="$(ip -o route get "$DSH_BIND_IP" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -1)"
   ufw allow in on "$iface" >/dev/null 2>&1 || warn "ufw: could not allow $iface"
   ufw route allow in on "$iface" out on "$iface" >/dev/null 2>&1 || warn "ufw: could not route $iface"
+  # Published container ports are DNAT'd; ufw's forward policy sees them, not
+  # the INPUT rule for the published port. Allow the LAN interface into the
+  # podman bridge, or remote clients time out while localhost works.
+  if [ -n "$lan_if" ] && [ "$lan_if" != "$iface" ]; then
+    ufw route allow in on "$lan_if" out on "$iface" >/dev/null 2>&1 \
+      || warn "ufw: could not route $lan_if → $iface"
+  fi
   ufw allow from "$cidr" to any port "$DSH_DESIGN_PORT" proto tcp >/dev/null 2>&1 \
     || warn "ufw: could not allow $DSH_DESIGN_PORT from $cidr"
-  log "ufw: allowed the Podman bridge $iface and port $DSH_DESIGN_PORT from $cidr"
+  log "ufw: allowed the Podman bridge $iface, $lan_if → $iface and port $DSH_DESIGN_PORT from $cidr"
 }
 
 # --- firewall advisory ------------------------------------------------------
