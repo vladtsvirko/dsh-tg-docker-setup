@@ -10,7 +10,12 @@
 # runtime reaches it with the `penpot` CLI over that address.
 x-penpot: &penpot
   PENPOT_PUBLIC_URI: http://${DSH_BIND_IP:-127.0.0.1}:${DSH_DESIGN_PORT:-8090}
-  PENPOT_DATABASE_URI: postgresql://penpot:${PENPOT_DB_PASSWORD:?set PENPOT_DB_PASSWORD}@penpot-postgres:5432/penpot
+  # Penpot prefixes "jdbc:" to this value, so credentials must NOT be in the
+  # URI: PGJDBC would treat "user:password@host" as the hostname. They go in
+  # the separate PENPOT_DATABASE_USERNAME/PASSWORD variables.
+  PENPOT_DATABASE_URI: postgresql://penpot-postgres:5432/penpot
+  PENPOT_DATABASE_USERNAME: penpot
+  PENPOT_DATABASE_PASSWORD: ${PENPOT_DB_PASSWORD:?set PENPOT_DB_PASSWORD}
   PENPOT_REDIS_URI: redis://penpot-redis:6379/0
   PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY:?set PENPOT_SECRET_KEY}
   # Registration is on so the first account can be created; email verification is

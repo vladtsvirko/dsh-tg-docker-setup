@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.1-rc.5-0.12.8
+
+### Fixed
+
+- **Penpot's database URI no longer carries credentials.** Penpot does
+  `(.setJdbcUrl (str "jdbc:" uri))`; PGJDBC then treats
+  `user:password@host` as the hostname, producing
+  `UnknownHostException: penpot:…@penpot-postgres`. The compose file now uses
+  `PENPOT_DATABASE_URI: postgresql://penpot-postgres:5432/penpot` plus
+  `PENPOT_DATABASE_USERNAME` / `PENPOT_DATABASE_PASSWORD`, which is the shape
+  Penpot's config expects.
+
 ## 0.2.1-rc.5-0.12.7
 
 ### Fixed
