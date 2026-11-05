@@ -15,24 +15,27 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 const read = (name) => readFile(join(here, name), 'utf8')
 
-test('the plugin catalog pins a GitHub ref and a minimum for both plugins', async () => {
+test('the plugin catalog pins an npm spec, a GitHub fallback and a minimum', async () => {
   const catalog = JSON.parse(await read('plugins.json'))
   for (const name of ['dsh-telegram-connector', 'dsh-penpot-plugin']) {
     const entry = catalog.plugins?.[name]
     assert.ok(entry, `${name} is missing from plugins.json`)
-    assert.match(entry.ref, /^github:[^#]+#v\d+\.\d+\.\d+/, `${name} ref`)
+    assert.match(entry.spec, /^(?:@[^/]+\/)?[^@]+@\d+\.\d+\.\d+/, `${name} spec`)
+    assert.match(entry.fallback, /^github:[^#]+#v\d+\.\d+\.\d+/, `${name} fallback`)
     assert.match(entry.minimum, /^\d+\.\d+\.\d+/, `${name} minimum`)
-    const tag = entry.ref.split('#')[1].replace(/^v/, '')
-    assert.ok(entry.minimum.localeCompare(tag, undefined, { numeric: true }) <= 0,
-      `${name} minimum ${entry.minimum} is above its ref ${tag}`)
+    const version = entry.spec.split('@').pop()
+    const tag = entry.fallback.split('#')[1].replace(/^v/, '')
+    assert.equal(version, tag, `${name} npm spec and GitHub fallback disagree`)
+    assert.ok(entry.minimum.localeCompare(version, undefined, { numeric: true }) <= 0,
+      `${name} minimum ${entry.minimum} is above its pinned version ${version}`)
   }
 })
 
 test('the entrypoint does not derive a plugin spec from the setup version', async () => {
   const entry = await read('entrypoint.sh')
   assert.doesNotMatch(entry, /v\$\{?SETUP_VERSION\}?/, 'a plugin ref still uses SETUP_VERSION')
-  assert.match(entry, /catalog_value dsh-telegram-connector ref/)
-  assert.match(entry, /catalog_value dsh-penpot-plugin ref/)
+  assert.match(entry, /catalog_spec dsh-telegram-connector/)
+  assert.match(entry, /catalog_spec dsh-penpot-plugin/)
   assert.match(entry, /PLUGIN_TARGET_REF/)
 })
 

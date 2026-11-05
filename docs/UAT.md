@@ -140,10 +140,10 @@ All `./install.sh` and `./update.sh` checks below run from `/srv/dsh`.
 ## 9. Plugin updates
 
 - [ ] `/system update connector` → either reports `the connector is current
-      (<version>); v<version> is the newest tag`, or updates and returns in a
+      (<version>); v<version> is the newest version`, or updates and returns in a
       trial. In both cases `/system status` still reports the runtime and the
       adapter, and the connector version is **not** the setup `VERSION`
-- [ ] `/system update connector to <older tag>` → refused as a rollback, with
+- [ ] `/system update connector to <older version>` → refused as a rollback, with
       the current version named
 - [ ] with the design stack enabled: `/system update penpot` → either current
       or updates through the plugin manager, in a trial; `penpot_status` still
@@ -152,8 +152,9 @@ All `./install.sh` and `./update.sh` checks below run from `/srv/dsh`.
       `/system update penpot`
 - [ ] `/plugins` lists both bundles; `/plugin info dsh-penpot-plugin` shows the
       version and source the update left in place
-- [ ] `cat plugins.json` and `cat VERSION`: the plugin refs are plain semver and
-      are not derived from the setup tag
+- [ ] `cat plugins.json` and `cat VERSION`: the plugin specs are exact
+      `name@version` npm specs, the fallbacks point at the same version, and
+      neither is derived from the setup tag
 
 ## 10. Uninstall
 

@@ -22,7 +22,7 @@ rules in [`VERSIONS.md`](VERSIONS.md).
 The setup is one release with DSH; the connector and Penpot plugin are versioned
 independently and need no matching setup tag. The DSH part is the prefix of
 `VERSION`; there is no separate DSH pin to edit. `plugins.json` pins the
-recommended plugin tags and the minimum floor a boot enforces.
+exact npm plugin specs, their GitHub fallbacks and the minimum floor a boot enforces.
 
 ## Which upgrades are allowed
 

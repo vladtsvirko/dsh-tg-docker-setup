@@ -37,6 +37,23 @@ catalog_value() {
   ' "$SETUP_DIR/plugins.json" "$key" "$field" 2>/dev/null
 }
 
+# The catalog moved from GitHub `ref` to an install `spec`; read both so an
+# older checkout still boots with a newer entrypoint.
+catalog_spec() {
+  local key="$1"
+  catalog_value "$key" spec || catalog_value "$key" ref
+}
+
+# The package name a spec installs. npm: `name@1.2.3`, git:
+# `github:owner/repo#v1.2.3`. Scoped npm names keep their scope.
+spec_package() {
+  case "${1:-}" in
+    github:*) printf '%s' "$1" | sed -e 's|^github:||' -e 's|#.*$||' -e 's|\.git$||' -e 's|/$||' | awk -F/ '{ print $NF }' ;;
+    *@[0-9]*) printf '%s' "${1%@*}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 # A targeted update from the bot names the exact spec for this one run. It wins
 # over both the .env override and the checkout pin; the next boot falls back to
 # whatever the profile has installed.
@@ -45,7 +62,7 @@ PLUGIN_REF="${DSH_TELEGRAM_PLUGIN:-}"
 PLUGIN_REF_FROM_ENV=0
 [ -n "$PLUGIN_REF" ] && PLUGIN_REF_FROM_ENV=1
 if [ -z "$PLUGIN_REF" ]; then
-  PLUGIN_REF="$(catalog_value dsh-telegram-connector ref || true)"
+  PLUGIN_REF="$(catalog_spec dsh-telegram-connector || true)"
 fi
 # Last-resort pin for a checkout whose catalog is missing (a partial copy). Not
 # `main`: a missing catalog must not silently make the bot float.
@@ -53,15 +70,12 @@ if [ -z "$PLUGIN_REF" ]; then
   PLUGIN_REF="github:vladtsvirko/dsh-telegram-connector#v0.13.0"
 fi
 PLUGIN_MIN="$(catalog_value dsh-telegram-connector minimum || true)"
-# Which package this ref installs. Derived from the ref unless stated, because the
-# patch row id and the install check both key off the package name.
+PLUGIN_FALLBACK="$(catalog_value dsh-telegram-connector fallback || true)"
+# Which package this ref installs. Derived from the spec unless stated, because
+# the patch row id and the install check both key off the package name.
 PLUGIN_PKG="${DSH_TELEGRAM_PACKAGE:-}"
 if [ -z "$PLUGIN_PKG" ]; then
-  case "$PLUGIN_REF" in
-    github:*) PLUGIN_PKG="$(printf '%s' "$PLUGIN_REF" | sed -e 's|^github:||' -e 's|#.*$||' -e 's|\.git$||' -e 's|/$||')" ;;
-    *)        PLUGIN_PKG="$(basename "$PLUGIN_REF")" ;;
-  esac
-  PLUGIN_PKG="${PLUGIN_PKG##*/}"
+  PLUGIN_PKG="$(spec_package "$PLUGIN_REF")"
 fi
 ALLOWED_USER_IDS="${ALLOWED_USER_IDS:-}"
 # The one account that may run /system update|restart|rollback and /plugin.
@@ -73,9 +87,10 @@ PENPOT_REF="${PENPOT_PLUGIN_REF:-}"
 PENPOT_REF_FROM_ENV=0
 [ -n "$PENPOT_REF" ] && PENPOT_REF_FROM_ENV=1
 if [ -z "$PENPOT_REF" ]; then
-  PENPOT_REF="$(catalog_value dsh-penpot-plugin ref || true)"
+  PENPOT_REF="$(catalog_spec dsh-penpot-plugin || true)"
 fi
 PENPOT_MIN="$(catalog_value dsh-penpot-plugin minimum || true)"
+PENPOT_FALLBACK="$(catalog_value dsh-penpot-plugin fallback || true)"
 PENPOT_PKG="dsh-penpot-plugin"
 
 # --- model route ----------------------------------------------------------
@@ -339,10 +354,11 @@ profile_dependency() {
   ' "$PROFILE_DIR/package.json" "$1" 2>/dev/null
 }
 
-# The version part of a git ref (`github:o/r#v1.2.3`), or empty.
+# The version part of a spec: `github:o/r#v1.2.3` or `name@1.2.3`, or empty.
 ref_version() {
   case "${1:-}" in
     *'#'v*) printf '%s' "${1##*#v}" ;;
+    *@[0-9]*) printf '%s' "${1##*@}" ;;
     *) return 1 ;;
   esac
 }
@@ -384,6 +400,60 @@ version_gte() {
   ' "$1" "$2" 2>/dev/null
 }
 
+# Install one exact spec, handling the two pnpm gates that a git install can
+# hit. Registry installs skip both. Returns 0 on success.
+install_spec() {
+  local pkg="$1" spec="$2" log="$3" attempts="$4" compat="$5" out attempt key ws
+  for attempt in $(seq 1 "$attempts"); do
+    if dsh plugin --profile web add "$spec" >"$log" 2>&1; then
+      return 0
+    fi
+    out="$(cat "$log")"
+
+    # gate 1 — pnpm blocks a git package's prepare script
+    if grep -q 'ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED\|Failed to prepare git-hosted' <<<"$out"; then
+      key="$(grep -o "$pkg@https:[^ ]*: true" <<<"$out" | head -n1)"
+      ws="$PROFILE_DIR/pnpm-workspace.yaml"
+      if [ -n "$key" ] && ! grep -qF "$key" "$ws" 2>/dev/null; then
+        log "allowing $pkg's build script"
+        if grep -q '^allowBuilds:' "$ws" 2>/dev/null; then
+          awk -v entry="  $key" '/^allowBuilds:/ { print; print entry; next } { print }' "$ws" > "$ws.new"
+          mv "$ws.new" "$ws"
+        else
+          printf '\nallowBuilds:\n  %s\n' "$key" >> "$ws"
+        fi
+        continue
+      fi
+    fi
+
+    # gate 2 — the connector declares peers for a different DSH line
+    if [ "$compat" = 1 ] && grep -q 'is incompatible with dsh' <<<"$out"; then
+      local refused refused_version
+      refused="$(grep -o 'allow-version [^ ]*' <<<"$out" | head -n1 | cut -d' ' -f2)"
+      refused_version="$(grep -o -- '--dsh-version [^ ]*' <<<"$out" | head -n1 | cut -d' ' -f2)"
+      if [ -n "$refused" ] && [ -n "$refused_version" ]; then
+        warn "granting a version exemption for $refused on dsh $refused_version (unverified combination)"
+        dsh plugin --profile web allow-version "$refused" --dsh-version "$refused_version" --accept-risk || true
+        continue
+      fi
+    fi
+    break
+  done
+  return 1
+}
+
+# pnpm may save a registry range (`^0.13.0`); the profile should record the
+# exact spec so a later reset reinstalls what the bot chose, not a newer patch.
+pin_dependency() {
+  node -e '
+    const fs = require("node:fs")
+    const [file, name, spec] = process.argv.slice(1)
+    const pkg = JSON.parse(fs.readFileSync(file, "utf8"))
+    pkg.dependencies = { ...(pkg.dependencies ?? {}), [name]: spec }
+    fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n")
+  ' "$PROFILE_DIR/package.json" "$1" "$2" 2>/dev/null || true
+}
+
 install_plugin() {
   # Check the installed copy, not the manifest entry: `reset-plugin` keeps the
   # dependency but wipes node_modules, and that must re-trigger the install.
@@ -391,16 +461,18 @@ install_plugin() {
   # A newer compatible connector installed from the bot must survive a reboot,
   # so the checkout pin is a floor, not a ceiling. Only a missing package, a
   # package below `minimum`, or an explicit target triggers a reinstall.
-  local stamp="$PROFILE_DIR/.telegram-plugin-ref" target desired installed_version min override_version
+  local stamp="$PROFILE_DIR/.telegram-plugin-ref" target desired installed_version min override_version fallback candidates candidate
   target="$PLUGIN_TARGET_REF"
   desired="${target:-$PLUGIN_REF}"
   min="$PLUGIN_MIN"
   [ "$PLUGIN_PKG" = "dsh-telegram-connector" ] || min=""
+  fallback="$PLUGIN_FALLBACK"
+  [ "$PLUGIN_REF_FROM_ENV" = 1 ] && fallback=""
   # An old .env override must not keep a deployment below the release floor.
   if [ -z "$target" ] && [ -n "$min" ] && [ "$PLUGIN_REF_FROM_ENV" = 1 ]; then
     override_version="$(ref_version "$PLUGIN_REF" || true)"
     if ! version_gte "$override_version" "$min"; then
-      desired="$(catalog_value dsh-telegram-connector ref || true)"
+      desired="$(catalog_spec dsh-telegram-connector || true)"
       warn "DSH_TELEGRAM_PLUGIN is below the required $min; using $desired"
       PLUGIN_REF="$desired"
     fi
@@ -418,51 +490,24 @@ install_plugin() {
     rm -rf "$PROFILE_DIR/node_modules/$PLUGIN_PKG"
   fi
   command -v pnpm >/dev/null 2>&1 ||
-    warn "pnpm is not on PATH — the adapter's build step will fail; install pnpm"
-  log "installing the Telegram adapter (needs network)"
-  local out attempt
-  for attempt in 1 2 3 4; do
-    if dsh plugin --profile web add "$desired" >/tmp/plugin-install.log 2>&1; then
+    warn "pnpm is not on PATH — the adapter install will fail; install pnpm"
+
+  candidates=("$desired")
+  if [ -z "$target" ] && [ -n "$fallback" ] && [ "$fallback" != "$desired" ]; then
+    candidates+=("$fallback")
+  fi
+  for candidate in "${candidates[@]}"; do
+    [ -n "$candidate" ] || continue
+    log "installing the Telegram adapter from $candidate (needs network)"
+    if install_spec "$PLUGIN_PKG" "$candidate" /tmp/plugin-install.log 4 1; then
+      pin_dependency "$PLUGIN_PKG" "$candidate"
       log "adapter installed"
-      printf '%s\n' "$desired" > "$stamp"
+      printf '%s\n' "$candidate" > "$stamp"
       return 0
     fi
-    out="$(cat /tmp/plugin-install.log)"
-
-    # gate 1 — pnpm blocks the git package's prepare script
-    if grep -q 'ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED\|Failed to prepare git-hosted' <<<"$out"; then
-      local key
-      key="$(grep -o "$PLUGIN_PKG@https:[^ ]*: true" <<<"$out" | head -n1)"
-      # grant this exact key whether or not an allowBuilds section already
-      # exists: switching connectors leaves the old package's entry behind, and
-      # a guard on the section header would then never add the new one
-      local ws="$PROFILE_DIR/pnpm-workspace.yaml"
-      if [ -n "$key" ] && ! grep -qF "$key" "$ws" 2>/dev/null; then
-        log "allowing the adapter's build script"
-        if grep -q '^allowBuilds:' "$ws" 2>/dev/null; then
-          awk -v entry="  $key" '/^allowBuilds:/ { print; print entry; next } { print }' "$ws" > "$ws.new"
-          mv "$ws.new" "$ws"
-        else
-          printf '\nallowBuilds:\n  %s\n' "$key" >> "$ws"
-        fi
-        continue
-      fi
-    fi
-
-    # gate 2 — the adapter declares peers for dsh 0.1.x
-    if grep -q 'is incompatible with dsh' <<<"$out"; then
-      local pkg ver
-      pkg="$(grep -o 'allow-version [^ ]*' <<<"$out" | head -n1 | cut -d' ' -f2)"
-      ver="$(grep -o -- '--dsh-version [^ ]*' <<<"$out" | head -n1 | cut -d' ' -f2)"
-      if [ -n "$pkg" ] && [ -n "$ver" ]; then
-        warn "granting a version exemption for $pkg on dsh $ver (unverified combination)"
-        dsh plugin --profile web allow-version "$pkg" --dsh-version "$ver" --accept-risk || true
-        continue
-      fi
-    fi
-    break
+    warn "install failed for $candidate — see /tmp/plugin-install.log"
   done
-  warn "adapter install failed — see /tmp/plugin-install.log; the web UI still works"
+  warn "adapter install failed — the web UI still works"
   warn "runbook: README.md → Troubleshooting"
   return 1
 }
@@ -525,14 +570,16 @@ install_penpot() {
   # Same shape as the Telegram adapter: the checkout pin installs a missing
   # plugin and enforces a minimum, but never downgrades a newer version the bot
   # installed through the plugin manager.
-  local stamp="$PROFILE_DIR/.penpot-plugin-ref" installed_version desired override_version
+  local stamp="$PROFILE_DIR/.penpot-plugin-ref" installed_version desired override_version fallback candidates candidate
   [ -n "$PENPOT_REF" ] || { warn "PENPOT_PLUGIN_REF is empty — design tools stay off"; return 1; }
   desired="$PENPOT_REF"
+  fallback="$PENPOT_FALLBACK"
+  [ "$PENPOT_REF_FROM_ENV" = 1 ] && fallback=""
   # A legacy pin below the release floor is upgraded, not obeyed forever.
   if [ -n "$PENPOT_MIN" ] && [ "$PENPOT_REF_FROM_ENV" = 1 ]; then
     override_version="$(ref_version "$PENPOT_REF" || true)"
     if ! version_gte "$override_version" "$PENPOT_MIN"; then
-      desired="$(catalog_value dsh-penpot-plugin ref || true)"
+      desired="$(catalog_spec dsh-penpot-plugin || true)"
       warn "PENPOT_PLUGIN_REF is below the required $PENPOT_MIN; using $desired"
     fi
   fi
@@ -546,34 +593,22 @@ install_penpot() {
     rm -rf "$PROFILE_DIR/node_modules/$PENPOT_PKG"
   fi
   command -v pnpm >/dev/null 2>&1 ||
-    warn "pnpm is not on PATH — the plugin's build step will fail; install pnpm"
-  log "installing the Penpot plugin (needs network)"
-  local out attempt key
-  for attempt in 1 2 3; do
-    if dsh plugin --profile web add "$desired" >/tmp/penpot-install.log 2>&1; then
+    warn "pnpm is not on PATH — the plugin install will fail; install pnpm"
+
+  candidates=("$desired")
+  if [ -n "$fallback" ] && [ "$fallback" != "$desired" ]; then candidates+=("$fallback"); fi
+  for candidate in "${candidates[@]}"; do
+    [ -n "$candidate" ] || continue
+    log "installing the Penpot plugin from $candidate (needs network)"
+    if install_spec "$PENPOT_PKG" "$candidate" /tmp/penpot-install.log 3 0; then
+      pin_dependency "$PENPOT_PKG" "$candidate"
       log "Penpot plugin installed"
-      printf '%s\n' "$desired" > "$stamp"
+      printf '%s\n' "$candidate" > "$stamp"
       return 0
     fi
-    out="$(cat /tmp/penpot-install.log)"
-    # pnpm blocks the git package's prepare script; grant exactly that package
-    if grep -q 'ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED\|Failed to prepare git-hosted' <<<"$out"; then
-      key="$(grep -o "$PENPOT_PKG@https:[^ ]*: true" <<<"$out" | head -n1)"
-      local ws="$PROFILE_DIR/pnpm-workspace.yaml"
-      if [ -n "$key" ] && ! grep -qF "$key" "$ws" 2>/dev/null; then
-        log "allowing the plugin's build script"
-        if grep -q '^allowBuilds:' "$ws" 2>/dev/null; then
-          awk -v entry="  $key" '/^allowBuilds:/ { print; print entry; next } { print }' "$ws" > "$ws.new"
-          mv "$ws.new" "$ws"
-        else
-          printf '\nallowBuilds:\n  %s\n' "$key" >> "$ws"
-        fi
-        continue
-      fi
-    fi
-    break
+    warn "install failed for $candidate — see /tmp/penpot-install.log"
   done
-  warn "Penpot plugin install failed — see /tmp/penpot-install.log; the design tools stay off"
+  warn "Penpot plugin install failed — the design tools stay off"
   return 1
 }
 

@@ -53,7 +53,7 @@ git push origin v0.2.1-rc.5-0.13.0
   `--i-know-versions-are-incompatible`; `/system update setup` accepts the same
   explicit flag, but never crosses without it.
 - The setup release and the plugin releases are independent. The entrypoint
-  installs the recommended plugin tags from `plugins.json` when a package is
+  installs the recommended plugin specs from `plugins.json` when a package is
   missing and enforces only their `minimum`; it never downgrades a newer
   compatible plugin. See [`VERSIONS.md`](VERSIONS.md).
 

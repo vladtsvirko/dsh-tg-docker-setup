@@ -27,14 +27,16 @@ const here = dirname(fileURLToPath(import.meta.url))
 const exec = promisify(execFile)
 
 const CATALOG = {
-  version: 1,
+  version: 2,
   plugins: {
     'dsh-telegram-connector': {
-      ref: 'github:vladtsvirko/dsh-telegram-connector#v0.13.0',
+      spec: 'dsh-telegram-connector@0.13.0',
+      fallback: 'github:vladtsvirko/dsh-telegram-connector#v0.13.0',
       minimum: '0.13.0',
     },
     'dsh-penpot-plugin': {
-      ref: 'github:vladtsvirko/dsh-penpot-plugin#v0.3.0',
+      spec: 'dsh-penpot-plugin@0.3.0',
+      fallback: 'github:vladtsvirko/dsh-penpot-plugin#v0.3.0',
       minimum: '0.3.0',
     },
   },
@@ -78,6 +80,8 @@ if (args[0] !== 'plugin') process.exit(0)
 const command = args[3]
 const value = args[4]
 const specOf = (spec) => {
+  const npm = /^((?:@[^/]+\\/)?[^@]+)@([0-9][^@]*)$/.exec(String(spec))
+  if (npm) return { name: npm[1], version: npm[2] }
   const base = String(spec).replace(/^github:/, '').replace(/#.*$/, '').replace(/\\.git$/, '').replace(/\\/$/, '')
   const name = base.split('/').filter(Boolean).pop()
   const match = /#v?([^#]+)$/.exec(String(spec))
@@ -85,6 +89,8 @@ const specOf = (spec) => {
 }
 
 if (command === 'add') {
+  if (process.env.FAKE_FAIL === '1') process.exit(1)
+  if (process.env.FAKE_FAIL_NPM === '1' && /^[^@]+@[0-9]/.test(String(value))) process.exit(1)
   const { name, version } = specOf(value)
   const dir = join(profile, 'node_modules', name)
   await writeJson(join(dir, 'package.json'), {
@@ -136,9 +142,10 @@ async function deployment() {
 }
 
 async function installFake(home, spec) {
+  const npm = /^((?:@[^/]+\/)?[^@]+)@([0-9][^@]*)$/.exec(spec)
   const base = spec.replace(/^github:/, '').replace(/#.*$/, '').replace(/\.git$/, '').replace(/\/$/, '')
-  const name = base.split('/').filter(Boolean).pop()
-  const version = /#v?([^#]+)$/.exec(spec)?.[1] ?? '0.0.0'
+  const name = npm ? npm[1] : base.split('/').filter(Boolean).pop()
+  const version = npm ? npm[2] : (/#v?([^#]+)$/.exec(spec)?.[1] ?? '0.0.0')
   const dir = join(home, 'profiles', 'web', 'node_modules', name)
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, 'package.json'), JSON.stringify({
@@ -204,7 +211,7 @@ test('a missing connector installs the catalog ref', async () => {
   try {
     await run(parts, ['init'])
     assert.equal(await installed(parts.home), '0.13.0')
-    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], CATALOG.plugins['dsh-telegram-connector'].ref)
+    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], CATALOG.plugins['dsh-telegram-connector'].spec)
   } finally {
     await rm(parts.root, { recursive: true, force: true })
   }
@@ -213,10 +220,10 @@ test('a missing connector installs the catalog ref', async () => {
 test('a connector at or above the minimum is left alone', async () => {
   const parts = await deployment()
   try {
-    await installFake(parts.home, 'github:vladtsvirko/dsh-telegram-connector#v0.13.1')
+    await installFake(parts.home, 'dsh-telegram-connector@0.13.1')
     const { stderr } = await run(parts, ['init'])
     assert.equal(await installed(parts.home), '0.13.1')
-    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], 'github:vladtsvirko/dsh-telegram-connector#v0.13.1')
+    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], 'dsh-telegram-connector@0.13.1')
     assert.doesNotMatch(stderr, /installing the Telegram adapter/)
   } finally {
     await rm(parts.root, { recursive: true, force: true })
@@ -226,7 +233,7 @@ test('a connector at or above the minimum is left alone', async () => {
 test('a connector below the minimum is upgraded to the catalog ref', async () => {
   const parts = await deployment()
   try {
-    await installFake(parts.home, 'github:vladtsvirko/dsh-telegram-connector#v0.12.0')
+    await installFake(parts.home, 'dsh-telegram-connector@0.12.0')
     await run(parts, ['init'])
     assert.equal(await installed(parts.home), '0.13.0')
   } finally {
@@ -237,10 +244,10 @@ test('a connector below the minimum is upgraded to the catalog ref', async () =>
 test('an explicit target ref wins for one run', async () => {
   const parts = await deployment()
   try {
-    await installFake(parts.home, 'github:vladtsvirko/dsh-telegram-connector#v0.13.1')
-    await run(parts, ['init'], { DSH_PLUGIN_TARGET_REF: 'github:vladtsvirko/dsh-telegram-connector#v0.14.0' })
+    await installFake(parts.home, 'dsh-telegram-connector@0.13.1')
+    await run(parts, ['init'], { DSH_PLUGIN_TARGET_REF: 'dsh-telegram-connector@0.14.0' })
     assert.equal(await installed(parts.home), '0.14.0')
-    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], 'github:vladtsvirko/dsh-telegram-connector#v0.14.0')
+    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], 'dsh-telegram-connector@0.14.0')
   } finally {
     await rm(parts.root, { recursive: true, force: true })
   }
@@ -249,9 +256,9 @@ test('an explicit target ref wins for one run', async () => {
 test('a stale .env override below the minimum loses to the catalog', async () => {
   const parts = await deployment()
   try {
-    await installFake(parts.home, 'github:vladtsvirko/dsh-telegram-connector#v0.12.0')
+    await installFake(parts.home, 'dsh-telegram-connector@0.12.0')
     const { stderr } = await run(parts, ['init'], {
-      DSH_TELEGRAM_PLUGIN: 'github:vladtsvirko/dsh-telegram-connector#v0.12.5',
+      DSH_TELEGRAM_PLUGIN: 'dsh-telegram-connector@0.12.5',
     })
     assert.equal(await installed(parts.home), '0.13.0')
     assert.match(stderr, /below the required 0\.13\.0/)
@@ -263,11 +270,22 @@ test('a stale .env override below the minimum loses to the catalog', async () =>
 test('reset-plugin reinstalls the installed spec, not the catalog pin', async () => {
   const parts = await deployment()
   try {
-    await installFake(parts.home, 'github:vladtsvirko/dsh-telegram-connector#v0.14.0')
+    await installFake(parts.home, 'dsh-telegram-connector@0.14.0')
     await writeFile(join(parts.home, 'profiles', 'web', '.telegram-plugin-ref'), 'github:vladtsvirko/dsh-telegram-connector#v0.14.0\n')
     await run(parts, ['reset-plugin'])
     assert.equal(await installed(parts.home), '0.14.0')
-    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], 'github:vladtsvirko/dsh-telegram-connector#v0.14.0')
+    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], 'dsh-telegram-connector@0.14.0')
+  } finally {
+    await rm(parts.root, { recursive: true, force: true })
+  }
+})
+
+test('the GitHub fallback installs when the registry fails', async () => {
+  const parts = await deployment()
+  try {
+    await run(parts, ['init'], { FAKE_FAIL_NPM: '1' })
+    assert.equal(await installed(parts.home), '0.13.0')
+    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], CATALOG.plugins['dsh-telegram-connector'].fallback)
   } finally {
     await rm(parts.root, { recursive: true, force: true })
   }
@@ -276,7 +294,7 @@ test('reset-plugin reinstalls the installed spec, not the catalog pin', async ()
 test('a failed targeted update makes the entrypoint exit non-zero', async () => {
   const parts = await deployment()
   try {
-    await installFake(parts.home, 'github:vladtsvirko/dsh-telegram-connector#v0.13.1')
+    await installFake(parts.home, 'dsh-telegram-connector@0.13.1')
     // The fake rejects an explicitly broken repo by returning a non-zero add.
     const rejected = fakeDsh.replace("if (command === 'add') {", "if (command === 'add' && String(value).includes('broken')) process.exit(1)\\nif (command === 'add') {")
     await writeFile(join(parts.bin, 'dsh'), rejected)

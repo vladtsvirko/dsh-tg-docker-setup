@@ -35,7 +35,7 @@ session between the two.
 | `scripts/credentials.mjs` | Reads and reconciles `data/home/.credentials.yaml` without printing a secret |
 | `scripts/git-manifest.mjs` | Builds or merges `secrets/git/profiles.json` from the installer's accounts |
 | `components.json` | Optional components (the Penpot design stack) |
-| `plugins.json` | Recommended plugin tags and the minimum each boot enforces |
+| `plugins.json` | Exact npm plugin specs, GitHub fallbacks and the minimum each boot enforces |
 | `design/` | Penpot compose stack on Podman + the `penpot` CLI (`--design penpot`) |
 | `docs/FIRST-RUN.md` | The guided first run |
 | `docs/HOST.md` | The host deployment: layout, containers, resource limits, security boundary |
@@ -250,26 +250,28 @@ line. Crossing a DSH line or product major requires the explicit
 crosses on its own.
 
 **Plugins.** The connector and the Penpot plugin are versioned on their own,
-with plain semver and their own release checklists. `plugins.json` pins a
-recommended `ref` and a `minimum` for each. There is no matching-tag rule: a
-setup release does not need a connector or plugin tag, and a plugin release does
-not need a setup release.
+with plain semver and their own release checklists. Both are published to npm;
+`plugins.json` pins an exact `spec` and a `minimum` for each, plus the same
+release's GitHub tag as a registry-unreachable `fallback`. There is no
+matching-tag rule: a setup release does not need a connector or plugin tag, and
+a plugin release does not need a setup release.
 
-The entrypoint follows one rule: **install the pin when absent, enforce the
+The entrypoint follows one rule: **install the spec when absent, enforce the
 minimum, never downgrade.**
 
-- A fresh install or a repair adds the `plugins.json` ref.
+- A fresh install or a repair adds the `plugins.json` spec from npm; if the
+  registry is unreachable, it installs the same release from the GitHub fallback.
 - A boot compares the installed version with `minimum`; only a version below it
   is reinstalled.
-- A newer compatible tag installed from the bot (`/system update connector`,
+- A newer compatible version installed from the bot (`/system update connector`,
   `/system update penpot`) stays installed across reboots and setup updates.
 - If a release genuinely needs a newer plugin, it raises `minimum`; that is the
   only remaining coupling.
 
-`/system update connector` resolves the newest tag in the connector repository
-(or `to <version>`), checks the tag's declared DSH range, and asks the
-supervisor to install that exact ref inside a trial. `/system update penpot`
-does the same for the design plugin through the host plugin manager. The full
+`/system update connector` resolves the newest npm version (or the repository
+tag for a GitHub-installed connector), checks its declared DSH range, and asks
+the supervisor to install that exact spec inside a trial. `/system update
+penpot` does the same for the design plugin through the host plugin manager. The full
 policy and release checklists are in [`docs/VERSIONS.md`](docs/VERSIONS.md) and
 [`docs/PLUGINS.md`](docs/PLUGINS.md). Inside the bot, `/system status` reports
 the connector version, runtime version and updater state.
@@ -277,14 +279,14 @@ the connector version, runtime version and updater state.
 ## Choosing the connector
 
 `DSH_TELEGRAM_PLUGIN` decides which plugin gets installed and mounted. Empty
-(the default) means this setup's connector, pinned to the setup version:
+(the default) means this setup's connector, pinned in `plugins.json`:
 
-| Ref | Model |
+| Spec | Model |
 |---|---|
 | *(empty)* | group = workspace, topic = session, control chat = private, version from `plugins.json` |
 | `github:ben7am1n/dsh-telegram` | one chat = one session, flat |
 
-The package name is derived from the ref (or set `DSH_TELEGRAM_PACKAGE`), because
+The package name is derived from the spec (or set `DSH_TELEGRAM_PACKAGE`), because
 the patch row, the install check and the version exemption all key off it. After
 changing it, run `sudo ./update.sh --tg-connector` once — otherwise the previous
 plugin stays installed and two pollers fight over the same token.
@@ -552,8 +554,8 @@ one-step rollback. `ASSUME_YES=1` makes it unattended:
 |---|---|---|
 | dsh itself | setup release tag (`VERSION`, DSH part) | The only version that matters for compatibility |
 | Node | host package manager | ≥ 22.19; the installer uses NodeSource when it must |
-| Telegram connector | its own semver tag; `/system update connector` installs the newest compatible one inside a trial | `plugins.json` pins a fresh-install floor, not a ceiling |
-| Penpot plugin | its own semver tag; `/system update penpot` through the plugin manager | Same trial/rollback path as any bundle |
+| Telegram connector | its own npm version; `/system update connector` installs the newest compatible one inside a trial | `plugins.json` pins a fresh-install floor, not a ceiling; GitHub tag is the fallback |
+| Penpot plugin | its own npm version; `/system update penpot` through the plugin manager | Same trial/rollback path as any bundle |
 | updater | checkout, restarted by systemd | Its code is the mounted checkout |
 | Other plugins | add via `/plugin add` or `dsh plugin`, pinned in the profile's `pnpm-lock.yaml` | Lives in `data/home`, survives updates |
 | Model names | `DSH_MODEL` in `.env` | Provider models change without any install change |

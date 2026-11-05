@@ -371,7 +371,7 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     assert.doesNotMatch(designEnv, /PENPOT_SECRET_KEY=change-me/)
     assert.match(mainEnv, /DSH_DESIGN_ENABLED=1/)
     assert.match(mainEnv, /PENPOT_ENABLED=1/)
-    assert.match(mainEnv, /PENPOT_PLUGIN_REF=github:vladtsvirko\/dsh-penpot-plugin#v\d+\.\d+\.\d+/)
+    assert.match(mainEnv, /PENPOT_PLUGIN_REF=dsh-penpot-plugin@\d+\.\d+\.\d+/)
     assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:8091/)
     assert.match(log, /podman-compose -f compose\.yaml up -d/)
 

@@ -1544,7 +1544,7 @@ write_env() {
     local catalog="$DIR/plugins.json"
     [ -f "$catalog" ] || catalog="$SRC_DIR/plugins.json"
     local plugin_ref=""
-    [ -f "$catalog" ] && plugin_ref="$(node -e 'process.stdout.write(require(process.argv[1]).plugins["dsh-penpot-plugin"].ref)' "$catalog" 2>/dev/null || true)"
+    [ -f "$catalog" ] && plugin_ref="$(node -e 'const p = require(process.argv[1]).plugins["dsh-penpot-plugin"]; process.stdout.write(p.spec ?? p.ref ?? "")' "$catalog" 2>/dev/null || true)"
     if [ -n "$plugin_ref" ]; then set_env PENPOT_PLUGIN_REF "$plugin_ref" "$file"; fi
     set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$file"
   else

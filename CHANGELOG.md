@@ -4,6 +4,15 @@
 
 ### Changed
 
+- **Plugins install from npm.** `plugins.json` now carries an exact npm `spec`
+  and a GitHub `fallback` of the same release. A fresh install uses the
+  registry; if it is unreachable, the same release installs from the tag. The
+  installer/updater/entrypoint understand both forms, and the fallback only
+  applies to a checkout install, never to an explicit update target.
+- **`/system update connector` follows the installed source.** A connector
+  installed from npm resolves the newest registry version; a git-installed one
+  keeps using tags. The supervisor accepts and validates both exact specs.
+
 - **Plugins are versioned and released independently of the setup.** The
   connector is `0.13.0` (plain semver) and the Penpot plugin `0.3.0`; neither
   tag has to match the setup tag any more. The setup pins a recommended `ref`

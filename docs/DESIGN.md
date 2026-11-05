@@ -89,14 +89,15 @@ new port. Disable stops the stack and keeps `design/data/`. The runtime env keep
 
 Enabling the component also installs the DSH plugin
 [dsh-penpot-plugin](https://github.com/vladtsvirko/dsh-penpot-plugin) into the
-profile: the entrypoint runs `dsh plugin --profile web add <ref>` on the next
-boot, where `<ref>` is `PENPOT_PLUGIN_REF` (pinned in `plugins.json`,
+profile: the entrypoint runs `dsh plugin --profile web add <spec>` on the next
+boot, where `<spec>` is `PENPOT_PLUGIN_REF` (pinned in `plugins.json`,
 overridable in `.env`) and writes a managed `dsh-penpot` row. Disabling sets
 `PENPOT_ENABLED=0`, which leaves the package installed but disables the row.
 
-The plugin is versioned on its own. `plugins.json` pins a recommended ref and a
-minimum; a newer compatible tag installed from the bot stays installed, and a
-setup release only raises the floor when it needs newer plugin behaviour.
+The plugin is versioned on its own. `plugins.json` pins an exact npm spec, a
+GitHub fallback of the same release, and a minimum; a newer compatible version
+installed from the bot stays installed, and a setup release only raises the
+floor when it needs newer plugin behaviour.
 
 ## The `penpot` CLI
 

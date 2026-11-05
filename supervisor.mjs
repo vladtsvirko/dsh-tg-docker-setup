@@ -574,12 +574,15 @@ const server = createServer((request, response) => {
       return send(response, result.ok ? 200 : result.code, result)
     }
     if (path === '/update') {
-      // A plugin update may name the exact git ref to install. Validate the
-      // shape here so the entrypoint only ever receives a package spec, never a
-      // shell fragment.
+      // A plugin update may name the exact spec to install: a git ref or an
+      // exact npm version. Validate the shape here so the entrypoint only ever
+      // receives a package spec, never a shell fragment. Ranges are refused on
+      // purpose; the resolver always chooses an exact version.
       const ref = body.ref
+      const gitSpec = /^(github:|git\+|https:\/\/|http:\/\/)[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+$/
+      const npmSpec = /^(?:@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+@[0-9][0-9A-Za-z.+-]*$/
       if (ref !== undefined && (typeof ref !== 'string' || ref.length === 0 || ref.length > 300
-        || !/^(github:|git\+|https:\/\/|http:\/\/)[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+$/.test(ref))) {
+        || (!gitSpec.test(ref) && !npmSpec.test(ref)))) {
         return send(response, 400, { error: 'invalid plugin ref' })
       }
       const result = await beginUpdate(body.trial !== false, ref)

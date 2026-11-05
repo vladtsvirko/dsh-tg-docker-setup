@@ -1,14 +1,16 @@
 {
-  "version": 1,
-  "comment": "Recommended plugin pins for a fresh install or repair. `minimum` is the floor a boot enforces; a newer compatible version installed from the bot stays installed. Plugin versions are independent of VERSION.",
+  "version": 2,
+  "comment": "Recommended plugin specs for a fresh install or repair. `spec` is the npm package pinned exactly; `fallback` is the same release from GitHub when the registry is unreachable. `minimum` is the floor a boot enforces. Plugin versions are independent of VERSION.",
   "plugins": {
     "dsh-telegram-connector": {
-      "ref": "github:vladtsvirko/dsh-telegram-connector#v0.13.0",
+      "spec": "dsh-telegram-connector@0.13.0",
+      "fallback": "github:vladtsvirko/dsh-telegram-connector#v0.13.0",
       "minimum": "0.13.0",
       "repository": "vladtsvirko/dsh-telegram-connector"
     },
     "dsh-penpot-plugin": {
-      "ref": "github:vladtsvirko/dsh-penpot-plugin#v0.3.0",
+      "spec": "dsh-penpot-plugin@0.3.0",
+      "fallback": "github:vladtsvirko/dsh-penpot-plugin#v0.3.0",
       "minimum": "0.3.0",
       "repository": "vladtsvirko/dsh-penpot-plugin"
     }

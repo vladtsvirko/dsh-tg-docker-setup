@@ -115,7 +115,7 @@ The apply path:
 3. write `DSH_SETUP_VERSION` into `.env`;
 4. install the matching `@deepseek-ai/dsh` globally when it differs;
 5. re-run the entrypoint's prepare step as the service user (this installs the
-   recommended plugin refs from `plugins.json`, enforcing only their minimum);
+   recommended plugin specs from `plugins.json`, enforcing only their minimum);
 6. `systemctl restart dsh.service`;
 7. health gate: service active **and** the published web port answers.
 

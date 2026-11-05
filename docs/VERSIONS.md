@@ -41,14 +41,14 @@ Plain semver, one tag per plugin repository:
 - `0.x` is the compatible line; `1.0.0` marks a break.
 - `COMPATIBILITY.md` in the plugin repository states which DSH release was
   tested. It is not encoded in the version.
-- `peerDependencies` is the supported DSH range. `/system update connector`
-  reads the range from the tagged `package.json` and refuses a tag the running
-  runtime does not satisfy. Other bundles are gated by the plugin manager's own
-  compatibility check.
-- Tags are immutable and every tag is a candidate for `/system update`; do not
-  push a tag you would not install.
-- Distribution is GitHub tags. npm publication is deliberately deferred until
-  `1.0.0`; until then there is no registry path in the update resolver.
+- `peerDependencies` is the supported DSH range. `/system update` reads the
+  range from the published manifest (or the tagged `package.json` for a git
+  install) and refuses a version the running runtime does not satisfy.
+- Tags and published versions are immutable. Every tag is a release: the
+  publish workflow uploads that exact version, and nothing is published from
+  `main` directly.
+- Distribution is npm (`name@version`), with the same release's GitHub tag kept
+  as the registry-unreachable fallback. The setup catalog carries both.
 
 ## `plugins.json`
 
@@ -56,12 +56,14 @@ Plain semver, one tag per plugin repository:
 {
   "plugins": {
     "dsh-telegram-connector": {
-      "ref": "github:vladtsvirko/dsh-telegram-connector#v0.13.0",
+      "spec": "dsh-telegram-connector@0.13.0",
+      "fallback": "github:vladtsvirko/dsh-telegram-connector#v0.13.0",
       "minimum": "0.13.0",
       "repository": "vladtsvirko/dsh-telegram-connector"
     },
     "dsh-penpot-plugin": {
-      "ref": "github:vladtsvirko/dsh-penpot-plugin#v0.3.0",
+      "spec": "dsh-penpot-plugin@0.3.0",
+      "fallback": "github:vladtsvirko/dsh-penpot-plugin#v0.3.0",
       "minimum": "0.3.0",
       "repository": "vladtsvirko/dsh-penpot-plugin"
     }
@@ -69,13 +71,15 @@ Plain semver, one tag per plugin repository:
 }
 ```
 
-- `ref` is what a fresh install or a repair installs.
+- `spec` is the exact npm package a fresh install or repair installs.
+- `fallback` is the same release as a GitHub tag, used only when the registry
+  cannot be reached. It never moves to a different version.
 - `minimum` is the floor a boot enforces. An installed version at or above it
-  is left alone, even when it is newer than `ref`.
+  is left alone, even when it is newer than `spec`.
 - A setup release raises `minimum` only when it genuinely needs newer plugin
-  behaviour. Bumping `ref` alone does not downgrade an existing deployment.
+  behaviour. Bumping `spec` alone does not downgrade an existing deployment.
 - An explicit `.env` override (`DSH_TELEGRAM_PLUGIN` / `PENPOT_PLUGIN_REF`) is
-  honoured, except when it points below `minimum`: the catalog ref wins and the
+  honoured, except when it points below `minimum`: the catalog spec wins and the
   boot warns. A stale pin cannot keep a deployment on an unsupported plugin.
 
 ## How updates move
@@ -83,9 +87,9 @@ Plain semver, one tag per plugin repository:
 | Mechanism | Moves | Rollback |
 |---|---|---|
 | `/system update setup` | setup checkout + installed DSH; the entrypoint then applies the plugin floor | automatic on failed health; one previous checkout + profile snapshot |
-| `/system update connector` | connector to the newest compatible tag, or `to <version>` | supervisor trial: Commit / Roll back / deadline; failed install restores at once |
+| `/system update connector` | connector to the newest compatible npm version, or `to <version>`; a GitHub-installed connector uses its repo tags | supervisor trial: Commit / Roll back / deadline; failed install restores at once |
 | `/system update penpot` | Penpot plugin through the plugin manager | trial opened before removal; failed install re-adds the previous spec, otherwise supervisor rollback |
-| `/system update plugin <name>` | any GitHub-installed bundle | same as Penpot |
+| `/system update plugin <name>` | any npm- or GitHub-installed bundle | same as Penpot |
 | `/system restart` | nothing (restarts current state) | trial |
 | `/system rollback` | profile only | does not move the setup checkout or DSH |
 | host `./update.sh --apply` | same as setup update | same health gate |
@@ -104,8 +108,8 @@ deployment needs at least connector X", and the next boot enforces that floor.
 | different setup product major | no | the same flag |
 | same setup version | no-op | the updater reports no target |
 | older setup tag | no | rollback is separate |
-| any newer plugin tag whose DSH range matches | yes | `/system update connector` / `penpot` / `plugin` |
-| plugin tag whose DSH range does not match | no | update DSH first, or install on the host with an explicit exemption |
+| any newer plugin version whose DSH range matches | yes | `/system update connector` / `penpot` / `plugin` |
+| plugin version whose DSH range does not match | no | update DSH first, or install on the host with an explicit exemption |
 
 Compatible setup releases may be **skipped**: `0.1.1 → 0.4.2` is allowed when the
 DSH part and the product major match. Tags on side branches are skipped because
@@ -129,11 +133,12 @@ the target must be a descendant of the running tag. Ordering is release-aware
 2. Update `VERSION`, the `AGENTS.md` example, README compatibility notes,
    `docs/VERSIONS.md` and any doc that names the current tag.
 3. If the release needs newer plugin behaviour, bump that plugin's `minimum` in
-   `plugins.json` (and usually its `ref`).
+   `plugins.json` (and its `spec`/`fallback`). The version must already exist on
+   npm.
 4. Run `node --test *.test.mjs`, `bash -n update.sh install.sh entrypoint.sh
    healthcheck.sh scripts/repair.sh`, `node scripts/check-version.mjs` with
    `GITHUB_REF_NAME=v<VERSION>`, and `node scripts/plugin-preflight.mjs`
-   (`--remote` after the plugin tags are pushed).
+   (`--remote` after the npm versions are published and the tags are pushed).
 5. Commit, tag and push the setup. CI validates the tag; it does not look for a
    connector tag.
 
@@ -141,15 +146,21 @@ the target must be a descendant of the running tag. Ordering is release-aware
 
 1. Update `package.json`/`package-lock.json`, `COMPATIBILITY.md` (tested DSH
    row), `CHANGELOG.md` and the README install pin.
-2. Run `npm run typecheck && npm test && npm run build`.
-3. Commit, tag `v<version>`, push. Optionally raise the setup's recommendation.
+2. Run `npm run typecheck && npm test && npm run build` and
+   `npm publish --dry-run`.
+3. Commit, tag `v<version>`, push. The tag runs `.github/workflows/publish.yml`
+   with the repository's `NPM_TOKEN` secret and publishes exactly that version.
+4. After the npm version exists, raise the setup's `spec`/`fallback`/`minimum`
+   and run `scripts/plugin-preflight.mjs --remote`.
 
 ### Penpot plugin
 
 1. Update `package.json`/`package-lock.json`, `COMPATIBILITY.md` (tested DSH and
    Penpot rows), `CHANGELOG.md` and the README install pin.
-2. Run `npm run typecheck && npm test && npm run build`.
-3. Commit, tag `v<version>`, push. Optionally raise the setup's recommendation.
+2. Run `npm run typecheck && npm test && npm run build` and
+   `npm publish --dry-run`.
+3. Commit, tag `v<version>`, push. The same publish workflow uploads it.
+4. Optionally raise the setup's recommendation.
 
 Do not move or reuse a tag. Do not tag only one repository when a release is
 meant to move both tracks.

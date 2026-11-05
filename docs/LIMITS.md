@@ -21,7 +21,7 @@ runtime.
 
 - prompts, sessions, topics, `/sync`, model and timezone changes;
 - `/system restart`, trials, `/system confirm`, `/system rollback` (profile);
-- `/system update connector` (newest compatible connector tag, in a trial);
+- `/system update connector` (newest compatible npm version, in a trial);
 - `/system update penpot` / `/system update plugin <name>` (bundles, in a trial);
 - `/system update setup` (drain, setup update, automatic rollback);
 - plugin install/enable/disable/remove through the approval flow;
@@ -162,7 +162,7 @@ See [`VERSIONS.md`](VERSIONS.md). In short:
 
 - the setup is one tag with DSH; the connector and Penpot plugin are versioned
   independently and need no matching setup tag;
-- `plugins.json` pins a recommended plugin tag and a minimum; a boot only
+- `plugins.json` pins an exact npm spec, a GitHub fallback and a minimum; a boot only
   enforces the minimum and never downgrades a newer compatible plugin;
 - tags are immutable;
 - the updater only moves forward within the same DSH line and product major

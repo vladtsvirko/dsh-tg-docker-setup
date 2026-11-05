@@ -73,7 +73,8 @@ jobs:
           node -e '
             const catalog = require("./plugins.json")
             for (const [name, entry] of Object.entries(catalog.plugins ?? {})) {
-              if (!/^github:[^#]+#v\d+\.\d+\.\d+/.test(entry.ref ?? "")) throw new Error(`${name}: bad ref`)
+              if (!/^((?:@[^/]+\/)?[^@]+)@\d+\.\d+\.\d+$/.test(entry.spec ?? "")) throw new Error(`${name}: bad npm spec`)
+              if (!/^github:[^#]+#v\d+\.\d+\.\d+$/.test(entry.fallback ?? "")) throw new Error(`${name}: bad fallback`)
               if (!/^\d+\.\d+\.\d+/.test(entry.minimum ?? "")) throw new Error(`${name}: bad minimum`)
             }
             console.log(`plugin catalog ok: ${Object.keys(catalog.plugins ?? {}).length} plugins`)

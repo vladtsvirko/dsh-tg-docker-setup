@@ -59,25 +59,31 @@ real handlers with a fake plugin manager).
 
 ## Update model
 
-The setup pins each plugin's recommended tag and a minimum in `plugins.json`:
+The setup pins each plugin's exact npm version and a minimum in `plugins.json`:
 
-- **Fresh install / repair:** install `ref`.
+- **Fresh install / repair:** install `spec` from npm. If the registry cannot be
+  reached, install the same release from `fallback` on GitHub.
 - **Boot:** if the installed version is below `minimum`, reinstall; otherwise
   leave it. A newer version installed from the bot is never downgraded. A
-  legacy `.env` pin below `minimum` is overridden by the catalog ref.
+  legacy `.env` pin below `minimum` is overridden by the catalog spec.
 - **Update from Telegram:**
-  - `/system update connector [to <version>] [now]` resolves the newest tag in
-    the connector repository, checks its declared DSH range, and lets the
-    supervisor install that exact ref in a trial.
+  - `/system update connector [to <version>] [now]` resolves the newest npm
+    version (or the repository tag for a GitHub-installed connector), checks
+    its declared DSH range, and lets the supervisor install that exact spec in
+    a trial.
   - `/system update penpot [to <version>] [now]` and
     `/system update plugin <name> [to <version>] [now]` remove and reinstall the
     bundle through the host plugin manager, in a trial, restoring the previous
     version if the new one fails.
-- **Standalone:** the plugin manager has no supervisor; use `dsh plugin remove`
-  then `add`. The same commands explain this.
+- **Standalone:** install `dsh-penpot-plugin@<version>` or
+  `dsh-telegram-connector@<version>`; update with `dsh plugin remove` then
+  `add`. The same commands explain the supervisor/updater limits.
+- **Publishing:** a plugin tag runs its `publish.yml`, which tests, validates the
+  tag and publishes that exact version to npm with provenance. The workflow
+  needs the repository secret `NPM_TOKEN` with publish rights.
 
-Plugin versions are independent of the setup `VERSION`. Distribution is GitHub
-tags; npm publication waits for `1.0.0`. See [`VERSIONS.md`](VERSIONS.md).
+Plugin versions are independent of the setup `VERSION`. See
+[`VERSIONS.md`](VERSIONS.md).
 
 ## Discoverability
 

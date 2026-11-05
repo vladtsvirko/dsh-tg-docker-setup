@@ -763,7 +763,7 @@ component_apply() {
       # runtime environment needs the API root and the token.
       set_env PENPOT_ENABLED 1 "$ENV_FILE"
       local plugin_ref
-      plugin_ref="$(node -e 'process.stdout.write(require("./plugins.json").plugins["dsh-penpot-plugin"].ref)' 2>/dev/null || true)"
+      plugin_ref="$(node -e 'const p = require("./plugins.json").plugins["dsh-penpot-plugin"]; process.stdout.write(p.spec ?? p.ref ?? "")' 2>/dev/null || true)"
       if [ -n "$plugin_ref" ]; then set_env PENPOT_PLUGIN_REF "$plugin_ref" "$ENV_FILE"; fi
       set_env PENPOT_API_URL "http://$bind:$port" "$ENV_FILE"
       # The token is asked on every interactive enable/configure: a stored one

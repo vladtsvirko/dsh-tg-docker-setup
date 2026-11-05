@@ -36,10 +36,12 @@ Nothing is tagged or merged. `main` is untouched.
 
 - Connector and Penpot use plain semver and their own `AGENTS.md`; DSH
   compatibility lives in `COMPATIBILITY.md`, not in the version string.
-- Setup `plugins.json` pins a recommended `ref` and a `minimum` per plugin.
-- Entrypoint rule: install the ref when absent, enforce the minimum, never
-  downgrade. A legacy `.env` pin below the minimum is overridden by the catalog
-  ref with a warning.
+- Setup `plugins.json` pins an exact npm `spec`, the same release's GitHub
+  `fallback`, and a `minimum` per plugin.
+- Entrypoint rule: install the spec when absent, enforce the minimum, never
+  downgrade; the GitHub fallback is tried if the registry fails. A legacy
+  `.env` pin below the minimum is overridden by the catalog spec with a
+  warning.
 - `reset-plugin` preserves the installed specs (and removes the previous
   package when the connector is switched), so a repair does not downgrade a
   bot-updated plugin.
@@ -51,14 +53,15 @@ Nothing is tagged or merged. `main` is untouched.
 
 ### Updates from Telegram
 
-- `/system update connector [to <version>] [now]`: resolves the newest tag,
-  checks the tag's declared DSH range, passes the exact ref to the supervisor,
-  installs it through `reset-plugin` inside a trial.
+- `/system update connector [to <version>] [now]`: resolves the newest npm
+  version (or repository tag for a git install), checks its declared DSH range,
+  passes the exact spec to the supervisor, installs it through `reset-plugin`
+  inside a trial.
 - `/system update penpot [to <version>] [now]` and `/system update plugin <name>
-  [to <version>] [now]`: resolve the bundle's tag, open a trial, remove the old
-  package, install the new one through the plugin manager, restore the previous
-  spec if install fails, and fall back to a supervisor rollback if restoration
-  fails.
+  [to <version>] [now]`: resolve the bundle's newest npm version (or tag),
+  open a trial, remove the old package, install the new one through the plugin
+  manager, restore the previous spec if install fails, and fall back to a
+  supervisor rollback if restoration fails.
 - Supervisor `/update` accepts and validates `ref`, passes
   `DSH_PLUGIN_TARGET_REF` to the entrypoint, and the entrypoint fails the update
   hard so the supervisor restores immediately instead of booting without a bot.
@@ -79,19 +82,20 @@ Run and green:
 
 ```sh
 # connector
-npm run typecheck && npm test && npm run build          # 232 passed, 1 todo
+npm run typecheck && npm test && npm run build          # 237 passed, 1 todo
 # penpot
 npm run typecheck && npm test && npm run build          # 11 passed
 # setup
 node --test entrypoint.test.mjs supervisor.test.mjs plugins.test.mjs install.test.mjs update.test.mjs
-bash -n update.sh install.sh entrypoint.sh healthcheck.sh scripts/repair.sh
+bash -n update.sh install.sh entrypoint.sh healthcheck.sh scripts/repair.sh   # 153 tests
 GITHUB_REF_NAME=v0.2.1-rc.5-0.13.0 node scripts/check-version.mjs
 node scripts/plugin-preflight.mjs            # local versions match the pins
-node scripts/plugin-preflight.mjs --remote   # fails until the plugin tags exist
+node scripts/plugin-preflight.mjs --remote   # fails until npm versions and tags exist
 ./install.sh --check --yes --dir /tmp/x      # plan still resolves (no writes)
 
 # both packages
-npm pack --dry-run  # lib/, cordis.patch.yml, COMPATIBILITY.md, docs/STANDALONE.md
+npm publish --dry-run  # checks prepublishOnly, then shows the tarball
+npm pack --dry-run     # lib/, cordis.patch.yml, COMPATIBILITY.md, docs/STANDALONE.md
 ```
 
 Standalone check (both plugins composed and booted in a temp `DSH_HOME`):
@@ -103,36 +107,45 @@ Penpot registered its tools.
 - **Plugin versions are plain semver.** Only the setup keeps the
   `<dsh-version>-<product>` prefix. The current proposals are the next minor,
   not `1.0.0`: connector `0.13.0`, Penpot `0.3.0`, setup `0.13.0`.
-- **npm waits for `1.0.0`.** Until then both plugins are distributed as GitHub
-  tags and updated from tags; no registry path is added to the resolver.
-- **Update channel:** newest tag. Stable/prerelease channels stay a follow-up.
+- **npm is the distribution path.** Both plugins are published as
+  `name@version`; the same release's GitHub tag stays as the
+  registry-unreachable fallback. npm publication no longer waits for `1.0.0`.
+- **Update channel:** newest published version (or newest repo tag for a
+  git-installed connector). Stable/prerelease channels stay a follow-up.
 - **Release owner:** merge to the default branch (GitHub calls it `main`; the
   discussion said "master"), cut the tags, then UAT on the owner's box.
 
 ## Remaining actions
 
-1. **Merge and tag (owner).** No tags exist yet; the branches are review-only.
+1. **Add the npm publish secret (owner).** Each plugin repository needs
+   `NPM_TOKEN` under Settings → Secrets and variables → Actions. The token must
+   be allowed to publish new packages (a classic Automation token, or a
+   granular token with *All packages* read/write). The tag-triggered
+   `publish.yml` cannot upload without it.
+2. **Merge and tag (owner).** No tags exist yet; the branches are review-only.
    ```sh
    # each repository, in this order
    git switch main
    git merge --no-ff feat/standalone-plugins
    git push
 
-   # connector first
+   # connector first: the tag workflow publishes 0.13.0
    git tag v0.13.0 && git push origin v0.13.0
-   # then Penpot
+   # then Penpot: the tag workflow publishes 0.3.0
    git tag v0.3.0 && git push origin v0.3.0
-   # prove the pins resolve before tagging the setup
+
+   # prove npm and the fallback tags exist before tagging the setup
    cd dsh-tg-docker-setup && node scripts/plugin-preflight.mjs --remote
 
    # setup last
    git tag v0.2.1-rc.5-0.13.0 && git push origin v0.2.1-rc.5-0.13.0
    ```
-   `plugin-preflight.mjs --remote` currently fails with “has no tag … — push the
-   plugin tag before the setup tag”; that is expected before the plugin tags and
-   must be green before the setup tag.
+   `plugin-preflight.mjs --remote` currently fails with “is not published” and
+   “has no tag”; that is expected until both publish workflows finish and must
+   be green before the setup tag. Re-running a failed publish workflow does not
+   move the tag. Do not publish the setup before the npm versions exist.
 
-2. **UAT on the owner's box.** The unit/integration suite covers discovery,
+3. **UAT on the owner's box.** The unit/integration suite covers discovery,
    range checks, argument parsing, the supervisor ref hand-off and the plugin
    manager sequence. Still manual: a real Telegram update of the connector and
    of Penpot, a live Penpot 2.18.6 import round trip, and the first boot after
@@ -143,4 +156,4 @@ Penpot registered its tools.
 
 The running deployment was not touched. It still runs setup `0.12.9`/connector
 `0.12.9` with Penpot plugin `0.1.2`; the next setup update will enforce the new
-floors and install `0.13.0`/`0.3.0` once those tags exist.
+floors and install `0.13.0`/`0.3.0` once those npm versions and tags exist.

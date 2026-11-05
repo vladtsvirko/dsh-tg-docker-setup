@@ -25,12 +25,14 @@ penpot plugin:  0.3.0                     tag v0.3.0
   `update.sh --apply` accept it; neither crosses without it.
 - Tags are immutable. `VERSION`, the tag and the `AGENTS.md` example move
   together.
-- **Plugins are independent.** `plugins.json` pins a recommended `ref` and a
-  `minimum` for the connector and the Penpot plugin. A fresh install and a
-  repair use the ref; a boot only forces a reinstall when the installed version
-  is below the minimum. A newer compatible tag installed from the bot stays
-  installed. A setup release does **not** need a matching connector or plugin
-  tag, and a plugin release does **not** need a setup release.
+- **Plugins are independent.** `plugins.json` pins an exact npm `spec`, a
+  GitHub `fallback` of the same release, and a `minimum` for the connector and
+  the Penpot plugin. A fresh install and a repair use the spec (falling back to
+  GitHub when the registry is unreachable); a boot only forces a reinstall when
+  the installed version is below the minimum. A newer compatible version
+  installed from the bot stays installed. A setup release does **not** need a
+  matching connector or plugin tag, and a plugin release does **not** need a
+  setup release.
 - The setup never derives a plugin spec from `VERSION`. A setup release that
   needs a newer plugin raises `minimum`; that is the only coupling left.
 
@@ -42,20 +44,19 @@ penpot plugin:  0.3.0                     tag v0.3.0
    `docs/VERSIONS.md` and any doc that names the current tag
    (`docs/UAT.md`, `docs/SELF-UPDATE.md`).
 3. If the release depends on newer plugin behaviour, bump the plugin's `minimum`
-   in `plugins.json` (and usually its `ref`). Do not add a matching plugin tag
-   requirement to CI.
+   in `plugins.json` (and its `spec`/`fallback`). The plugin version must already
+   be published to npm. Do not add a matching plugin tag requirement to CI.
 4. Run `node --test *.test.mjs`, `bash -n update.sh install.sh entrypoint.sh
    healthcheck.sh scripts/repair.sh`, and
    `node scripts/check-version.mjs` with `GITHUB_REF_NAME=v<VERSION>`.
    `node scripts/plugin-preflight.mjs` checks the sibling versions against
-   `plugins.json`; after tagging the plugins, `--remote` proves the tags exist.
+   `plugins.json`; after publishing the plugins, `--remote` proves the npm version and tag exist.
 5. Commit, tag and push the setup. CI runs `scripts/check-version.mjs`; it does
    not look for a connector tag.
 
 The connector and Penpot plugin have their own `AGENTS.md` and release
-checklists. Tag them first only when the setup's `minimum` requires that tag; a
-plugin release alone is picked up by `/system update connector` and
-`/system update penpot`.
+checklists. Publish them first when the setup's `spec` changes; a plugin release
+alone is picked up by `/system update connector` and `/system update penpot`.
 
 `/system update setup` is the normal no-SSH path: it drains agents, then the
 `updater` service runs `update.sh --to <target>`, which checks out,
