@@ -82,7 +82,7 @@ npm run typecheck && npm test && npm run build          # 228 passed, 1 todo
 # penpot
 npm run typecheck && npm test && npm run build          # 10 passed
 # setup
-node --test supervisor.test.mjs plugins.test.mjs install.test.mjs update.test.mjs
+node --test entrypoint.test.mjs supervisor.test.mjs plugins.test.mjs install.test.mjs update.test.mjs
 bash -n update.sh install.sh entrypoint.sh healthcheck.sh scripts/repair.sh
 GITHUB_REF_NAME=v0.2.1-rc.5-0.13.0 node scripts/check-version.mjs
 ```

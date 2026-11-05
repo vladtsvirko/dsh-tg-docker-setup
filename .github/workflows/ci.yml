@@ -47,6 +47,9 @@ jobs:
       - name: Plugin catalog and version-policy tests
         run: node --test plugins.test.mjs
 
+      - name: Entrypoint plugin-policy tests
+        run: node --test entrypoint.test.mjs
+
       - name: Shell syntax
         run: bash -n entrypoint.sh healthcheck.sh update.sh install.sh scripts/repair.sh
 
