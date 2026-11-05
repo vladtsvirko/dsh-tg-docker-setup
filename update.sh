@@ -714,6 +714,10 @@ component_apply() {
       set_env PENPOT_API_URL "http://$bind:$port" "$ENV_FILE"
       local token
       token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
+      if [ -z "$token" ]; then
+        token="$(env_get PENPOT_ACCESS_TOKEN)"
+        if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$env_file"; fi
+      fi
       if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$ENV_FILE"; fi
       log "restarting the runtime so the tools appear"
       restart_runtime || warn "could not restart the runtime"

@@ -1563,6 +1563,12 @@ design_apply() {
   set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$DIR/.env"
   local token
   token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
+  # The token may have been entered only in the main .env. Keep it in both, so
+  # a later re-create of design/.env (or an update) cannot lose it.
+  if [ -z "$token" ]; then
+    token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$DIR/.env" | head -1)"
+    if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$env_file"; fi
+  fi
   if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$DIR/.env"; fi
   # set_env preserves the mode, but a first run may have created .env here.
   chown root:"$SERVICE_USER" "$DIR/.env" 2>/dev/null || true

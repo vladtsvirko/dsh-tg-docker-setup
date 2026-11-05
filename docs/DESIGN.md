@@ -57,7 +57,10 @@ stack.
 1. Open `http://<DSH_BIND_IP>:<DSH_DESIGN_PORT>/` and create the first account
    (registration is on; email verification is off, a LAN instance has no SMTP).
 2. Settings → **Access tokens** → create one.
-3. Put it in `/srv/dsh/design/.env` as `PENPOT_ACCESS_TOKEN=...`.
+3. Put it in `/srv/dsh/design/.env` as `PENPOT_ACCESS_TOKEN=...` (or in
+   `/srv/dsh/.env`; the installer mirrors it into both). It is stored once and
+   survives updates — re-running `install.sh` or `/system update setup` does not
+   require entering it again.
 4. Re-run the component once so the runtime picks the token up: `/system components`
    → Enable (idempotent), or `./update.sh --component design enable`.
 

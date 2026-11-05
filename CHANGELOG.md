@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1-rc.5-0.12.11
+
+### Fixed
+
+- **The Penpot access token is stored in both `.env` files.** If it was entered
+  only in `/srv/dsh/.env`, the design component now mirrors it into
+  `design/.env` (and vice versa), so a re-created design env or a later update
+  cannot lose it. Re-running install/update never asks for it again.
+
 ## 0.2.1-rc.5-0.12.10
 
 ### Changed
