@@ -1290,8 +1290,8 @@ podman_user_setup() {
       || warn "could not add subuid/subgid for $SERVICE_USER; rootless podman may fail"
   fi
   local runtime="$DATA_HOME/.local/state"
-  run mkdir -p "$runtime"
-  run chown "$SERVICE_USER:$SERVICE_USER" "$runtime"
+  run mkdir -p "$DATA_HOME/.config" "$runtime"
+  run chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_HOME/.config" "$runtime"
   run chmod 700 "$runtime"
   if run runuser -u "$SERVICE_USER" -- env HOME="$DATA_HOME" XDG_RUNTIME_DIR="$runtime" podman info >/dev/null 2>&1; then
     log "podman ready for $SERVICE_USER (rootless)"
@@ -1575,10 +1575,14 @@ stop_runtime() {
 ensure_user() {
   if id "$SERVICE_USER" >/dev/null 2>&1; then
     log "user $SERVICE_USER already exists"
+    # Rootless Podman (and every tool that follows HOME) needs a home the
+    # service user owns. Older installs used the root-owned checkout.
+    run usermod --home "$DATA_HOME" "$SERVICE_USER" 2>/dev/null \
+      || warn "could not move $SERVICE_USER's home to $DATA_HOME"
     return 0
   fi
   log "creating the unprivileged service user $SERVICE_USER"
-  run useradd --system --home-dir "$DIR" --shell /bin/bash "$SERVICE_USER"
+  run useradd --system --home-dir "$DATA_HOME" --shell /bin/bash "$SERVICE_USER"
 }
 
 native_units() {
@@ -1625,6 +1629,7 @@ Group=$SERVICE_USER
 WorkingDirectory=$DATA_WORKSPACE
 EnvironmentFile=-$env_file
 Environment=HOME=$DATA_HOME
+Environment=XDG_RUNTIME_DIR=$DATA_HOME/.local/state
 Environment=DSH_HOME=$DATA_HOME
 Environment=DSH_WORKSPACE=$DATA_WORKSPACE
 Environment=DSH_SUPERVISOR_STATE=$SUPERVISOR_STATE

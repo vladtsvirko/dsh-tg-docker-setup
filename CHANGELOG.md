@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.1-rc.5-0.12.2
+
+### Fixed
+
+- **The service user's home is the data directory.** Older installs created
+  `dsh` with `--home-dir /srv/dsh`, which is root-owned; rootless Podman then
+  failed with `stat /srv/dsh/.config: no such file or directory`. The installer
+  moves the home to `/srv/dsh/data/home` and the unit exports
+  `XDG_RUNTIME_DIR=/srv/dsh/data/home/.local/state`.
+- The installer creates `$DATA_HOME/.config` as well, so a manual
+  `sudo -u dsh podman …` works once `XDG_RUNTIME_DIR` is set.
+
 ## 0.2.1-rc.5-0.12.1
 
 ### Fixed

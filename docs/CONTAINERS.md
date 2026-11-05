@@ -19,7 +19,9 @@ root
 range. The runtime unit stays fully hardened; no `SupplementaryGroups` is added.
 
 ```sh
-podman run --rm docker.io/library/alpine:3 sh -c 'echo hello'
+# the service user's home is /srv/dsh/data/home; a manual sudo needs the runtime dir
+sudo -u dsh env XDG_RUNTIME_DIR=/srv/dsh/data/home/.local/state \
+  podman run --rm docker.io/library/alpine:3 sh -c 'echo hello'
 podman run --rm --memory 512m --cpus 1 docker.io/library/postgres:15 --version
 podman ps -a
 podman rm -f <id>
