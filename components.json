@@ -31,10 +31,6 @@
         "urlEnv": "PENPOT_API_URL",
         "tokenEnv": "PENPOT_ACCESS_TOKEN",
         "cli": "penpot"
-      },
-      "plugin": {
-        "ref": "github:vladtsvirko/dsh-penpot-plugin#v0.2.0",
-        "package": "dsh-penpot-plugin"
       }
     }
   }

@@ -345,6 +345,7 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
   try {
     await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
     await cp(join(here, 'components.json'), join(dir, 'components.json'))
+    await cp(join(here, 'plugins.json'), join(dir, 'plugins.json'))
     await mkdir(join(dir, 'design'), { recursive: true })
     await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
     await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.4.0\n')
@@ -370,7 +371,7 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     assert.doesNotMatch(designEnv, /PENPOT_SECRET_KEY=change-me/)
     assert.match(mainEnv, /DSH_DESIGN_ENABLED=1/)
     assert.match(mainEnv, /PENPOT_ENABLED=1/)
-    assert.match(mainEnv, /PENPOT_PLUGIN_REF=github:vladtsvirko\/dsh-penpot-plugin#v\d+\.\d+\.\d+/)
+    assert.match(mainEnv, /PENPOT_PLUGIN_REF=dsh-penpot-plugin@\d+\.\d+\.\d+/)
     assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:8091/)
     assert.match(log, /podman-compose -f compose\.yaml up -d/)
 
@@ -380,6 +381,38 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     assert.match(after, /DSH_DESIGN_ENABLED=0/)
     assert.match(after, /PENPOT_ENABLED=0/)
     assert.match(log2, /podman-compose -f compose\.yaml down/)
+  } finally {
+    await rm(outer, { recursive: true, force: true })
+  }
+})
+
+test('enabling the design stack mirrors a stored Penpot token into both env files', async () => {
+  const outer = await mkdtemp(join(tmpdir(), 'component-token-'))
+  const dir = join(outer, 'repo')
+  const bins = join(outer, 'bin')
+  await mkdir(dir, { recursive: true })
+  if (!(await canExec(outer))) { await rm(outer, { recursive: true, force: true }); return }
+  try {
+    await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
+    await cp(join(here, 'components.json'), join(dir, 'components.json'))
+    await cp(join(here, 'plugins.json'), join(dir, 'plugins.json'))
+    await mkdir(join(dir, 'design'), { recursive: true })
+    await writeFile(join(dir, 'design', '.env'), 'PENPOT_DB_PASSWORD=x\nPENPOT_SECRET_KEY=y\nPENPOT_ACCESS_TOKEN=stored-token\n')
+    await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.4.0\n')
+    await writeFile(join(dir, '.env'), 'DSH_BIND_IP=127.0.0.1\n')
+    await mkdir(bins, { recursive: true })
+    await stub(bins, 'podman-compose', 'exit 0')
+    await stub(bins, 'curl', 'printf 200')
+    await stub(bins, 'systemctl', 'exit 0')
+
+    await exec('bash', [join(dir, 'update.sh'), '--component', 'design', 'enable', '--port', '8095'], {
+      env: { ...process.env, PATH: `${bins}:${process.env.PATH}` },
+      timeout: 30000,
+    })
+    const designEnv = await readFile(join(dir, 'design', '.env'), 'utf8')
+    const mainEnv = await readFile(join(dir, '.env'), 'utf8')
+    assert.match(designEnv, /PENPOT_ACCESS_TOKEN=stored-token/)
+    assert.match(mainEnv, /PENPOT_ACCESS_TOKEN=stored-token/)
   } finally {
     await rm(outer, { recursive: true, force: true })
   }

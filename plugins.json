@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "comment": "Recommended plugin specs for a fresh install or repair. `spec` is the npm package pinned exactly; `fallback` is the same release from GitHub when the registry is unreachable. `minimum` is the floor a boot enforces. Plugin versions are independent of VERSION.",
+  "plugins": {
+    "dsh-telegram-connector": {
+      "spec": "dsh-telegram-connector@0.13.0",
+      "fallback": "github:vladtsvirko/dsh-telegram-connector#v0.13.0",
+      "minimum": "0.13.0",
+      "repository": "vladtsvirko/dsh-telegram-connector"
+    },
+    "dsh-penpot-plugin": {
+      "spec": "dsh-penpot-plugin@0.3.0",
+      "fallback": "github:vladtsvirko/dsh-penpot-plugin#v0.3.0",
+      "minimum": "0.3.0",
+      "repository": "vladtsvirko/dsh-penpot-plugin"
+    }
+  }
+}

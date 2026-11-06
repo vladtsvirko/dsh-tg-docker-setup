@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.2.1-rc.5-0.13.0
+
+### Changed
+
+- **Plugins install from npm.** `plugins.json` now carries an exact npm `spec`
+  and a GitHub `fallback` of the same release. A fresh install uses the
+  registry; if it is unreachable, the same release installs from the tag. The
+  installer/updater/entrypoint understand both forms, and the fallback only
+  applies to a checkout install, never to an explicit update target.
+- **`/system update connector` follows the installed source.** A connector
+  installed from npm resolves the newest registry version; a git-installed one
+  keeps using tags. The supervisor accepts and validates both exact specs.
+
+- **Plugins are versioned and released independently of the setup.** The
+  connector is `0.13.0` (plain semver) and the Penpot plugin `0.3.0`; neither
+  tag has to match the setup tag any more. The setup pins a recommended `ref`
+  and a `minimum` in the new `plugins.json`. A fresh install uses the ref; a
+  boot only forces a reinstall when the installed version is below the minimum,
+  so a newer compatible plugin installed from the bot survives updates and
+  reboots.
+- **`/system update connector` now moves the connector** to the newest
+  compatible tag instead of reinstalling the setup-pinned one. The supervisor
+  receives the exact ref and runs the same `reset-plugin` path inside a trial;
+  a bad install or an unhealthy boot restores the previous state.
+- **`/system update penpot` and `/system update plugin <name>`** update any
+  GitHub-installed bundle through the host plugin manager, wrapped in a trial,
+  with the previous version restored if the new one fails.
+- **Standalone installs are documented** (`docs/PLUGINS.md`, and each plugin's
+  `docs/STANDALONE.md`). Both plugins run in any DSH profile; the setup adds
+  packaging and lifecycle, not capability.
+
+### Removed
+
+- The `plugin.ref` field in `components.json`; plugin pins live in
+  `plugins.json`.
+- The release-tag CI check that required a connector tag matching the setup
+  tag.
+
+### Fixed
+
+- **The installer asks for the Penpot access token, and Enter keeps the stored
+  one.** `install.sh`, `./update.sh --apply` and `./update.sh --component design
+  enable` prompt on every interactive run; the value is never echoed and is
+  mirrored into both `.env` files. A non-interactive run (the updater,
+  `/system components`, `--yes`) uses the stored token without prompting.
+
 ## 0.2.1-rc.5-0.12.11
 
 ### Fixed

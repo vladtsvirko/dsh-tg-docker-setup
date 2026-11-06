@@ -100,7 +100,7 @@ async function harness({ trialSeconds = 60, bootGrace = 30, entryExit = 0, entry
   const entry = join(root, 'entrypoint.sh')
   await writeFile(
     entry,
-    `#!/bin/sh\necho entrypoint >> "$FAKE_ENTRY_LOG"\necho partial > "$FAKE_ENTRY_WRITE"\ncase "$1" in reset-plugin) [ -n "$FAKE_ENTRY_SLEEP" ] && sleep "$FAKE_ENTRY_SLEEP" ;; esac\nexit ${entryExit}\n`,
+    `#!/bin/sh\necho entrypoint >> "$FAKE_ENTRY_LOG"\n[ -n "$DSH_PLUGIN_TARGET_REF" ] && echo "ref:$DSH_PLUGIN_TARGET_REF" >> "$FAKE_ENTRY_LOG"\necho partial > "$FAKE_ENTRY_WRITE"\ncase "$1" in reset-plugin) [ -n "$FAKE_ENTRY_SLEEP" ] && sleep "$FAKE_ENTRY_SLEEP" ;; esac\nexit ${entryExit}\n`,
     { mode: 0o755 },
   )
   const entryLog = join(root, 'entry.log')
@@ -412,6 +412,32 @@ needsExec('an update runs the entrypoint under a trial', async () => {
     assert.equal((await test15.call('/trial/commit', {})).status, 200)
   } finally {
     await test15.stop()
+  }
+})
+
+needsExec('an update passes the exact npm spec to reset-plugin', async () => {
+  const testRef = await harness()
+  try {
+    assert.equal((await testRef.call('/update', { ref: 'dsh-telegram-connector@0.14.0' })).status, 200)
+    await waitFor(async () => {
+      const ran = await readFile(testRef.entryLog, 'utf8').catch(() => '')
+      return ran.includes('ref:dsh-telegram-connector@0.14.0')
+    }, { timeout: 15000, what: 'the ref to reach the entrypoint' })
+    assert.equal((await testRef.call('/trial/commit', {})).status, 200)
+  } finally {
+    await testRef.stop()
+  }
+})
+
+needsExec('an update with a malformed ref is refused before anything stops', async () => {
+  const testBadRef = await harness()
+  try {
+    const response = await testBadRef.call('/update', { ref: 'github:o/r; rm -rf /' })
+    assert.equal(response.status, 400)
+    assert.match(response.body?.error ?? '', /invalid plugin ref/)
+    assert.equal((await testBadRef.status()).child, 'running')
+  } finally {
+    await testBadRef.stop()
   }
 })
 

@@ -218,6 +218,7 @@ CONTAINERS="${CONTAINERS:-}"
 DSH_UPDATER_TOKEN="${DSH_UPDATER_TOKEN:-}"
 DESIGN="${DESIGN:-}"
 DSH_DESIGN_PORT="${DSH_DESIGN_PORT:-}"
+PENPOT_ACCESS_TOKEN="${PENPOT_ACCESS_TOKEN:-}"
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
@@ -268,7 +269,7 @@ EOF
 # Strict KEY=VALUE parsing: no sourcing, so a config file cannot execute code.
 CONFIG_KEYS="CONTAINERS DIR SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PROVIDER DSH_MODEL DSH_RESOURCE_PERCENT
 DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT PROVIDER_KEY
-DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN GIT_HOST
+PENPOT_ACCESS_TOKEN DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN GIT_HOST
 GIT_AUTH GIT_KEY GIT_KNOWN_HOSTS GIT_PROFILES_FILE"
 load_config() {
   local file="$1" line key value
@@ -379,6 +380,35 @@ ask_secret_keep() {
   if [ -t 0 ]; then read -r -s answer || answer=""; else read -r -s answer </dev/tty || answer=""; fi
   printf '\n'
   if [ -n "$answer" ]; then printf -v "$var" '%s' "$answer"; fi
+}
+
+# A secret read that never echoes and still works when stdin is the script
+# itself (the `wget … | bash` case).
+read_secret() {
+  local answer=""
+  if [ -t 0 ]; then read -r -s answer || answer=""; else read -r -s answer </dev/tty || answer=""; fi
+  printf '%s' "$answer"
+}
+
+# The Penpot access token is created inside Penpot (Settings -> Access tokens),
+# so a first install has none yet and can add it after the stack is up. On every
+# later run the stored token is the default: Enter keeps it, which is why a
+# repair or an update never needs the file edited by hand.
+ask_penpot_token() {
+  local answer
+  can_ask || return 0
+  if [ -n "${PENPOT_ACCESS_TOKEN:-}" ]; then
+    printf 'Penpot access token (blank = keep the stored one): ' >&2
+  else
+    printf 'Penpot access token (blank = set it up after the first start): ' >&2
+  fi
+  answer="$(read_secret)"
+  printf '\n' >&2
+  # A paste can carry surrounding whitespace or the whole KEY=value line.
+  answer="${answer#"${answer%%[![:space:]]*}"}"
+  answer="${answer%"${answer##*[![:space:]]}"}"
+  answer="${answer#PENPOT_ACCESS_TOKEN=}"
+  if [ -n "$answer" ]; then PENPOT_ACCESS_TOKEN="$answer"; fi
 }
 
 ask_secret() {
@@ -762,6 +792,15 @@ cpu_count() {
 # working deployment ends up with two keys and no way to tell which one is live).
 read_existing_env() {
   local key value provider key_var
+  # The Penpot access token lives in design/.env, or in the main .env when the
+  # component mirrored it. Read both so the prompt has a stored value to keep.
+  if [ -z "${PENPOT_ACCESS_TOKEN:-}" ]; then
+    for key in "$DIR/design/.env" "$DIR/.env"; do
+      [ -r "$key" ] || continue
+      value="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$key" | head -1)"
+      if [ -n "$value" ]; then PENPOT_ACCESS_TOKEN="$value"; break; fi
+    done
+  fi
   [ -r "$DIR/.env" ] || return 0
   for key in DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PROVIDER DSH_MODEL DSH_RESOURCE_PERCENT DSH_TELEGRAM_BOT_TOKEN \
              ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT CONTAINERS \
@@ -879,7 +918,7 @@ rerun_as_root() {
   local -a keep=() pair
   while IFS= read -r pair; do
     case "$pair" in
-      DSH_*=*|PROVIDER_KEY=*|ALLOWED_USER_IDS=*|SERVICE_USER=*|CONTAINERS=*|DESIGN=*) keep+=("$pair") ;;
+      DSH_*=*|PROVIDER_KEY=*|ALLOWED_USER_IDS=*|SERVICE_USER=*|CONTAINERS=*|DESIGN=*|PENPOT_ACCESS_TOKEN=*) keep+=("$pair") ;;
     esac
   done < <(env 2>/dev/null || true)
   # Remember where the download lives, so the installer can say it is not the
@@ -1262,6 +1301,13 @@ warn_exposure
 # Native mode only: a published Docker port never reaches ufw's INPUT chain.
 ufw_hints "$DSH_PORT" "$DSH_BIND_IP"
 
+# The Penpot token is the one answer a repair may want to change, so it is asked
+# on every interactive run. Blank keeps the stored token (and is a no-op on a
+# first install, where there is nothing to keep yet).
+if [ "$DESIGN" = penpot ]; then
+  ask_penpot_token
+fi
+
 # One confirmation for everything the plan above describes, so apt and the unit
 # work do not start while someone is still reading it.
 if can_ask; then
@@ -1495,10 +1541,10 @@ write_env() {
     set_env DSH_DESIGN_PORT "$DSH_DESIGN_PORT" "$file"
     set_env DSH_DESIGN_ENABLED 1 "$file"
     set_env PENPOT_ENABLED 1 "$file"
-    local comp="$DIR/components.json"
-    [ -f "$comp" ] || comp="$SRC_DIR/components.json"
+    local catalog="$DIR/plugins.json"
+    [ -f "$catalog" ] || catalog="$SRC_DIR/plugins.json"
     local plugin_ref=""
-    [ -f "$comp" ] && plugin_ref="$(node -e 'process.stdout.write(require(process.argv[1]).components.design.plugin.ref)' "$comp" 2>/dev/null || true)"
+    [ -f "$catalog" ] && plugin_ref="$(node -e 'const p = require(process.argv[1]).plugins["dsh-penpot-plugin"]; process.stdout.write(p.spec ?? p.ref ?? "")' "$catalog" 2>/dev/null || true)"
     if [ -n "$plugin_ref" ]; then set_env PENPOT_PLUGIN_REF "$plugin_ref" "$file"; fi
     set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$file"
   else
@@ -1561,15 +1607,16 @@ design_apply() {
   set_env DSH_BIND_IP "$DSH_BIND_IP" "$env_file"
   set_env DSH_DESIGN_PORT "$DSH_DESIGN_PORT" "$env_file"
   set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$DIR/.env"
-  local token
-  token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
-  # The token may have been entered only in the main .env. Keep it in both, so
-  # a later re-create of design/.env (or an update) cannot lose it.
-  if [ -z "$token" ]; then
-    token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$DIR/.env" | head -1)"
-    if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$env_file"; fi
+  # The token comes from the interactive prompt (or --config/environment) when
+  # one was given; otherwise the stored one is kept. Mirror it into both files
+  # so a re-created design/.env or a later update cannot lose it.
+  local token="${PENPOT_ACCESS_TOKEN:-}"
+  [ -n "$token" ] || token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
+  [ -n "$token" ] || token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$DIR/.env" | head -1)"
+  if [ -n "$token" ]; then
+    set_env PENPOT_ACCESS_TOKEN "$token" "$env_file"
+    set_env PENPOT_ACCESS_TOKEN "$token" "$DIR/.env"
   fi
-  if [ -n "$token" ]; then set_env PENPOT_ACCESS_TOKEN "$token" "$DIR/.env"; fi
   # set_env preserves the mode, but a first run may have created .env here.
   chown root:"$SERVICE_USER" "$DIR/.env" 2>/dev/null || true
   chmod 640 "$DIR/.env" 2>/dev/null || true
@@ -1601,8 +1648,12 @@ design_apply() {
     return 1
   fi
 
-  warn "create the first account at http://$DSH_BIND_IP:$DSH_DESIGN_PORT/ then Settings -> Access tokens,"
-  warn "and put the token in $env_file as PENPOT_ACCESS_TOKEN=... to enable the design tools"
+  if [ -n "$token" ]; then
+    log "Penpot access token stored — the design tools are enabled"
+  else
+    warn "create the first account at http://$DSH_BIND_IP:$DSH_DESIGN_PORT/ then Settings -> Access tokens,"
+    warn "and re-run ./install.sh (or ./update.sh --component design enable) to paste it"
+  fi
 }
 
 # A running deployment is stopped before the units are rewritten: two runtimes

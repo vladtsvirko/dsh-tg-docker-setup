@@ -1,115 +1,166 @@
 # Versions and update policy
 
-Two repositories ship one release:
+Three artifacts, two release tracks:
 
-| Artifact | Repository | What it contains |
-|---|---|---|
-| connector | `dsh-telegram-connector` | The Cordis plugin installed into the DSH profile |
-| setup | `dsh-tg-docker-setup` | Installer, entrypoint, supervisor, updater, host scripts, docs |
+| Artifact | Repository | Version | Released with |
+|---|---|---|---|
+| setup | `dsh-tg-docker-setup` | `0.2.1-rc.5-0.13.0` | DSH, as one tag |
+| connector | `dsh-telegram-connector` | `0.13.0` | its own tag |
+| Penpot plugin | `dsh-penpot-plugin` | `0.3.0` | its own tag |
 
-They always carry the **same tag and version**. A release is the pair, not one
-repository.
+The setup is released as one unit with DSH. Each plugin is released on its own
+and pinned by the setup's `plugins.json`; plugin tags do not match the setup tag
+and do not have to.
 
-## Scheme
+## Setup scheme
 
 ```
 <dsh-version>-<major>.<minor>.<patch>          tag: v<same>
-v0.2.1-rc.5-0.12.11
+v0.2.1-rc.5-0.13.0
 ```
 
-- **DSH part** (`0.2.1-rc.5`) is the exact DSH release the pair was built and
+- **DSH part** (`0.2.1-rc.5`) is the exact DSH release the setup was built and
   tested against. Prerelease suffixes are part of the version.
-- **Product part** (`0.11.0`) is ours.
-  - It resets to `0.0.0` when the pair aligns to a new DSH line.
+- **Product part** (`0.13.0`) is ours.
+  - It resets to `0.0.0` when the setup aligns to a new DSH line.
   - `0.x` is the compatible line. A patch is a fix, a minor is a compatible
     feature, and `1.0.0` (or any new major) marks an incompatible change.
   - Never ship a breaking change in the `0.x` line.
-- Tags are immutable. Do not move, delete, or reuse a released tag.
-- The tag and setup `VERSION` must agree; the DSH part is the prefix of
-  `VERSION` and `install.sh` installs `@deepseek-ai/dsh@<DSH part>`. There is no
-  image and no second DSH pin. This repository's CI checks the tag and
-  `VERSION`; the connector's CI checks its `package.json` and COMPATIBILITY row.
+- The tag and `VERSION` must agree; the DSH part is the prefix of `VERSION` and
+  `install.sh` installs `@deepseek-ai/dsh@<DSH part>`. There is no `.env` DSH
+  pin.
 
-## Why the versions are coupled
+## Plugin scheme
 
-The setup does not float the connector. `entrypoint.sh` derives
+Plain semver, one tag per plugin repository:
 
 ```
-DSH_TELEGRAM_PLUGIN=github:vladtsvirko/dsh-telegram-connector#v${DSH_SETUP_VERSION}
+<major>.<minor>.<patch>        tag: v<same>
 ```
 
-and forces that ref even when `.env` contains an older override pointing at the
-official connector. (A ref for a different connector is left alone.) When the ref
-recorded in `.telegram-plugin-ref` changes, it reinstalls the connector before
-the runtime starts.
+- `0.x` is the compatible line; `1.0.0` marks a break.
+- `COMPATIBILITY.md` in the plugin repository states which DSH release was
+  tested. It is not encoded in the version.
+- `peerDependencies` is the supported DSH range. `/system update` reads the
+  range from the published manifest (or the tagged `package.json` for a git
+  install) and refuses a version the running runtime does not satisfy.
+- Tags and published versions are immutable. Every tag is a release: the
+  publish workflow uploads that exact version, and nothing is published from
+  `main` directly.
+- Distribution is npm (`name@version`), with the same release's GitHub tag kept
+  as the registry-unreachable fallback. The setup catalog carries both.
 
-Consequences:
+## `plugins.json`
 
-- A setup version bump **requires a connector tag with the same version**. A
-  setup-only fix still cuts a connector maintenance tag; otherwise the entrypoint
-  asks for a tag that does not exist.
-- A connector change you want a running setup to use **requires a setup release**
-  with the same version. A connector tag alone is not picked up by a reboot: the
-  boot pin remains the old setup tag.
-- `/system update connector` reinstalls the **pinned** connector. It repairs or
-  reapplies that version; it does not choose a newer connector tag.
-- `/system update setup` moves the setup tag, installs the matching DSH, and the
-  new entrypoint installs the connector tag derived from it.
+```json
+{
+  "plugins": {
+    "dsh-telegram-connector": {
+      "spec": "dsh-telegram-connector@0.13.0",
+      "fallback": "github:vladtsvirko/dsh-telegram-connector#v0.13.0",
+      "minimum": "0.13.0",
+      "repository": "vladtsvirko/dsh-telegram-connector"
+    },
+    "dsh-penpot-plugin": {
+      "spec": "dsh-penpot-plugin@0.3.0",
+      "fallback": "github:vladtsvirko/dsh-penpot-plugin#v0.3.0",
+      "minimum": "0.3.0",
+      "repository": "vladtsvirko/dsh-penpot-plugin"
+    }
+  }
+}
+```
 
-The `.env` variable `DSH_TELEGRAM_PLUGIN` exists for alternative connectors. The
-official connector ref is always rewritten to the setup tag.
+- `spec` is the exact npm package a fresh install or repair installs.
+- `fallback` is the same release as a GitHub tag, used only when the registry
+  cannot be reached. It never moves to a different version.
+- `minimum` is the floor a boot enforces. An installed version at or above it
+  is left alone, even when it is newer than `spec`.
+- A setup release raises `minimum` only when it genuinely needs newer plugin
+  behaviour. Bumping `spec` alone does not downgrade an existing deployment.
+- An explicit `.env` override (`DSH_TELEGRAM_PLUGIN` / `PENPOT_PLUGIN_REF`) is
+  honoured, except when it points below `minimum`: the catalog spec wins and the
+  boot warns. A stale pin cannot keep a deployment on an unsupported plugin.
 
-There is no `DSH_VERSION` environment knob. The DSH version is the prefix of
-`VERSION`; `install.sh` and `update.sh` install that exact version globally.
+## How updates move
+
+| Mechanism | Moves | Rollback |
+|---|---|---|
+| `/system update setup` | setup checkout + installed DSH; the entrypoint then applies the plugin floor | automatic on failed health; one previous checkout + profile snapshot |
+| `/system update connector` | connector to the newest compatible npm version, or `to <version>`; a GitHub-installed connector uses its repo tags | supervisor trial: Commit / Roll back / deadline; failed install restores at once |
+| `/system update penpot` | Penpot plugin through the plugin manager | trial opened before removal; failed install re-adds the previous spec, otherwise supervisor rollback |
+| `/system update plugin <name>` | any npm- or GitHub-installed bundle | same as Penpot |
+| `/system restart` | nothing (restarts current state) | trial |
+| `/system rollback` | profile only | does not move the setup checkout or DSH |
+| host `./update.sh --apply` | same as setup update | same health gate |
+
+Plugin updates and setup updates are independent. A setup release no longer
+forces a connector version, and a connector release no longer needs a setup
+release. The only coupling left is `minimum`: a setup release can say "this
+deployment needs at least connector X", and the next boot enforces that floor.
 
 ## What may jump
 
 | From → to | Allowed by default? | How |
 |---|---|---|
-| same DSH part, same product major | yes | `/system update setup` (mode `compatible`) |
-| same product major, different DSH part | no | `/system update setup --i-know-versions-are-incompatible` or host `./update.sh --apply --i-know-versions-are-incompatible` |
-| different product major | no | same explicit flag |
-| same version | no-op | updater reports no target |
-| older tag | no | the updater rejects it; rollback is a separate, automatic path |
+| same setup DSH part, same product major | yes | `/system update setup` |
+| same product major, different DSH part | no | `--i-know-versions-are-incompatible` |
+| different setup product major | no | the same flag |
+| same setup version | no-op | the updater reports no target |
+| older setup tag | no | rollback is separate |
+| any newer plugin version whose DSH range matches | yes | `/system update connector` / `penpot` / `plugin` |
+| plugin version whose DSH range does not match | no | update DSH first, or install on the host with an explicit exemption |
 
-Compatible releases may be **skipped**: `0.1.1 → 0.4.2` is allowed when the DSH
-part and the product major match. Tags on side branches are skipped because the
-target must be a descendant of the running tag. Ordering is release-aware
+Compatible setup releases may be **skipped**: `0.1.1 → 0.4.2` is allowed when the
+DSH part and the product major match. Tags on side branches are skipped because
+the target must be a descendant of the running tag. Ordering is release-aware
 (`versionsort.suffix=-rc`).
-
-`/system` never crosses a DSH line or a product major on its own. The flag is an
-explicit human decision, accepted only from an allowlisted user in the control
-chat. `/system status` and the update card show the target before acceptance.
 
 ## Scopes
 
 | Mechanism | Changes | Rollback |
 |---|---|---|
-| `/system restart`, `/system update connector`, plugins | **profile** (`data/home/profiles/web`) | supervisor snapshot; Commit / Roll back / deadline |
-| `/system update setup` | setup checkout, installed DSH, connector pin, profile state snapshot | automatic on failed health gate; one previous checkout + one `self-*.tgz` |
-| host `./update.sh --apply` | same as `/system update setup`, without draining agents | same |
-| `/system rollback` | profile only | does **not** move the checkout or the setup tag |
+| `/system restart`, `/system update connector`, plugin mutations | **profile** (`data/home/profiles/web`) | supervisor snapshot; Commit / Roll back / deadline |
+| `/system update setup` | setup checkout, installed DSH, profile state snapshot | automatic on failed health gate |
+| `/system rollback` | profile only | does not move the checkout or the setup tag |
 
-The updater only moves forward. There is no Telegram command that says "check
-out the previous tag"; a failed update restores it automatically, and a manual
-rollback is a host operation (checkout + snapshot).
+## Release checklists
 
-## Release checklist
+### Setup
 
-1. Bump the connector product version when the connector changes. For a
-   setup-only fix, still cut a connector **maintenance** release with no code
-   change.
-2. Update connector `package.json` / `package-lock.json`, `COMPATIBILITY.md` and
-   `CHANGELOG.md`.
-3. Run `npm run typecheck && npm test && npm run build` in the connector.
-4. Commit and tag the **connector first**; the setup's entrypoint must be able to
-   resolve `v<version>` on the next boot.
-5. Bump setup `VERSION`, the `AGENTS.md` example and any doc that names the
-   current tag (`docs/UAT.md`, `docs/SELF-UPDATE.md`, README examples).
-6. Run `node --test *.test.mjs`, `bash -n` on the shell entrypoints
-   (`update.sh install.sh entrypoint.sh healthcheck.sh scripts/repair.sh`) and
-   `node scripts/check-version.mjs` with `GITHUB_REF_NAME=v<VERSION>`.
-7. Commit and tag the setup. Both CI version checks must pass, and the setup tag
-   build proves the connector tag exists.
+1. Align the DSH part in `VERSION` to the tested DSH release; reset the product
+   to `0.0.0` for a new DSH line. Bump the product for setup changes.
+2. Update `VERSION`, the `AGENTS.md` example, README compatibility notes,
+   `docs/VERSIONS.md` and any doc that names the current tag.
+3. If the release needs newer plugin behaviour, bump that plugin's `minimum` in
+   `plugins.json` (and its `spec`/`fallback`). The version must already exist on
+   npm.
+4. Run `node --test *.test.mjs`, `bash -n update.sh install.sh entrypoint.sh
+   healthcheck.sh scripts/repair.sh`, `node scripts/check-version.mjs` with
+   `GITHUB_REF_NAME=v<VERSION>`, and `node scripts/plugin-preflight.mjs`
+   (`--remote` after the npm versions are published and the tags are pushed).
+5. Commit, tag and push the setup. CI validates the tag; it does not look for a
+   connector tag.
 
-Do not tag only one repository. Do not tag a commit that is not on `main`.
+### Connector
+
+1. Update `package.json`/`package-lock.json`, `COMPATIBILITY.md` (tested DSH
+   row), `CHANGELOG.md` and the README install pin.
+2. Run `npm run typecheck && npm test && npm run build` and
+   `npm publish --dry-run`.
+3. Commit, tag `v<version>`, push. The tag runs `.github/workflows/publish.yml`
+   with the repository's `NPM_TOKEN` secret and publishes exactly that version.
+4. After the npm version exists, raise the setup's `spec`/`fallback`/`minimum`
+   and run `scripts/plugin-preflight.mjs --remote`.
+
+### Penpot plugin
+
+1. Update `package.json`/`package-lock.json`, `COMPATIBILITY.md` (tested DSH and
+   Penpot rows), `CHANGELOG.md` and the README install pin.
+2. Run `npm run typecheck && npm test && npm run build` and
+   `npm publish --dry-run`.
+3. Commit, tag `v<version>`, push. The same publish workflow uploads it.
+4. Optionally raise the setup's recommendation.
+
+Do not move or reuse a tag. Do not tag only one repository when a release is
+meant to move both tracks.

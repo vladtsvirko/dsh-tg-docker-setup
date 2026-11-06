@@ -23,4 +23,4 @@ if (version !== tag) fail(`VERSION is ${version}, tag is ${tag}`)
 const env = await readFile(new URL('../.env.example', import.meta.url), 'utf8')
 if (/^DSH_VERSION=/m.test(env)) fail('.env.example sets DSH_VERSION; it is derived from VERSION')
 
-console.log(`version check ok: setup ${tag} (DSH ${dsh}, connector derived from setup version)`)
+console.log(`version check ok: setup ${tag} (DSH ${dsh}; plugins are versioned independently)`)

@@ -39,11 +39,11 @@ crossing, so an unattended update cannot cross on its own.
 ## Tag convention
 
 Tags match `<dsh>-<major>.<minor>.<patch>`, for example
-`v0.2.1-rc.5-0.12.11`, and the target must be a descendant of the current one:
+`v0.2.1-rc.5-0.13.0`, and the target must be a descendant of the current one:
 
 ```sh
-git tag v0.2.1-rc.5-0.12.11
-git push origin v0.2.1-rc.5-0.12.11
+git tag v0.2.1-rc.5-0.13.0
+git push origin v0.2.1-rc.5-0.13.0
 ```
 
 - Product `0.x` is the compatible line; `1.0.0` marks a break.
@@ -52,9 +52,10 @@ git push origin v0.2.1-rc.5-0.12.11
 - Crossing a major **or** a DSH line needs
   `--i-know-versions-are-incompatible`; `/system update setup` accepts the same
   explicit flag, but never crosses without it.
-- The setup release and the connector release carry the same tag. The entrypoint
-  installs the connector tag derived from the setup `VERSION`; see
-  [`VERSIONS.md`](VERSIONS.md).
+- The setup release and the plugin releases are independent. The entrypoint
+  installs the recommended plugin specs from `plugins.json` when a package is
+  missing and enforces only their `minimum`; it never downgrades a newer
+  compatible plugin. See [`VERSIONS.md`](VERSIONS.md).
 
 The checkout must be **on a tag**, not on `main`:
 
@@ -75,8 +76,9 @@ skipped because it is not a descendant of the current one.
 4. Checks out the target tag (detached HEAD). The old runtime keeps running.
 5. Writes `DSH_SETUP_VERSION` into `.env` and installs
    `@deepseek-ai/dsh@<DSH part>` globally when the installed version differs.
-6. Runs the entrypoint's prepare step as the service user, which installs the
-   connector tag derived from the new version.
+6. Runs the entrypoint's prepare step as the service user, which installs any
+   missing plugin and raises an installed plugin only when it is below the new
+   `minimum`.
 7. Restarts `dsh.service`, then waits for the health gate: the unit active **and**
    the web port answering.
 8. Runs the usual `verify` checks (web answers, recent plugin warnings) and the
