@@ -5,7 +5,7 @@ once the release is tagged.
 
 | Repository | Branch | Version | Commit |
 |---|---|---|---|
-| `dsh-tg-docker-setup` | `feat/standalone-plugins` | `0.2.1-rc.5-0.13.0` | branch head (this file) |
+| `dsh-tg-docker-setup` | `feat/standalone-plugins` | `0.2.1-rc.5-0.13.1` | branch head (this file) |
 | `dsh-telegram-connector` | `feat/standalone-plugins` | `0.13.0` | branch head |
 | `dsh-penpot-plugin` | `feat/standalone-plugins` | `0.3.0` | branch head |
 
@@ -88,7 +88,7 @@ npm run typecheck && npm test && npm run build          # 11 passed
 # setup
 node --test entrypoint.test.mjs supervisor.test.mjs plugins.test.mjs install.test.mjs update.test.mjs
 bash -n update.sh install.sh entrypoint.sh healthcheck.sh scripts/repair.sh   # 153 tests
-GITHUB_REF_NAME=v0.2.1-rc.5-0.13.0 node scripts/check-version.mjs
+GITHUB_REF_NAME=v0.2.1-rc.5-0.13.1 node scripts/check-version.mjs
 node scripts/plugin-preflight.mjs            # local versions match the pins
 node scripts/plugin-preflight.mjs --remote   # fails until npm versions and tags exist
 ./install.sh --check --yes --dir /tmp/x      # plan still resolves (no writes)
@@ -140,7 +140,7 @@ Penpot registered its tools.
    git tag v0.13.0 && git push origin v0.13.0
    git tag v0.3.0 && git push origin v0.3.0
    cd dsh-tg-docker-setup && node scripts/plugin-preflight.mjs --remote
-   git tag v0.2.1-rc.5-0.13.0 && git push origin v0.2.1-rc.5-0.13.0
+   git tag v0.2.1-rc.5-0.13.1 && git push origin v0.2.1-rc.5-0.13.1
    ```
    `plugin-preflight.mjs --remote` must be green before the setup tag.
 

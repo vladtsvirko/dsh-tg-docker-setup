@@ -27,7 +27,7 @@ exact npm plugin specs, their GitHub fallbacks and the minimum floor a boot enfo
 ## Which upgrades are allowed
 
 ```
-<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.13.0
+<dsh-version>-<major>.<minor>.<patch>      v0.2.1-rc.5-0.13.1
 ```
 
 - **Compatible** (the default): same DSH part, same product major. Any newer
@@ -62,7 +62,7 @@ cancels a running updater job).
 ```sh
 sudo ./update.sh --check    # what a compatible upgrade would do; changes nothing
 sudo ./update.sh --apply          # do it, with the first prompt asking to confirm
-sudo ./update.sh --to v0.2.1-rc.5-0.13.0   # an exact target (what the updater uses)
+sudo ./update.sh --to v0.2.1-rc.5-0.13.1   # an exact target (what the updater uses)
 ```
 
 Use this for a broken bot, a first install of the updater, or a deliberate

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1-rc.5-0.13.1
+
+### Fixed
+
+- **Connector `0.13.1` is the new floor.** That release probes the address the
+  Web UI actually advertises instead of hardcoded loopback, so a deployment
+  bound to the LAN address no longer shows
+  `web: 127.0.0.1:4310 answered unreachable` in `/system status`.
+  `plugins.json` pins `0.13.1` and raises its minimum to match.
+
 ## 0.2.1-rc.5-0.13.0
 
 ### Changed

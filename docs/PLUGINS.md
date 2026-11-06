@@ -8,9 +8,9 @@ where the boundary is.
 | | Connector | Penpot plugin |
 |---|---|---|
 | Repository | `dsh-telegram-connector` | `dsh-penpot-plugin` |
-| Current version | `0.13.0` | `0.3.0` |
+| Current version | `0.13.1` | `0.3.0` |
 | Standalone guide | [docs/STANDALONE.md](https://github.com/vladtsvirko/dsh-telegram-connector/blob/main/docs/STANDALONE.md) | [docs/STANDALONE.md](https://github.com/vladtsvirko/dsh-penpot-plugin/blob/main/docs/STANDALONE.md) |
-| Install | `dsh plugin --profile <p> add github:vladtsvirko/dsh-telegram-connector#v0.13.0` | `dsh plugin --profile <p> add github:vladtsvirko/dsh-penpot-plugin#v0.3.0` |
+| Install | `dsh plugin --profile <p> add dsh-telegram-connector@0.13.1` | `dsh plugin --profile <p> add dsh-penpot-plugin@0.3.0` |
 | Bundle patch | mounts the connector row, token from env | mounts `dsh-penpot`, URL/token from env |
 | Setup extras | supervisor, updater, components, firewall, managed row | Penpot/Podman stack, `penpot` CLI, managed row |
 
