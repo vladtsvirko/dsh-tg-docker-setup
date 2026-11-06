@@ -79,8 +79,10 @@ The setup pins each plugin's exact npm version and a minimum in `plugins.json`:
   `dsh-telegram-connector@<version>`; update with `dsh plugin remove` then
   `add`. The same commands explain the supervisor/updater limits.
 - **Publishing:** a plugin tag runs its `publish.yml`, which tests, validates the
-  tag and publishes that exact version to npm with provenance. The workflow
-  needs the repository secret `NPM_TOKEN` with publish rights.
+  tag and publishes that exact version to npm with provenance. Authentication is
+  npm Trusted Publishing (GitHub OIDC), so no npm token is stored. The first
+  version of a new package is published manually once; configure the trusted
+  publisher for the repository and `publish.yml` immediately after.
 
 Plugin versions are independent of the setup `VERSION`. See
 [`VERSIONS.md`](VERSIONS.md).

@@ -110,6 +110,9 @@ Penpot registered its tools.
 - **npm is the distribution path.** Both plugins are published as
   `name@version`; the same release's GitHub tag stays as the
   registry-unreachable fallback. npm publication no longer waits for `1.0.0`.
+- **No npm token in GitHub.** Publishing uses npm Trusted Publishing (OIDC).
+  The first versions are published manually; the trusted publisher is configured
+  immediately afterwards for future tags.
 - **Update channel:** newest published version (or newest repo tag for a
   git-installed connector). Stable/prerelease channels stay a follow-up.
 - **Release owner:** merge to the default branch (GitHub calls it `main`; the
@@ -117,33 +120,29 @@ Penpot registered its tools.
 
 ## Remaining actions
 
-1. **Add the npm publish secret (owner).** Each plugin repository needs
-   `NPM_TOKEN` under Settings → Secrets and variables → Actions. The token must
-   be allowed to publish new packages (a classic Automation token, or a
-   granular token with *All packages* read/write). The tag-triggered
-   `publish.yml` cannot upload without it.
-2. **Merge and tag (owner).** No tags exist yet; the branches are review-only.
+1. **First npm publish (owner).** The branches are merged. From each repository
+   on `main`, with npm 11.5.1+:
    ```sh
-   # each repository, in this order
-   git switch main
-   git merge --no-ff feat/standalone-plugins
-   git push
-
-   # connector first: the tag workflow publishes 0.13.0
+   cd dsh-telegram-connector && npm login && npm publish --access public
+   cd ../dsh-penpot-plugin && npm login && npm publish --access public
+   npm logout
+   ```
+   The package tarballs already contain `lib/`; `prepublishOnly` runs the tests
+   and build. This is the only manual publish: npm cannot configure a trusted
+   publisher before the package exists.
+2. **Configure trusted publishing (owner).** On each npm package page:
+   **Settings → Trusted Publisher → GitHub Actions**, with owner
+   `vladtsvirko`, the repository, workflow filename `publish.yml`, environment
+   blank. The workflow is already OIDC-only (`id-token: write`, no token).
+3. **Tag (owner).** The tag workflows see the versions already exist and skip
+   the upload, while still validating tests/build:
+   ```sh
    git tag v0.13.0 && git push origin v0.13.0
-   # then Penpot: the tag workflow publishes 0.3.0
    git tag v0.3.0 && git push origin v0.3.0
-
-   # prove npm and the fallback tags exist before tagging the setup
    cd dsh-tg-docker-setup && node scripts/plugin-preflight.mjs --remote
-
-   # setup last
    git tag v0.2.1-rc.5-0.13.0 && git push origin v0.2.1-rc.5-0.13.0
    ```
-   `plugin-preflight.mjs --remote` currently fails with “is not published” and
-   “has no tag”; that is expected until both publish workflows finish and must
-   be green before the setup tag. Re-running a failed publish workflow does not
-   move the tag. Do not publish the setup before the npm versions exist.
+   `plugin-preflight.mjs --remote` must be green before the setup tag.
 
 3. **UAT on the owner's box.** The unit/integration suite covers discovery,
    range checks, argument parsing, the supervisor ref hand-off and the plugin

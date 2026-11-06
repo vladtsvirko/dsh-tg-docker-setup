@@ -148,8 +148,10 @@ the target must be a descendant of the running tag. Ordering is release-aware
    row), `CHANGELOG.md` and the README install pin.
 2. Run `npm run typecheck && npm test && npm run build` and
    `npm publish --dry-run`.
-3. Commit, tag `v<version>`, push. The tag runs `.github/workflows/publish.yml`
-   with the repository's `NPM_TOKEN` secret and publishes exactly that version.
+3. Commit, tag `v<version>`, push. The tag runs `.github/workflows/publish.yml`,
+   authenticated by npm Trusted Publishing (OIDC), and publishes exactly that
+   version. The first version of a new package is published manually once,
+   before its trusted publisher exists.
 4. After the npm version exists, raise the setup's `spec`/`fallback`/`minimum`
    and run `scripts/plugin-preflight.mjs --remote`.
 
