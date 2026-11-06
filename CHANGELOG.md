@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1-rc.5-0.13.2
+
+### Fixed
+
+- **A profile written by 0.13.1 could not install a plugin.** The entrypoint
+  recorded an npm dependency as the full `name@version` spec; pnpm reads that as
+  `name@name@version` and refuses the whole install with
+  `ERR_PNPM_SPEC_NOT_SUPPORTED_BY_ANY_RESOLVER`, so a boot that needed to
+  install or repair a plugin failed — and the design component could not install
+  the Penpot plugin at all. The profile now records the bare version,
+  `reset-plugin` turns it back into a spec, and a boot repairs a profile an
+  older release already wrote.
+
 ## 0.2.1-rc.5-0.13.1
 
 ### Fixed

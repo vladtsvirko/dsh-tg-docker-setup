@@ -342,14 +342,16 @@ BLOCK
 
 # The spec the profile currently records for a package, if any. `reset-plugin`
 # uses it so a reinstall keeps the version the bot moved to instead of
-# downgrading to the checkout's recommendation.
+# downgrading to the checkout's recommendation. pnpm stores an npm dependency as
+# a bare version (`0.13.1`), so turn that back into the spec the caller installs.
 profile_dependency() {
   [ -f "$PROFILE_DIR/package.json" ] || return 1
   node -e '
     try {
-      const pkg = require(process.argv[1])
-      const spec = pkg.dependencies?.[process.argv[2]]
-      if (typeof spec === "string" && spec.length > 0) process.stdout.write(spec)
+      const name = process.argv[2]
+      const spec = require(process.argv[1]).dependencies?.[name]
+      if (typeof spec !== "string" || spec.length === 0) process.exit(0)
+      process.stdout.write(/^[0-9]+\.[0-9]+\.[0-9]+/.test(spec) ? name + "@" + spec : spec)
     } catch {}
   ' "$PROFILE_DIR/package.json" "$1" 2>/dev/null
 }
@@ -444,14 +446,39 @@ install_spec() {
 
 # pnpm may save a registry range (`^0.13.0`); the profile should record the
 # exact spec so a later reset reinstalls what the bot chose, not a newer patch.
+# An npm dependency value is a bare version: pnpm parses `name@version` there as
+# `name@name@version` and refuses the whole install. A git spec keeps its form.
 pin_dependency() {
   node -e '
     const fs = require("node:fs")
     const [file, name, spec] = process.argv.slice(1)
+    const value = spec.startsWith(name + "@") ? spec.slice(name.length + 1) : spec
     const pkg = JSON.parse(fs.readFileSync(file, "utf8"))
-    pkg.dependencies = { ...(pkg.dependencies ?? {}), [name]: spec }
+    pkg.dependencies = { ...(pkg.dependencies ?? {}), [name]: value }
     fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n")
   ' "$PROFILE_DIR/package.json" "$1" "$2" 2>/dev/null || true
+}
+
+# Releases up to 0.13.1 wrote the full `name@version` spec into package.json.
+# pnpm cannot resolve that value, and the failure is fatal for every install in
+# the profile — not just the package named there — so a deployment updated from
+# one of those releases cannot install a plugin until it is repaired.
+normalize_profile_specs() {
+  [ -f "$PROFILE_DIR/package.json" ] || return 0
+  node -e '
+    const fs = require("node:fs")
+    const file = process.argv[1]
+    const pkg = JSON.parse(fs.readFileSync(file, "utf8"))
+    let changed = false
+    for (const [name, spec] of Object.entries(pkg.dependencies ?? {})) {
+      if (typeof spec !== "string" || !spec.startsWith(name + "@")) continue
+      const version = spec.slice(name.length + 1)
+      if (!/^[0-9]/.test(version)) continue
+      pkg.dependencies[name] = version
+      changed = true
+    }
+    if (changed) fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n")
+  ' "$PROFILE_DIR/package.json" 2>/dev/null || true
 }
 
 install_plugin() {
@@ -666,6 +693,7 @@ prepare() {
   prepare_dirs
   setup_git_credentials
   init_profile
+  normalize_profile_specs
   set_provider_patch
   install_skills
 

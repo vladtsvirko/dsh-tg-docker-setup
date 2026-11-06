@@ -92,14 +92,23 @@ if (command === 'add') {
   if (process.env.FAKE_FAIL === '1') process.exit(1)
   if (process.env.FAKE_FAIL_NPM === '1' && /^[^@]+@[0-9]/.test(String(value))) process.exit(1)
   const { name, version } = specOf(value)
+  const pkg = await readJson(join(profile, 'package.json'), { dependencies: {} })
+  // pnpm rejects a dependency value that repeats the package name, and one such
+  // value fails the whole install, not just that package.
+  for (const [dep, spec] of Object.entries(pkg.dependencies ?? {})) {
+    if (typeof spec === 'string' && spec.startsWith(dep + '@') && /^[0-9]/.test(spec.slice(dep.length + 1))) {
+      process.stderr.write('ERR_PNPM_SPEC_NOT_SUPPORTED_BY_ANY_RESOLVER ' + JSON.stringify(dep + '@' + spec) + '\\n')
+      process.exit(1)
+    }
+  }
   const dir = join(profile, 'node_modules', name)
   await writeJson(join(dir, 'package.json'), {
     name,
     version,
     peerDependencies: { '@deepseek-ai/dsh-agent': '>=0.1.0-rc.6 <0.3.0-0' },
   })
-  const pkg = await readJson(join(profile, 'package.json'), { dependencies: {} })
-  pkg.dependencies = { ...(pkg.dependencies ?? {}), [name]: value }
+  // pnpm saves an npm dependency as a range; the entrypoint pins it exactly.
+  pkg.dependencies = { ...(pkg.dependencies ?? {}), [name]: /^[^@]+@[0-9]/.test(String(value)) ? '^' + version : value }
   await writeJson(join(profile, 'package.json'), pkg)
   process.exit(0)
 }
@@ -156,7 +165,7 @@ async function installFake(home, spec) {
   const manifest = join(home, 'profiles', 'web', 'package.json')
   let pkg = { dependencies: {} }
   try { pkg = JSON.parse(await readFile(manifest, 'utf8')) } catch {}
-  pkg.dependencies = { ...(pkg.dependencies ?? {}), [name]: spec }
+  pkg.dependencies = { ...(pkg.dependencies ?? {}), [name]: npm ? version : spec }
   await mkdir(dirname(manifest), { recursive: true })
   await writeFile(manifest, JSON.stringify(pkg, null, 2))
   const patch = join(home, 'profiles', 'web', 'cordis.patch.yml')
@@ -211,7 +220,28 @@ test('a missing connector installs the catalog ref', async () => {
   try {
     await run(parts, ['init'])
     assert.equal(await installed(parts.home), '0.13.0')
-    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], CATALOG.plugins['dsh-telegram-connector'].spec)
+    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], '0.13.0')
+  } finally {
+    await rm(parts.root, { recursive: true, force: true })
+  }
+})
+
+test('a legacy name@version dependency is repaired before installing', async () => {
+  const parts = await deployment()
+  try {
+    await run(parts, ['init'])
+    // What 0.13.1 wrote: pnpm refuses the value, and the refusal fails every
+    // install in the profile — here, the Penpot plugin.
+    const manifest = join(parts.home, 'profiles', 'web', 'package.json')
+    const pkg = JSON.parse(await readFile(manifest, 'utf8'))
+    pkg.dependencies['dsh-telegram-connector'] = 'dsh-telegram-connector@0.13.0'
+    pkg.dependencies['dsh-penpot-plugin'] = 'dsh-penpot-plugin@0.3.0'
+    await writeFile(manifest, JSON.stringify(pkg, null, 2) + '\n')
+    const { stderr } = await run(parts, ['init'], { PENPOT_ENABLED: '1' })
+    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], '0.13.0')
+    assert.equal((await recorded(parts.home))['dsh-penpot-plugin'], '0.3.0')
+    assert.equal(await installed(parts.home, 'dsh-penpot-plugin'), '0.3.0')
+    assert.doesNotMatch(stderr, /SPEC_NOT_SUPPORTED/)
   } finally {
     await rm(parts.root, { recursive: true, force: true })
   }
@@ -223,7 +253,7 @@ test('a connector at or above the minimum is left alone', async () => {
     await installFake(parts.home, 'dsh-telegram-connector@0.13.1')
     const { stderr } = await run(parts, ['init'])
     assert.equal(await installed(parts.home), '0.13.1')
-    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], 'dsh-telegram-connector@0.13.1')
+    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], '0.13.1')
     assert.doesNotMatch(stderr, /installing the Telegram adapter/)
   } finally {
     await rm(parts.root, { recursive: true, force: true })
@@ -247,7 +277,7 @@ test('an explicit target ref wins for one run', async () => {
     await installFake(parts.home, 'dsh-telegram-connector@0.13.1')
     await run(parts, ['init'], { DSH_PLUGIN_TARGET_REF: 'dsh-telegram-connector@0.14.0' })
     assert.equal(await installed(parts.home), '0.14.0')
-    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], 'dsh-telegram-connector@0.14.0')
+    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], '0.14.0')
   } finally {
     await rm(parts.root, { recursive: true, force: true })
   }
@@ -274,7 +304,7 @@ test('reset-plugin reinstalls the installed spec, not the catalog pin', async ()
     await writeFile(join(parts.home, 'profiles', 'web', '.telegram-plugin-ref'), 'github:vladtsvirko/dsh-telegram-connector#v0.14.0\n')
     await run(parts, ['reset-plugin'])
     assert.equal(await installed(parts.home), '0.14.0')
-    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], 'dsh-telegram-connector@0.14.0')
+    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], '0.14.0')
   } finally {
     await rm(parts.root, { recursive: true, force: true })
   }
