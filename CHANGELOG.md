@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1-rc.5-0.13.3
+
+### Fixed
+
+- **The `penpot` CLI was not executable.** `design/penpot.mjs` was committed
+  without the executable bit and the installer only symlinked it, so
+  `/usr/local/bin/penpot` answered `Permission denied`. The file is executable
+  in the repository now and `install.sh` sets the mode before linking.
+
 ## 0.2.1-rc.5-0.13.2
 
 ### Fixed

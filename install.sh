@@ -1794,6 +1794,10 @@ link_bins() {
   # The entrypoint runs this by absolute path. Without the link a native install
   # boots with no git credentials at all (and warns once per start).
   run ln -sf "$DIR/git-credentials.mjs" /usr/local/bin/dsh-git-credentials.mjs
+  # The CLI is invoked as `penpot`, so the target must be executable; a checkout
+  # that lost the mode (or an old tag that never had it) would link a file the
+  # shell refuses to run.
+  run chmod 0755 "$DIR/design/penpot.mjs"
   run ln -sf "$DIR/design/penpot.mjs" /usr/local/bin/penpot
 }
 

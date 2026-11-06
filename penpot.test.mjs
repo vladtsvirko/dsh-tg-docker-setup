@@ -11,7 +11,7 @@
 
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -128,6 +128,11 @@ test('a refused request is an ApiError with the status', async () => {
 test('a missing token is a usage error before any request', async () => {
   await assert.rejects(main(['whoami', '--url', 'http://127.0.0.1:1', '--token', '']), /PENPOT_ACCESS_TOKEN is not set/)
   await assert.rejects(main(['whoami', '--url', '', '--token', 'x']), /PENPOT_API_URL is not set/)
+})
+
+test('the CLI file is executable so the installed symlink runs', async () => {
+  const mode = (await stat(join(here, 'design/penpot.mjs'))).mode
+  assert.notEqual(mode & 0o111, 0, 'design/penpot.mjs must be executable')
 })
 
 test('the CLI entry point exits 2 when the API refuses', async () => {
