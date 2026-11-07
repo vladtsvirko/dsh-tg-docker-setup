@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1-rc.5-0.13.7
+
+### Fixed
+
+- **The update's design reconcile opens the HTTPS port too.** It now runs the
+  same ufw helper as a component enable, so `https://…:8443` is reachable after
+  `/system update setup` without a second component action.
+- CI runs `tls.test.mjs` and syntax-checks `scripts/design-tls.sh`.
+
 ## 0.2.1-rc.5-0.13.6
 
 ### Added

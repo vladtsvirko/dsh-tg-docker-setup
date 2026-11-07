@@ -769,6 +769,9 @@ design_reconcile() {
   prepare_penpot_tls "$dir" "$bind" || warn "Penpot HTTPS front skipped (certificate generation failed)"
   ( cd "$dir" && podman-compose -f compose.yaml up -d ) \
     || { warn "design stack reconcile failed — run ./update.sh --component design enable"; return 0; }
+  local http_port
+  http_port="$(env_get DSH_DESIGN_PORT)"; [ -n "$http_port" ] || http_port=8090
+  component_ufw "$http_port" "$(basename "$dir")"
   penpot_tls_hint "$dir" "$bind" "$tls_port"
 }
 
