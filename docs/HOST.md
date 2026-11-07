@@ -85,7 +85,7 @@ the symlinks and `.env`, keeps the deployed values (including the provider key
 and the resource share), and does not move data. A failed re-run is not rolled
 back — the files are written before the health check.
 
-`./setup.sh --doctor` (and `./setup.sh doctor`) check the same things;
+`./setup.sh doctor` (and `./setup.sh doctor`) check the same things;
 `--fix` repairs the safe subset: duplicate or CRLF `.env` lines, a provider key
 the web UI's stored copy shadows, a duplicated managed block in the profile
 patch, wrong ownership. Every install and every successful self-update runs it

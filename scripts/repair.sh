@@ -450,16 +450,33 @@ check_design_tls() {
   command -v openssl >/dev/null 2>&1 || return 0
   local ca="$DIR/design/certs/ca.crt" crt="$DIR/design/certs/server.crt" bind
   bind="$(env_last DSH_BIND_IP)"; bind="${bind:-127.0.0.1}"
-  if [ ! -s "$crt" ] || [ ! -s "$ca" ]; then
-    warns design-tls "no HTTPS certificate in $DIR/design/certs — the browser stays on http:// and the token Copy button stays broken; rerun the design enable"
+  if [ -s "$crt" ] && [ -s "$ca" ] &&
+     openssl x509 -in "$crt" -noout -checkend 604800 >/dev/null 2>&1 &&
+     openssl x509 -in "$crt" -noout -text 2>/dev/null | grep -qF "IP Address:$bind"; then
+    ok design-tls "HTTPS certificate covers $bind (trust $ca once)"
     return 0
   fi
-  if ! openssl x509 -in "$crt" -noout -checkend 604800 >/dev/null 2>&1; then
-    warns design-tls "the HTTPS certificate expires within a week — rerun the design enable to re-issue it"
-  elif ! openssl x509 -in "$crt" -noout -text 2>/dev/null | grep -qF "IP Address:$bind"; then
-    warns design-tls "the HTTPS certificate does not cover $bind — rerun the design enable"
+  if [ "$FIX" = 1 ] && [ "$(id -u)" = 0 ] && [ -x "$DIR/scripts/design-tls.sh" ]; then
+    if bash "$DIR/scripts/design-tls.sh" "$DIR/design" "$bind" >/dev/null 2>&1; then
+      fixed design-tls "issued the HTTPS certificate for $bind"
+      # The sidecar is a compose service; a running stack needs `up -d` to pick
+      # it up. A stopped stack is left stopped — enabling it is the component
+      # action, not a repair.
+      if command -v podman-compose >/dev/null 2>&1 &&
+         ( cd "$DIR/design" && podman-compose -f compose.yaml ps -q 2>/dev/null | grep -q . ); then
+        ( cd "$DIR/design" && podman-compose -f compose.yaml up -d >/dev/null 2>&1 ) \
+          && fixed design-tls "reconciled the HTTPS sidecar" \
+          || warns design-tls "certificate issued, but podman-compose up -d failed"
+      fi
+    else
+      warns design-tls "could not issue the HTTPS certificate — rerun the design enable"
+    fi
+  elif [ ! -s "$crt" ] || [ ! -s "$ca" ]; then
+    warns design-tls "no HTTPS certificate in $DIR/design/certs — the browser stays on http:// and the token Copy button stays broken; rerun with --fix as root"
+  elif ! openssl x509 -in "$crt" -noout -checkend 604800 >/dev/null 2>&1; then
+    warns design-tls "the HTTPS certificate expires within a week — rerun with --fix as root"
   else
-    ok design-tls "HTTPS certificate covers $bind (trust $ca once)"
+    warns design-tls "the HTTPS certificate does not cover $bind — rerun with --fix as root"
   fi
 }
 

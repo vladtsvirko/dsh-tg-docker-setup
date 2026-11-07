@@ -358,10 +358,10 @@ while [ $# -gt 0 ]; do
     --check)  CHECK=1; shift ;;
     --no-deps) DEPS=0; shift ;;
     --clean-source) CLEAN_SOURCE=1; shift ;;
-    --uninstall) UNINSTALL=1; shift ;;
-    --purge)  PURGE=1; shift ;;
-    --doctor) DOCTOR=1; shift ;;
-    --fix)    FIX=1; shift ;;
+    --uninstall) die "--uninstall moved: run ./setup.sh uninstall" ;;
+    --purge)  die "--purge moved: run ./setup.sh uninstall --purge" ;;
+    --doctor) die "--doctor moved: run ./setup.sh doctor [--fix]" ;;
+    --fix)    die "--fix moved: run ./setup.sh doctor --fix" ;;
     --rotate-key) ROTATE_KEY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --version) printf 'dsh-setup %s (DSH %s)\n' "$SETUP_VERSION" "$DSH_VERSION"; exit 0 ;;
@@ -1147,7 +1147,7 @@ wait_native_healthy() {
 }
 
 # Run a command as the unprivileged runtime user, with the deployment's env.
-# Used by `--tg-connector` and by the native apply path to run the entrypoint's
+# Used by the native apply path and a repair to run the entrypoint's
 # prepare step without leaving root-owned files in the profile.
 # The systemd unit runs the launcher from /usr/local/bin; a partial install may
 # only have it inside the deployment directory. update.sh used to assume the
@@ -1297,7 +1297,7 @@ update_apply() {
 
   verify || warn "healthy, but verification complained — inspect: journalctl -u dsh.service"
   design_reconcile || warn "the design stack was not reconciled — run ./setup.sh components enable design"
-  repair_deployment || warn "the update is applied, but the health check found something — ./setup.sh update --doctor"
+  repair_deployment || warn "the update is applied, but the health check found something — ./setup.sh doctor"
   log "done — $target is running (detached HEAD)"
 }
 
@@ -3091,7 +3091,7 @@ printf '    update:  /system update setup (Telegram) or ./update.sh --apply (hos
 echo
 if [ -x "$SRC_DIR/scripts/repair.sh" ]; then
   bash "$SRC_DIR/scripts/repair.sh" --dir "$DIR" --fix \
-    || warn "the health check found something above — ./setup.sh --doctor"
+    || warn "the health check found something above — ./setup.sh doctor"
 fi
 
 # --- the download is not the deployment ------------------------------------

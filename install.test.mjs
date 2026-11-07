@@ -540,10 +540,10 @@ test('--uninstall --purge --check says the data goes too', async () => {
   assert.match(result.out, /deletes:\s+.*data, .*\.env, .*backups/)
 })
 
-test('--purge without --uninstall is refused', async () => {
+test('--purge without uninstall is refused with the new command', async () => {
   const result = await install(['--purge', '--check'])
   assert.notEqual(result.code, 0)
-  assert.match(result.out, /--purge only makes sense with --uninstall/)
+  assert.match(result.out, /--purge moved: run \.\/setup\.sh uninstall --purge/)
 })
 
 test('--uninstall without root refuses before touching anything', async () => {
@@ -659,7 +659,7 @@ test('publisher bots can be given at install time and are written to .env', asyn
 
 test('the downloaded checkout is described as separate from the deployment', async () => {
   // `curl | bash` leaves a checkout behind; native mode installs elsewhere.
-  const source = await readFile(join(here, 'install.sh'), 'utf8')
+  const source = await readFile(join(here, 'setup.sh'), 'utf8')
   assert.match(source, /is the download, not the deployment/)
   assert.match(source, /--clean-source/)
   // and never deletes a checkout the deployment updates from
@@ -670,7 +670,7 @@ test('every variable write_env persists is initialised under set -u', async () =
   // `set -u` plus an unset variable aborts the install at the .env write — which
   // is how DSH_ADMIN_USER_ID and later DSH_TELEGRAM_PUBLISHER_TOKENS broke the
   // unattended path while every --check run stayed green.
-  const source = await readFile(join(here, 'install.sh'), 'utf8')
+  const source = await readFile(join(here, 'setup.sh'), 'utf8')
   const writeEnv = source.slice(source.indexOf('write_env() {'), source.indexOf('\n}\n', source.indexOf('write_env() {')))
   const used = [...writeEnv.matchAll(/set_env ([A-Z_]+) "\$\{?([A-Z_]+)/g)]
     .filter((match) => match[1] === match[2])
@@ -750,13 +750,13 @@ test('a deployed publisher token is preserved and counted, never echoed', async 
 })
 
 test('DSH_PUBLIC_URL is an accepted answer and is written to .env', async () => {
-  const source = await readFile(join(here, 'install.sh'), 'utf8')
+  const source = await readFile(join(here, 'setup.sh'), 'utf8')
   assert.match(source, /CONFIG_KEYS="[^"]*DSH_PUBLIC_URL/)
   assert.match(source, /set_env DSH_PUBLIC_URL "\$DSH_PUBLIC_URL"/)
 })
 
 test('the installer asks for a resource share and writes it to the unit', async () => {
-  const source = await readFile(join(here, 'install.sh'), 'utf8')
+  const source = await readFile(join(here, 'setup.sh'), 'utf8')
   assert.match(source, /ask DSH_RESOURCE_PERCENT .*percent of this machine \(0 = unlimited\)" 30/)
   assert.match(source, /MemoryMax=\$\{DSH_RESOURCE_PERCENT\}%/)
   assert.match(source, /CPUQuota=\$\(\(DSH_RESOURCE_PERCENT \* \$\(cpu_count\)\)\)%/)
@@ -787,7 +787,7 @@ test('the plan names the git author and the repository access', async () => {
 })
 
 test('the bootstrap text no longer advertises --tier or Docker', async () => {
-  const source = await readFile(join(here, 'install.sh'), 'utf8')
+  const source = await readFile(join(here, 'setup.sh'), 'utf8')
   assert.equal(source.includes('--tier'), false, '--tier has no parser branch and must not be documented')
   assert.equal(source.includes('Docker or Node'), false, 'the bootstrap summary must name Podman, not Docker')
   const usage = source.slice(source.indexOf('bootstrap_usage() {'), source.indexOf('in_bootstrap() {'))

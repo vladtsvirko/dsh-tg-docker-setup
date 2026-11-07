@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.0
+
+### Changed
+
+- **One setup script.** `install.sh` and `update.sh` are merged into `setup.sh`
+  with explicit commands: `install` (the default), `update`, `status`,
+  `doctor`, `components`, `uninstall` and `help`. The updater service, the
+  smoke workflow, the tests and the docs use the new surface. The old flags are
+  rejected with the command that replaced them (`--uninstall` → `uninstall`,
+  `--doctor` → `doctor`, `--apply` → `update`, `--component` → `components`,
+  `--status` → `status`).
+- **`components` is a first-class command.** `components list`, `enable NAME
+  [port]`, `disable NAME`, `configure NAME [port]` and `port NAME PORT`.
+- **`--allow-incompatible`** is the readable spelling of the update crossing
+  flag; `update` still accepts the long `--i-know-versions-are-incompatible`
+  form for the updater's existing contract.
+- The terminal UX follows one vocabulary and one shape: a plan before changes,
+  `--check` for a dry run, `--yes` for unattended runs, actionable errors that
+  name the command to use, and a short summary with the next steps.
+
 ## 0.2.1-rc.5-0.13.8
 
 ### Fixed

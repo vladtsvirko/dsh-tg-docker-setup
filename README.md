@@ -31,7 +31,7 @@ session between the two.
 | `healthcheck.sh` | The probe systemd and the updater run |
 | `.env.example` | Every knob, with comments |
 | `install.example.env` | Every answer `setup.sh --config` accepts |
-| `scripts/repair.sh` | The health check `setup.sh --doctor` and `setup.sh update --doctor` run |
+| `scripts/repair.sh` | The health check `setup.sh doctor` and `setup.sh doctor` run |
 | `scripts/credentials.mjs` | Reads and reconciles `data/home/.credentials.yaml` without printing a secret |
 | `scripts/git-manifest.mjs` | Builds or merges `secrets/git/profiles.json` from the installer's accounts |
 | `components.json` | Optional components (the Penpot design stack) |
@@ -107,7 +107,7 @@ curl -fsSL …/setup.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.13.8`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.14.0`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -236,7 +236,7 @@ different name is never touched. The setup currently ships:
 Three artifacts, two release tracks:
 
 ```
-setup          0.2.1-rc.5-0.13.8      tag v0.2.1-rc.5-0.13.8
+setup          0.2.1-rc.5-0.14.0      tag v0.2.1-rc.5-0.14.0
 connector      0.13.1                 tag v0.13.1
 penpot plugin  0.3.1                  tag v0.3.1
 ```
@@ -428,7 +428,7 @@ fails, the snapshot is restored before the runtime comes back.
 updater service to check out, install and start the latest **compatible setup
 tag**, and reports the result to the control chat. If `DSH_UPDATER_TOKEN` is
 empty, the command degrades to diagnostics and prints the host fallback
-(`./setup.sh update --check` / `--apply`).
+(`./setup.sh update --check` / `setup.sh update`).
 
 Scopes:
 
@@ -461,8 +461,8 @@ Two caveats before you rely on it:
 Two commands answer "what is wrong right now?" without changing anything:
 
 ```sh
-./setup.sh --doctor          # or ./setup.sh doctor — same checks
-./setup.sh --doctor --fix    # repair the safe subset
+./setup.sh doctor          # or ./setup.sh doctor — same checks
+./setup.sh doctor --fix    # repair the safe subset
 ./setup.sh --rotate-key      # ask for a new provider key (otherwise: keep)
 ```
 
@@ -498,7 +498,7 @@ commands remain the bootstrap, break-glass and deliberate manual path:
 
 ```sh
 ./setup.sh status       # setup/DSH version, service health, adapter, HTTP
-./setup.sh doctor       # the same checks ./setup.sh --doctor runs
+./setup.sh doctor       # the same checks ./setup.sh doctor runs
 ./setup.sh update --check        # latest compatible setup tag, change nothing
 ./setup.sh update        # latest compatible tag, health gate, rollback
 ./setup.sh update --to <tag>     # exact target (what the updater service uses)
@@ -573,7 +573,7 @@ full list is in [`docs/LIMITS.md`](docs/LIMITS.md).
 | Symptom | Cause | Fix |
 |---|---|---|
 | Service restarts, log shows permission denied on `data/` | data owned by root | `sudo chown -R dsh:dsh /srv/dsh/data`, `sudo systemctl restart dsh.service` |
-| `dsh.service` fails at boot | bad unit or missing Node | `journalctl -u dsh.service -n 60`; `./setup.sh --doctor` |
+| `dsh.service` fails at boot | bad unit or missing Node | `journalctl -u dsh.service -n 60`; `./setup.sh doctor` |
 | `adapter install failed` in log | no egress during first boot, or the version gate | `journalctl -u dsh.service \| grep -i plugin`; `sudo ./setup.sh update` |
 | Web UI 200 but API calls 403 | opened the bare origin instead of the `?token=` URL | use the URL from the log, or set `DSH_PUBLIC_URL` |
 | `failed to bind …: cannot assign requested address` | `DSH_BIND_IP` isn't an address of this host | fix `.env`, `sudo systemctl restart dsh.service` |
@@ -582,9 +582,9 @@ full list is in [`docs/LIMITS.md`](docs/LIMITS.md).
 | Bot says `You are not authorized` | your id isn't in `allowedUserIds` | add it to `ALLOWED_USER_IDS` in `.env`, then restart |
 | `no space left on device` | sessions + pnpm store in `data/home` | prune old sessions, move the data directory |
 | `/system update setup` says updater unreachable | updater not running, or token mismatch | `systemctl status dsh-updater.service`; `journalctl -u dsh-updater.service` |
-| Model calls fail after re-running the installer | the runtime prefers a key stored by the web UI over `.env` (or `.env` has two copies) | `./setup.sh --doctor --fix`, then restart |
+| Model calls fail after re-running the installer | the runtime prefers a key stored by the web UI over `.env` (or `.env` has two copies) | `./setup.sh doctor --fix`, then restart |
 | Web UI lists no workspace after a restart, Telegram still does | the connector's bindings and the runtime's registry disagree | `/sync` in the group repairs it; the connector retries at boot |
-| Telegram: "this session is held by another client" right after a restart | a second runtime over the same data directory holds the lock | `./setup.sh --doctor` names it; stop the other one, then `/system restart now` |
+| Telegram: "this session is held by another client" right after a restart | a second runtime over the same data directory holds the lock | `./setup.sh doctor` names it; stop the other one, then `/system restart now` |
 | Telegram: "this session is open in a web UI tab…" | a browser tab owns the session's write handle | the prompt is queued; tap **Take over** or close the tab |
 
 If you are validating a release, [`docs/UAT.md`](docs/UAT.md) is the
@@ -593,8 +593,8 @@ step-by-step acceptance run.
 ## Removing it
 
 ```sh
-./setup.sh --uninstall --check     # the plan: what is stopped, what is kept
-./setup.sh --uninstall             # asks for confirmation
+./setup.sh uninstall --check     # the plan: what is stopped, what is kept
+./setup.sh uninstall             # asks for confirmation
 ```
 
 It disables and removes the systemd units and their `/usr/local/bin` launchers.
@@ -604,7 +604,7 @@ left off, and it never deletes the checkout.
 `--purge` also deletes those three:
 
 ```sh
-./setup.sh --uninstall --purge
+./setup.sh uninstall --purge
 ```
 
 The last lines of the run print what still exists — the service user and the

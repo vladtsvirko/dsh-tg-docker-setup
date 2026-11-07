@@ -50,7 +50,7 @@ container port; without it `localhost` works and the LAN times out. Without the
 bridge rules the containers cannot resolve each other through `aardvark-dns`,
 so the frontend fails with `host not found in upstream "penpot-backend"` and the
 backend with `UnknownHostException: penpot-postgres`. The rules are not removed
-by `setup.sh --uninstall`; delete them with `ufw delete` if you remove the
+by `setup.sh uninstall`; delete them with `ufw delete` if you remove the
 stack.
 
 ## First run

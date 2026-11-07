@@ -179,7 +179,7 @@ prepare_dirs() {
 #
 # The kernel owns the lock, so a crashed runtime never leaves it behind. The
 # marker beside it is informational: it names the holder for the refusal message
-# and for ./setup.sh --doctor.
+# and for ./setup.sh doctor.
 DATA_ROOT="$(cd "$DSH_HOME/.." 2>/dev/null && pwd -P || printf '%s' "$DSH_HOME/..")"
 export DSH_DATA_ROOT="$DATA_ROOT"
 INSTANCE_LOCK="$DATA_ROOT/.runtime.lock"

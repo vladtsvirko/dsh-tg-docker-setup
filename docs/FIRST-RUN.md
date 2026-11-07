@@ -160,7 +160,7 @@ and recovering from a dead runtime. [LIMITS.md](LIMITS.md) is the exact boundary
 ```sh
 # what is installed, and is it healthy
 ./setup.sh status
-./setup.sh --doctor            # add --fix to repair the safe subset
+./setup.sh doctor            # add --fix to repair the safe subset
 
 # update the whole setup (the bot does this too, via /system update setup)
 ./setup.sh update --check         # what would change
@@ -206,7 +206,7 @@ chat.
 | install ended before the summary | `journalctl -u dsh.service -n 100` |
 | web UI loads but reconnects forever | set `DSH_PUBLIC_URL` to the URL you actually open, then `sudo systemctl restart dsh.service` |
 | bot silent | check `ALLOWED_USER_IDS`, privacy mode, and `journalctl -u dsh.service \| grep -i telegram` |
-| model calls fail | `./setup.sh --doctor` (a key saved in the web UI can outrank `.env`) |
+| model calls fail | `./setup.sh doctor` (a key saved in the web UI can outrank `.env`) |
 | an update went wrong | `/system status`, then [UPGRADE.md](UPGRADE.md) |
 
 ## Where to read next

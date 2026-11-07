@@ -100,7 +100,7 @@ jobs:
 
       - name: Uninstall removes the units and keeps the data
         run: |
-          sudo -E ./setup.sh --uninstall --yes --config .github/native-answers.env
+          sudo -E ./setup.sh uninstall --yes --config .github/native-answers.env
           if sudo systemctl is-active --quiet dsh.service; then
             echo "dsh.service is still active after uninstall"
             exit 1

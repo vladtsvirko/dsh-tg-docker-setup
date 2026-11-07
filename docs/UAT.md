@@ -1,6 +1,6 @@
 # Acceptance run: the native install
 
-These steps were written for `v0.2.1-rc.5-0.13.8`; if you are accepting a later
+These steps were written for `v0.2.1-rc.5-0.14.0`; if you are accepting a later
 tag, substitute it everywhere below.
 
 One run, ~20 minutes. The point is not to see it work once, but to see the
@@ -33,8 +33,8 @@ in step 7.
 Install the way a stranger would — one downloaded file:
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.13.8/setup.sh | sudo bash -s -- --check --dir /srv/dsh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.13.8/setup.sh | sudo bash -s -- --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.14.0/setup.sh | sudo bash -s -- --check --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.14.0/setup.sh | sudo bash -s -- --dir /srv/dsh
 ```
 
 All `./setup.sh` and `./setup.sh update` checks below run from `/srv/dsh`.
@@ -47,12 +47,12 @@ All `./setup.sh` and `./setup.sh update` checks below run from `/srv/dsh`.
       `Proceed? [Y/n]`
 - [ ] it installs Node 22 (and says so), then `dsh` and `pnpm`; a missing Podman
       daemon is not an error for this run
-- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.13.8`
+- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.14.0`
 - [ ] the self-check that follows reports `clean`: `service`, `web` and
       `data-owner` all ok
-- [ ] `sudo ./setup.sh --doctor` (no `--fix`) exits 0 and names the deployed
+- [ ] `sudo ./setup.sh doctor` (no `--fix`) exits 0 and names the deployed
       `OPENCODE_GO_API_KEY` without printing it
-- [ ] `./setup.sh --doctor --fix` is idempotent: a second run changes nothing
+- [ ] `./setup.sh doctor --fix` is idempotent: a second run changes nothing
 - [ ] a repair run (`sudo ./setup.sh`, Enter at every prompt) does not ask for
       the provider key again and restarts the service once
 - [ ] re-running `./setup.sh` with the same answers keeps
@@ -76,7 +76,7 @@ All `./setup.sh` and `./setup.sh update` checks below run from `/srv/dsh`.
 - [ ] tap it, add the bot to a new group with Topics enabled: the group gets a
       dashboard
 - [ ] `/new` in the group creates a topic; a message in it gets a streamed answer
-- [ ] `/system status` shows: version `0.2.1-rc.5-0.13.8`, the admin line,
+- [ ] `/system status` shows: version `0.2.1-rc.5-0.14.0`, the admin line,
       `web: 127.0.0.1:<port> answered …`, `key: set`,
       `registry: 1 workspace(s) in the runtime · 1 bound to Telegram`,
       `data: … this runtime`, `last agent error: none`
@@ -162,15 +162,15 @@ From the deployment checkout:
 
 ```sh
 cd /srv/dsh
-sudo ./setup.sh --uninstall --check     # what it will stop and what it keeps
-sudo ./setup.sh --uninstall             # asks for confirmation
+sudo ./setup.sh uninstall --check     # what it will stop and what it keeps
+sudo ./setup.sh uninstall             # asks for confirmation
 ```
 
 - [ ] `systemctl status dsh.service` says it does not exist
 - [ ] `/usr/local/bin/dsh-*` launchers are gone
 - [ ] `data/`, `.env` and `backups/` are still there
 - [ ] the last lines say which user and directory remain, and how to remove them
-- [ ] `sudo ./setup.sh --uninstall --purge` removes `data/`, `.env` and
+- [ ] `sudo ./setup.sh uninstall --purge` removes `data/`, `.env` and
       `backups/` too
 
 ---
