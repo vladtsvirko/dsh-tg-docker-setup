@@ -292,8 +292,8 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
     try {
       // --to enforces the compatibility policy too; this flag is the
       // updater's explicit assertion that /update already accepted the crossing.
-      const args = ['update.sh', '--to', job.target]
-      if (crossesCompat(job.from, job.target)) args.push('--i-know-versions-are-incompatible')
+      const args = ['setup.sh', 'update', '--to', job.target]
+      if (crossesCompat(job.from, job.target)) args.push('--allow-incompatible')
       child = spawn('bash', args, {
         cwd: repo,
         env: { ...process.env, PWD: repo, ASSUME_YES: '1' },
@@ -402,8 +402,8 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
 
   const runComponent = async (job) => {
     job.state = 'applying'
-    const args = ['update.sh', '--component', job.component, job.action]
-    if (job.port !== undefined) args.push('--port', String(job.port))
+    const args = ['setup.sh', 'components', job.action, job.component]
+    if (job.port !== undefined) args.push(String(job.port))
     let output = ''
     let child
     try {

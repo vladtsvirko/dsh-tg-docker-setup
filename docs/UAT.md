@@ -33,11 +33,11 @@ in step 7.
 Install the way a stranger would — one downloaded file:
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.13.8/install.sh | sudo bash -s -- --check --dir /srv/dsh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.13.8/install.sh | sudo bash -s -- --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.13.8/setup.sh | sudo bash -s -- --check --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.13.8/setup.sh | sudo bash -s -- --dir /srv/dsh
 ```
 
-All `./install.sh` and `./update.sh` checks below run from `/srv/dsh`.
+All `./setup.sh` and `./setup.sh update` checks below run from `/srv/dsh`.
 
 - [ ] the first line prints what it will fetch, then the full plan, and changes
       nothing
@@ -50,18 +50,18 @@ All `./install.sh` and `./update.sh` checks below run from `/srv/dsh`.
 - [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.13.8`
 - [ ] the self-check that follows reports `clean`: `service`, `web` and
       `data-owner` all ok
-- [ ] `sudo ./install.sh --doctor` (no `--fix`) exits 0 and names the deployed
+- [ ] `sudo ./setup.sh --doctor` (no `--fix`) exits 0 and names the deployed
       `OPENCODE_GO_API_KEY` without printing it
-- [ ] `./install.sh --doctor --fix` is idempotent: a second run changes nothing
-- [ ] a repair run (`sudo ./install.sh`, Enter at every prompt) does not ask for
+- [ ] `./setup.sh --doctor --fix` is idempotent: a second run changes nothing
+- [ ] a repair run (`sudo ./setup.sh`, Enter at every prompt) does not ask for
       the provider key again and restarts the service once
-- [ ] re-running `./install.sh` with the same answers keeps
+- [ ] re-running `./setup.sh` with the same answers keeps
       `OPENCODE_GO_API_KEY` byte-for-byte (`grep ^OPENCODE_GO_API_KEY= .env`
       before and after) and leaves exactly one such line
 - [ ] the summary prints `web: http://<ip>:<port>/?token=…` (read back from the
       runtime log), and `bot: configured` when a token was given
 - [ ] it warns about web UI exposure when binding a LAN address
-- [ ] re-running `./install.sh` keeps the deployed git author as the prompt
+- [ ] re-running `./setup.sh` keeps the deployed git author as the prompt
       default (`git -C . config --file data/home/.gitconfig user.name` before
       and after)
 - [ ] `systemctl status dsh.service` is `active (running)`
@@ -162,15 +162,15 @@ From the deployment checkout:
 
 ```sh
 cd /srv/dsh
-sudo ./install.sh --uninstall --check     # what it will stop and what it keeps
-sudo ./install.sh --uninstall             # asks for confirmation
+sudo ./setup.sh --uninstall --check     # what it will stop and what it keeps
+sudo ./setup.sh --uninstall             # asks for confirmation
 ```
 
 - [ ] `systemctl status dsh.service` says it does not exist
 - [ ] `/usr/local/bin/dsh-*` launchers are gone
 - [ ] `data/`, `.env` and `backups/` are still there
 - [ ] the last lines say which user and directory remain, and how to remove them
-- [ ] `sudo ./install.sh --uninstall --purge` removes `data/`, `.env` and
+- [ ] `sudo ./setup.sh --uninstall --purge` removes `data/`, `.env` and
       `backups/` too
 
 ---
@@ -180,7 +180,7 @@ sudo ./install.sh --uninstall             # asks for confirmation
 For each failed checkbox: the step, what you expected, what happened, and:
 
 ```sh
-./update.sh --status
+./setup.sh status
 journalctl -u dsh.service -n 100
 ```
 

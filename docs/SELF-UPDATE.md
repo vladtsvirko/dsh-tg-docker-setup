@@ -5,7 +5,7 @@ There are two entry points to the same update path:
 - **`/system update setup`** in the bot control chat — normal operation, no host
   shell. The connector drains all agents, asks the updater service, and reports
   the result to Telegram. See [`UPDATER.md`](UPDATER.md).
-- **`./update.sh --apply`** on the host — bootstrap, break-glass, or a deliberate
+- **`./setup.sh update`** on the host — bootstrap, break-glass, or a deliberate
   manual update. It does not require the connector to be healthy.
 
 Both move the **setup checkout** (installer, entrypoint, supervisor, updater,
@@ -13,20 +13,20 @@ docs) to a release tag, install the matching DSH, and restart `dsh.service`.
 Neither pulls `main`.
 
 ```sh
-./update.sh --check   # fetch tags, show the target and its commits; change nothing
-sudo ./update.sh --apply    # latest compatible tag, install, health gate, rollback
-sudo ./update.sh --apply --i-know-versions-are-incompatible   # allow a major/DSH jump
-sudo ./update.sh --to <newer tag>                        # exact target, used by the updater
+./setup.sh update --check   # fetch tags, show the target and its commits; change nothing
+sudo ./setup.sh update    # latest compatible tag, install, health gate, rollback
+sudo ./setup.sh update --i-know-versions-are-incompatible   # allow a major/DSH jump
+sudo ./setup.sh update --to <newer tag>                        # exact target, used by the updater
 ```
 
 `--check` exits `0` when there is no newer tag at all, `2` when a newer tag
 exists (compatible or only incompatible — it prints which), and `1` on an error.
 `--apply` asks for confirmation unless `ASSUME_YES=1`. Run it as root
-(`sudo ./update.sh --apply`): it writes the root-owned checkout, installs DSH
+(`sudo ./setup.sh update`): it writes the root-owned checkout, installs DSH
 globally and restarts the unit.
 
 Every successful update ends with the same health check an install runs
-(`scripts/repair.sh --fix`, exposed as `./update.sh --doctor`). It catches the
+(`scripts/repair.sh --fix`, exposed as `./setup.sh doctor`). It catches the
 files an update rewrites — `.env`, the profile patch, the stored credential —
 so a half-applied change is repaired before the next boot instead of surfacing
 as a model call that fails for no visible reason.
@@ -108,6 +108,6 @@ The previous release is a tag plus the data snapshot.
   [`LIMITS.md`](LIMITS.md).
 - The updater's code is the checkout it runs. A setup update changes that code
   on its next start; a change to the updater's **unit** needs
-  `sudo ./install.sh --yes`.
+  `sudo ./setup.sh --yes`.
 - A crash of the updater mid-apply is not automatically resumed. The result
   file, checkout and snapshot are the recovery inputs.

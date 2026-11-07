@@ -34,7 +34,7 @@ exact npm plugin specs, their GitHub fallbacks and the minimum floor a boot enfo
   tag is fine, and jumps are fine (`0.6.0 → 0.9.1`).
 - **Crossing** a DSH line or a product major needs the explicit flag
   `/system update setup --i-know-versions-are-incompatible` (or
-  `./update.sh --apply --i-know-versions-are-incompatible`). Neither path crosses
+  `./setup.sh update --i-know-versions-are-incompatible`). Neither path crosses
   on its own, and the updater refuses targets that are not newer.
 
 ## Upgrading from Telegram
@@ -47,7 +47,7 @@ What happens, in order:
 
 1. The bot reports the drain and waits for every agent to go idle (a web UI turn
    counts too; `/system status` shows who is blocked).
-2. The updater runs `update.sh --to <latest compatible tag>` on the host.
+2. The updater runs `setup.sh update --to <latest compatible tag>` on the host.
 3. The target tag is checked out and the matching DSH installed while the old
    runtime runs; `dsh.service` is restarted, and the new runtime must pass the
    health gate (the unit active **and** the web port answering).
@@ -60,9 +60,9 @@ cancels a running updater job).
 ## Upgrading from the host
 
 ```sh
-sudo ./update.sh --check    # what a compatible upgrade would do; changes nothing
-sudo ./update.sh --apply          # do it, with the first prompt asking to confirm
-sudo ./update.sh --to v0.2.1-rc.5-0.13.8   # an exact target (what the updater uses)
+sudo ./setup.sh update --check    # what a compatible upgrade would do; changes nothing
+sudo ./setup.sh update          # do it, with the first prompt asking to confirm
+sudo ./setup.sh update --to v0.2.1-rc.5-0.13.8   # an exact target (what the updater uses)
 ```
 
 Use this for a broken bot, a first install of the updater, or a deliberate
@@ -84,10 +84,10 @@ install — opens a supervisor **trial**. The bot posts a card with **Commit** a
 - A runtime that never comes up rolls back after `DSH_BOOT_GRACE_SECONDS`
   (120 s), or immediately if it exits.
 
-**A setup upgrade** — `/system update setup` or `./update.sh --apply` — opens no
+**A setup upgrade** — `/system update setup` or `./setup.sh update` — opens no
 trial and posts no Commit/Roll back card. It has a **health gate** instead: the
 restarted service must be active **and** answer on the web port. If either
-fails, `update.sh` restores the snapshot, checks the previous tag out, rewrites
+fails, `setup.sh update` restores the snapshot, checks the previous tag out, rewrites
 the version and restarts by itself, then reports the rollback in the chat.
 There is nothing to confirm and no deadline: success is final, failure is
 automatic.
@@ -111,20 +111,20 @@ Run this once, on a quiet deployment:
 That proves the supervisor, the bot and the trial card. It does **not** exercise
 the setup rollback, which is the updater's health gate, not a trial: to drill
 that one, break a disposable deployment on purpose (a target whose unit cannot
-start, or a web bind that does not answer) and watch `update.sh --apply` restore
+start, or a web bind that does not answer) and watch `setup.sh update` restore
 the previous tag and snapshot and report `rolled back`; the apply path it
 exercises is [`SELF-UPDATE.md`](SELF-UPDATE.md). If the card never arrives, the
 supervisor or its token is misconfigured — fix that before you need a rollback
 for real (`/system status` reports both).
 
-`./update.sh --to <current tag>` is **not** a no-op drill: an exact-or-older
+`./setup.sh update --to <current tag>` is **not** a no-op drill: an exact-or-older
 target is refused on purpose, so the drill has to be the trial above.
 
 ## Upgrading from an older install (0.4.x and before)
 
 Nothing has to be done by hand:
 
-- missing `.env` keys are filled from defaults on the next `./install.sh` (the
+- missing `.env` keys are filled from defaults on the next `./setup.sh` (the
   installer also says when an exported variable overrides a deployed value);
 - if `DSH_ADMIN_USER_ID` is absent, the owner of the bot chat is the admin, so
   an upgrade cannot lock you out; new installs always set it;

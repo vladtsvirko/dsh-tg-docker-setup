@@ -229,7 +229,7 @@ test('a stale marker from a dead pid is not a failure', async () => {
 test('install.sh --doctor runs the doctor instead of installing', async () => {
   const dir = await fixture()
   try {
-    const { stdout } = await exec('bash', [join(here, 'install.sh'), '--doctor', '--dir', dir], {
+    const { stdout } = await exec('bash', [join(here, 'setup.sh'), 'doctor', '--dir', dir], {
       timeout: 20000,
       env: { ...process.env, ...shimEnv },
     })

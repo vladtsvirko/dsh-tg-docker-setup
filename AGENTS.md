@@ -10,7 +10,7 @@ penpot plugin:  0.3.1                     tag v0.3.1
 ```
 
 - The DSH part is the runtime the setup release installs. It is the prefix of
-  `VERSION`; `install.sh` installs `@deepseek-ai/dsh@<DSH part>`. There is no
+  `VERSION`; `setup.sh` installs `@deepseek-ai/dsh@<DSH part>`. There is no
   image and no `.env` DSH pin.
 - The setup product part starts at `0.0.0` for each new DSH alignment; patch =
   fix, minor = compatible feature, **major = breaking**. `0.x` is the compatible
@@ -22,7 +22,7 @@ penpot plugin:  0.3.1                     tag v0.3.1
   releases.
 - Different product major **or a different DSH part**: only with the explicit
   `--i-know-versions-are-incompatible` flag. Both `/system update setup` and
-  `update.sh --apply` accept it; neither crosses without it.
+  `setup.sh update` accept it; neither crosses without it.
 - Tags are immutable. `VERSION`, the tag and the `AGENTS.md` example move
   together.
 - **Plugins are independent.** `plugins.json` pins an exact npm `spec`, a
@@ -46,7 +46,7 @@ penpot plugin:  0.3.1                     tag v0.3.1
 3. If the release depends on newer plugin behaviour, bump the plugin's `minimum`
    in `plugins.json` (and its `spec`/`fallback`). The plugin version must already
    be published to npm. Do not add a matching plugin tag requirement to CI.
-4. Run `node --test *.test.mjs`, `bash -n update.sh install.sh entrypoint.sh
+4. Run `node --test *.test.mjs`, `bash -n setup.sh entrypoint.sh
    healthcheck.sh scripts/repair.sh`, and
    `node scripts/check-version.mjs` with `GITHUB_REF_NAME=v<VERSION>`.
    `node scripts/plugin-preflight.mjs` checks the sibling versions against
@@ -59,8 +59,8 @@ checklists. Publish them first when the setup's `spec` changes; a plugin release
 alone is picked up by `/system update connector` and `/system update penpot`.
 
 `/system update setup` is the normal no-SSH path: it drains agents, then the
-`updater` service runs `update.sh --to <target>`, which checks out,
+`updater` service runs `setup.sh update --to <target>`, which checks out,
 installs and restarts the service, and rolls back on a failed health gate. The
-host `./update.sh --apply` path remains for bootstrap, break-glass, or a
+host `./setup.sh update` path remains for bootstrap, break-glass, or a
 deliberate manual update. The runtime has no privileged access; the updater is
 the only component that restarts it.

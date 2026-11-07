@@ -30,7 +30,7 @@ exploit. Expect an answer within a few days.
   plugins or create workspaces. Empty allowlist refuses everyone.
 - **A narrow updater.** It accepts a release tag and a mode, never a command. It
   is reachable only from the loopback interface and only with the token.
-- **Root-owned control plane.** The checkout, the units and `install.sh` are
+- **Root-owned control plane.** The checkout, the units and `setup.sh` are
   root-owned; the runtime cannot rewrite the code that starts it. The supervisor
   (the recovery path) does not load plugins.
 - **Trials.** A plugin change or restart opens a rollback window; a broken

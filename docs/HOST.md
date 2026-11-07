@@ -1,6 +1,6 @@
 # The host deployment
 
-`install.sh` turns this machine into a DSH host: two systemd units, an
+`setup.sh` turns this machine into a DSH host: two systemd units, an
 unprivileged service user, a root-owned checkout, and the data directory that
 survives everything else. This page is the reference for that layout, the
 isolation it does and does not give, and the update authority.
@@ -10,7 +10,7 @@ isolation it does and does not give, and the update authority.
 | Unit | User | What it does |
 |---|---|---|
 | `dsh.service` | `dsh` (the service user) | `entrypoint.sh serve` → `supervisor.mjs` → `dsh` |
-| `dsh-updater.service` | `root` | `updater.mjs` on `127.0.0.1:8787`, bearer token; runs `update.sh --to` |
+| `dsh-updater.service` | `root` | `updater.mjs` on `127.0.0.1:8787`, bearer token; runs `setup.sh update --to` |
 
 The runtime is unprivileged. The updater is root because restarting
 `dsh.service` requires it — that is the only reason. The updater has no
@@ -65,17 +65,17 @@ TasksMax=512
 `MemoryMax` is a percentage of RAM; `CPUQuota` is measured against one core, so
 a share of the machine is `percent × nproc`. Unlimited writes none of the three.
 The value is stored as `DSH_RESOURCE_PERCENT` in `.env`, so a repair keeps it;
-change it there and re-run `./install.sh` (the unit is rewritten) or edit the
+change it there and re-run `./setup.sh` (the unit is rewritten) or edit the
 unit and `systemctl daemon-reload`.
 
 ## Install and repair
 
 ```sh
-./install.sh                 # asks the questions, writes units, starts
-./install.sh --check         # the plan, nothing changed
-./install.sh --containers none --yes
-./install.sh --config answers.env
-./install.sh --ref <git ref>
+./setup.sh                 # asks the questions, writes units, starts
+./setup.sh --check         # the plan, nothing changed
+./setup.sh --containers none --yes
+./setup.sh --config answers.env
+./setup.sh --ref <git ref>
 ```
 
 A native install run as a normal user re-executes itself under `sudo`, and the
@@ -85,7 +85,7 @@ the symlinks and `.env`, keeps the deployed values (including the provider key
 and the resource share), and does not move data. A failed re-run is not rolled
 back — the files are written before the health check.
 
-`./install.sh --doctor` (and `./update.sh --doctor`) check the same things;
+`./setup.sh --doctor` (and `./setup.sh doctor`) check the same things;
 `--fix` repairs the safe subset: duplicate or CRLF `.env` lines, a provider key
 the web UI's stored copy shadows, a duplicated managed block in the profile
 patch, wrong ownership. Every install and every successful self-update runs it
@@ -104,8 +104,8 @@ Both paths end in the same script and the same tag policy.
 
 | Trigger | Path |
 |---|---|
-| Telegram `/system update setup` | connector → `dsh-updater.service` (127.0.0.1:8787, bearer token) → `update.sh --to <tag>` |
-| Host `./update.sh --apply` | `update.sh --apply` (root) |
+| Telegram `/system update setup` | connector → `dsh-updater.service` (127.0.0.1:8787, bearer token) → `setup.sh update --to <tag>` |
+| Host `./setup.sh update` | `setup.sh update` (root) |
 | Telegram `/system update connector` | supervisor → `entrypoint reset-plugin`, profile only |
 
 The apply path:
@@ -122,8 +122,8 @@ The apply path:
 On failure it checks the previous tag out again, restores the snapshot, rewrites
 the version and restarts.
 
-A release that changes `install.sh` itself (the systemd units) needs one
-`sudo ./install.sh --yes` afterwards: it is idempotent and keeps the values
+A release that changes `setup.sh` itself (the systemd units) needs one
+`sudo ./setup.sh --yes` afterwards: it is idempotent and keeps the values
 already in `.env`. The updater reports the outcome to the control chat.
 
 Compatibility rules are unchanged: same DSH part and same product major may
@@ -134,7 +134,7 @@ connector passes through.
 
 - Keep `/srv/dsh/.env` at `0640 root:dsh`. It holds the bot token, the model key
   and the updater token.
-- The updater token is a root credential: the updater runs `update.sh` and
+- The updater token is a root credential: the updater runs `setup.sh update` and
   restarts the runtime.
 - The runtime and the connector share the `dsh` uid, so the agent can read the
   bot and updater tokens. That is inherent to one unprivileged runtime; if it is

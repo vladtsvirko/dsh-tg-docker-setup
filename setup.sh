@@ -2,11 +2,11 @@
 #
 # One-command installer for the DSH setup.
 #
-#   ./install.sh                        interactive: asks for the few values
+#   ./setup.sh                        interactive: asks for the few values
 #                                        that are easy to get wrong
-#   ./install.sh --check                print the plan, change nothing
-#   ./install.sh --yes                  unattended, all defaults
-#   ./install.sh --config answers.env   answers from a file (see install.example.env)
+#   ./setup.sh --check                print the plan, change nothing
+#   ./setup.sh --yes                  unattended, all defaults
+#   ./setup.sh --config answers.env   answers from a file (see install.example.env)
 #
 # The deployment is a systemd service on this host: the agent runs as an
 # unprivileged user and can read the host's files; the updater runs as root
@@ -16,14 +16,33 @@
 # plan is all that happens, which is what the test suite exercises.
 set -euo pipefail
 
+# Sourced callers (the test suite) get the helpers without running a command.
+SETUP_SOURCED=0
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  SETUP_SOURCED=1
+  # Sourced helpers run against the deployment in the current directory.
+  DEPLOY_DIR="$(pwd -P)"
+  ENV_FILE="$DEPLOY_DIR/.env"
+  NATIVE_DATA="$DEPLOY_DIR/data"
+  BACKUP_DIR="$DEPLOY_DIR/backups"
+  SERVICE_USER="${SERVICE_USER:-dsh}"
+  HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
+fi
+
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
-die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
+die()  {
+  printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2
+  # A sourced caller must survive: the test asserts on the message, not on exit.
+  [ "$SETUP_SOURCED" = 1 ] && return 1
+  exit 1
+}
 
 # Where this file is, without assuming it is a file at all: `wget -qO- … | bash`
 # has no path, and that is exactly the case the bootstrap below handles.
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
   SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SETUP_ROOT="$SRC_DIR"
 else
   SRC_DIR="$(pwd -P)"
 fi
@@ -31,7 +50,7 @@ fi
 # ===========================================================================
 # Bootstrap: one downloaded file is enough.
 #
-#   wget -qO- https://raw.githubusercontent.com/…/install.sh | bash -s -- --yes
+#   wget -qO- https://raw.githubusercontent.com/…/setup.sh | bash -s -- --yes
 #
 # The installer needs VERSION and the entrypoint beside it, so a lone copy
 # fetches a release checkout and re-runs the copy
@@ -44,8 +63,8 @@ bootstrap_usage() {
   cat <<'EOF'
 Get the setup from the internet and install it.
 
-  wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash
-  curl -fsSL https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash -s -- --yes
+  wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/setup.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/setup.sh | bash -s -- --yes
 
 Options (bootstrap):
   --ref REF              release tag to fetch (default: the newest on the remote)
@@ -62,7 +81,9 @@ EOF
 }
 
 in_bootstrap() {
-  [ -f "$SRC_DIR/VERSION" ] && [ -f "$SRC_DIR/entrypoint.sh" ] && return 1
+  # A release checkout carries VERSION plus the runtime entrypoint; a partial
+  # copy that only has this script is a download and must fetch the release.
+  [ -f "$SRC_DIR/VERSION" ] && { [ -f "$SRC_DIR/entrypoint.sh" ] || [ -f "$SRC_DIR/setup.sh" ]; } && return 1
   return 0
 }
 
@@ -141,7 +162,7 @@ bootstrap() {
       rm -rf "$preview"
       die "cannot clone $SETUP_REPO at $ref"
     fi
-    ( cd "$preview" && bash "$preview/install.sh" --check "${args[@]}" --dir "$dir" )
+    ( cd "$preview" && bash "$preview/setup.sh" --check "${args[@]}" --dir "$dir" )
     code=$?
     rm -rf "$preview"
     exit $code
@@ -180,13 +201,28 @@ bootstrap() {
 
   log "installing from $dir"
   cd "$dir"
-  exec env DSH_BOOTSTRAP_SOURCE="$dir" bash "$dir/install.sh" "${args[@]}"
+  exec env DSH_BOOTSTRAP_SOURCE="$dir" bash "$dir/setup.sh" "${args[@]}"
 }
 
 if in_bootstrap; then
   bootstrap "$@"
   exit 0
 fi
+
+if [ "$SETUP_SOURCED" = 1 ]; then
+  COMMAND=none
+else
+  COMMAND="${1:-install}"
+fi
+case "$COMMAND" in
+  -*) COMMAND=install ;;
+  install|update|status|doctor|components|uninstall|help) shift || true ;;
+esac
+COMMAND_ARGS=("$@")
+INSTALL_ARGS=("$@")
+# Other commands parse their own options; keep the install parser from
+# rejecting them (it would see --to, --json, ... as unknown).
+if [ "$COMMAND" != install ]; then set --; fi
 
 cd "$SRC_DIR"
 SETUP_VERSION="$(tr -d '\n' < "$SRC_DIR/VERSION")"
@@ -223,46 +259,48 @@ PENPOT_ACCESS_TOKEN="${PENPOT_ACCESS_TOKEN:-}"
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
-die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
+die()  {
+  printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2
+  # A sourced caller must survive: the test asserts on the message, not on exit.
+  [ "$SETUP_SOURCED" = 1 ] && return 1
+  exit 1
+}
 run()  { if [ "$CHECK" = 1 ]; then printf '    would run: %s\n' "$*"; else "$@"; fi; }
 
 usage() {
   cat <<'EOF'
-Install the DSH setup in one command.
+Install, update and inspect this DSH deployment.
 
-  ./install.sh                        interactive
-  ./install.sh --check                print the plan, change nothing
-  ./install.sh --yes                  unattended, all defaults
-  ./install.sh --config answers.env   answers from a file
+Usage:
+  setup.sh [command] [options]
 
-Without a checkout — one small file fetches the release, then installs Node,
-git and the systemd units:
+Commands:
+  install      Install or repair the deployment (default)
+  update       Update to the newest compatible release
+  status       Show versions, services and health
+  doctor       Check the deployment; --fix repairs the safe subset
+  components   Manage the optional design stack
+  uninstall    Remove the services; --purge deletes data too
+  help         Show this help, or help for one command
 
-  wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash
-  curl -fsSL https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash -s -- --yes
+Common options:
+  --dir PATH   Deployment directory (default: /srv/dsh)
+  --check      Show the plan; change nothing
+  --yes, -y    Do not ask; use stored answers
+  --config F   Read answers from F (install)
+  --version    Print the setup version
+  -h, --help   This help
 
-Options:
-  --containers podman|none
-                         rootless Podman for the agent's disposable containers
-                         (default: podman; Docker is never installed)
-  --dir PATH             deployment directory (default: /srv/dsh)
-  --design penpot|none   optional Penpot design stack, run on Podman
-                         (default: ask, else none)
-  --ref REF              git ref for the native checkout (default: v<VERSION>)
-  --config FILE          read answers from FILE (KEY=VALUE, no shell);
-                         still prompts unless --yes is passed
-  --no-deps              do not install Node or git; they must already exist
-  --clean-source         remove the downloaded checkout once installed
-  --yes, -y              accept defaults, never prompt
-  --check                print the plan and change nothing
-  --doctor               check this deployment and report; change nothing
-  --fix                  repair what the check can repair (implies --doctor)
-  --rotate-key           ask for the provider key again (default: keep the
-                         deployed OPENCODE_GO_API_KEY / DEEPSEEK_API_KEY)
-  --uninstall            stop and remove the deployment (keeps data/)
-  --purge                with --uninstall: also delete data/, .env and backups/
-  --version              print the setup and DSH versions, then exit
-  -h, --help             this text
+Examples:
+  sudo ./setup.sh                       # install or repair, asking first
+  sudo ./setup.sh install --check       # the plan, no changes
+  ./setup.sh update --check             # what an update would do
+  ./setup.sh status
+  sudo ./setup.sh doctor --fix
+  sudo ./setup.sh components enable design
+  sudo ./setup.sh uninstall --purge
+
+Exit codes: 0 ok, 1 error, 2 update available (--check), 3 cancelled.
 EOF
 }
 
@@ -697,7 +735,7 @@ ufw_state() {
     sudo -n ufw status 2>/dev/null
     return 0
   fi
-  # Unprivileged without passwordless sudo (the usual `./install.sh --check`).
+  # Unprivileged without passwordless sudo (the usual `./setup.sh --check`).
   # The rules are root-only, but the enable flag is world-readable, so a check
   # can still say "your firewall is on" instead of going silent.
   if [ -r /etc/ufw/ufw.conf ] && grep -qx 'ENABLED=yes' /etc/ufw/ufw.conf 2>/dev/null; then
@@ -936,10 +974,10 @@ rerun_as_root() {
   done < <(env 2>/dev/null || true)
   # Remember where the download lives, so the installer can say it is not the
   # deployment once it has one of its own.
-  exec sudo env "${keep[@]}" DSH_BOOTSTRAP_SOURCE="$SRC_DIR" bash "$SRC_DIR/install.sh" "$@" </dev/tty
+  exec sudo env "${keep[@]}" DSH_BOOTSTRAP_SOURCE="$SRC_DIR" bash "$SRC_DIR/setup.sh" install "${INSTALL_ARGS[@]}" </dev/tty
 }
 
-if [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$DOCTOR" = 0 ] && [ "$(id -u)" != 0 ]; then
+if [ "$COMMAND" = install ] && [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$DOCTOR" = 0 ] && [ "$(id -u)" != 0 ]; then
   if command -v sudo >/dev/null 2>&1; then rerun_as_root; fi
   die "this installs a systemd service — run with sudo"
 fi
@@ -961,9 +999,9 @@ if [ "$DESIGN" = penpot ] && [ "$CONTAINERS" = none ]; then
   CONTAINERS=podman
   warn "--design penpot needs Podman; containers set to podman"
 fi
-[ -n "$DIR" ] || DIR=/srv/dsh
+[ "$COMMAND" = install ] && { [ -n "$DIR" ] || DIR=/srv/dsh; }
 
-read_existing_env
+[ "$SETUP_SOURCED" = 1 ] || read_existing_env
 
 # --- deployment path guard -------------------------------------------------
 # --purge deletes data/ and .env as root. Refuse anything that is not a
@@ -997,6 +1035,1070 @@ assert_deployment_dir() {
   fi
   printf '%s\n' "$resolved"
 }
+
+
+set_env() {
+  local key="$1" value="$2" file="$3" tmp owner="" mode=""
+  tmp="$(mktemp)"
+  if [ -f "$file" ]; then
+    owner="$(stat -c '%u:%g' "$file" 2>/dev/null || true)"
+    mode="$(stat -c '%a' "$file" 2>/dev/null || true)"
+    grep -v "^${key}=" "$file" > "$tmp" || true
+  fi
+  printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  # A rewrite must not turn .env into root:root 0600: the service reads it
+  # through systemd, but the doctor and the operator need the deployed mode.
+  [ -z "$owner" ] || chown "$owner" "$tmp" 2>/dev/null || true
+  [ -z "$mode" ] || chmod "$mode" "$tmp" 2>/dev/null || true
+  mv "$tmp" "$file"
+}
+
+del_env() {
+  local key="$1" file="$2" tmp
+  [ -f "$file" ] || return 0
+  grep -q "^${key}=" "$file" || return 0
+  tmp="$(mktemp)"
+  grep -v "^${key}=" "$file" > "$tmp" || true
+  mv "$tmp" "$file"
+}
+
+sync_stored_credential() {
+  local file="$1" home="$DATA_HOME" store="$DATA_HOME/.credentials.yaml"
+  local key_var key owner state
+  [ -f "$store" ] || return 0
+  [ -f "$SRC_DIR/scripts/credentials.mjs" ] || return 0
+  key_var="${PROVIDER_KEY_ENV:-$(provider_key_env "$DSH_PROVIDER")}"
+  key="$(sed -n "s/^${key_var}=//p" "$file" | tail -1)"
+  command -v node >/dev/null 2>&1 || {
+    warn "cannot reconcile $store without node; save $key_var in Settings -> Models to match .env"
+    return 0
+  }
+  if [ -z "$key" ]; then
+    state="$(DSH_VALUE= node "$SRC_DIR/scripts/credentials.mjs" status --home "$home" --ref "$key_var" 2>/dev/null || true)"
+    case "$state" in
+      ""|absent) ;;
+      *) warn "$key_var is stored by the web UI but not in $file — the stored key is what model calls use" ;;
+    esac
+    return 0
+  fi
+  state="$(DSH_VALUE="$key" node "$SRC_DIR/scripts/credentials.mjs" status --home "$home" --ref "$key_var" 2>/dev/null || true)"
+  case "$state" in
+    ""|absent|match) return 0 ;;
+  esac
+  if DSH_VALUE="$key" node "$SRC_DIR/scripts/credentials.mjs" sync --home "$home" --ref "$key_var" >/dev/null 2>&1; then
+    owner="$SERVICE_USER:$SERVICE_USER"
+    chown "$owner" "$store" "$store.bak" 2>/dev/null || true
+    log "reconciled the stored $key_var with $file (backup: $store.bak)"
+  else
+    warn "could not reconcile $store; save $key_var in Settings -> Models or remove the file"
+  fi
+}
+
+prepare_penpot_data() {
+  local dir="$1"
+  mkdir -p "$dir/data/assets" 2>/dev/null || true
+  if [ "$(id -u)" = 0 ]; then
+    chown -R 1001:1001 "$dir/data/assets" 2>/dev/null || true
+    chmod 0775 "$dir/data/assets" 2>/dev/null || true
+  fi
+}
+
+prepare_penpot_tls() {
+  local dir="$1" bind="$2"
+  local script="$SRC_DIR/scripts/design-tls.sh"
+  [ -f "$script" ] || { warn "scripts/design-tls.sh is missing — the HTTPS front is skipped"; return 1; }
+  bash "$script" "$dir" "$bind" >/dev/null
+}
+
+penpot_tls_hint() {
+  local dir="$1" bind="$2" port="$3" ca
+  ca="$dir/certs/ca.crt"
+  [ -f "$ca" ] || return 0
+  log "Penpot UI over HTTPS: https://$bind:$port/ (the agent keeps using http://$bind:$DSH_DESIGN_PORT/)"
+  log "Trust the local CA once — it removes the browser warning and enables the token Copy button:"
+  log "  macOS:   sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain $ca"
+  log "  Windows: certutil -addstore -f \"ROOT\" $ca"
+  log "  Linux:   sudo cp $ca /usr/local/share/ca-certificates/dsh-penpot-ca.crt && sudo update-ca-certificates"
+  log "  Firefox keeps its own store: Settings -> Privacy & Security -> Certificates -> Authorities -> Import"
+  log "  copy the CA off the host: scp <you>@$bind:$ca ~/Downloads/dsh-penpot-ca.crt"
+}
+
+# --- update path (merged from update.sh) ---
+
+env_get() { sed -n "s/^$1=//p" "$ENV_FILE" | head -1; }
+
+# Prompts: update.sh is run from a terminal, so stdin being a tty is the test.
+# The updater service and the connector call it without one and must not block.
+
+service_active() { systemctl is-active --quiet dsh.service 2>/dev/null; }
+
+
+wait_native_healthy() {
+  local waited=0
+  while [ "$waited" -lt "$HEALTH_TIMEOUT" ]; do
+    if service_active && web_ready; then return 0; fi
+    if [ $((waited % 15)) -eq 0 ]; then
+      printf '    waiting for dsh.service (%ss/%ss)…\n' "$waited" "$HEALTH_TIMEOUT" >&2
+    fi
+    sleep 3; waited=$((waited + 3))
+  done
+  warn "dsh.service did not become healthy within ${HEALTH_TIMEOUT}s"
+  return 1
+}
+
+# Run a command as the unprivileged runtime user, with the deployment's env.
+# Used by `--tg-connector` and by the native apply path to run the entrypoint's
+# prepare step without leaving root-owned files in the profile.
+# The systemd unit runs the launcher from /usr/local/bin; a partial install may
+# only have it inside the deployment directory. update.sh used to assume the
+# latter existed in $DEPLOY_DIR, so every native update failed to prepare.
+
+entrypoint_bin() {
+  # DSH_ENTRYPOINT lets a test (or an unusual install) name the launcher.
+  if [ -n "${DSH_ENTRYPOINT:-}" ] && [ -x "${DSH_ENTRYPOINT}" ]; then
+    printf %s "$DSH_ENTRYPOINT"
+  elif [ -x /usr/local/bin/dsh-entrypoint ]; then
+    printf %s /usr/local/bin/dsh-entrypoint
+  elif command -v dsh-entrypoint >/dev/null 2>&1; then
+    command -v dsh-entrypoint
+  elif [ -x "$DEPLOY_DIR/entrypoint.sh" ]; then
+    printf %s "$DEPLOY_DIR/entrypoint.sh"
+  else
+    return 1
+  fi
+}
+
+
+run_as_service() {
+  local -a pass=(
+    "HOME=$NATIVE_DATA/home"
+    "DSH_HOME=$NATIVE_DATA/home"
+    "DSH_WORKSPACE=$NATIVE_DATA/workspace"
+    "DSH_SUPERVISOR_STATE=$NATIVE_DATA/supervisor"
+    "DSH_SETUP_VERSION=$(setup_version)"
+  )
+  local key value
+  for key in DSH_PROVIDER DSH_MODEL DSH_PROVIDER_API_KEY_ENV OPENCODE_GO_API_KEY \
+             DEEPSEEK_API_KEY DSH_TELEGRAM_BOT_TOKEN DSH_TELEGRAM_ENABLED \
+             DSH_TELEGRAM_PLUGIN DSH_TELEGRAM_PACKAGE PENPOT_PLUGIN_REF \
+             PENPOT_ENABLED DSH_DESIGN_ENABLED \
+             ALLOWED_USER_IDS DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PERMISSION_MODE; do
+    value="$(env_get "$key")"
+    [ -n "$value" ] && pass+=("$key=$value")
+  done
+  # Run from the workspace directory, exactly as the systemd unit does. `dsh`
+  # loads the .env of its working directory and refuses launch-only keys there
+  # ("DSH_BIND_IP … export it instead"), so running this from the deployment
+  # directory — the documented way — made every native prepare fail.
+  local workdir="$NATIVE_DATA/workspace"
+  [ -d "$workdir" ] || workdir=/
+  ( cd "$workdir" && runuser -u "$SERVICE_USER" -- env "${pass[@]}" "$@" )
+}
+
+
+native_snapshot() {
+  local stamp=$1 file
+  [ -d "$NATIVE_DATA/home" ] || return 1
+  mkdir -p "$BACKUP_DIR"
+  file="$BACKUP_DIR/self-$stamp.tgz"
+  local paths=(home)
+  [ -d "$NATIVE_DATA/supervisor" ] && paths+=(supervisor)
+  tar czf "$file" -C "$NATIVE_DATA" "${paths[@]}"
+  ls -1t "$BACKUP_DIR"/self-*.tgz 2>/dev/null | tail -n +2 | while IFS= read -r old; do rm -f "$old"; done
+  printf '%s\n' "$file"
+}
+
+
+native_restore() {
+  local file=$1
+  [ -f "$file" ] || return 1
+  rm -rf "$NATIVE_DATA/home" "$NATIVE_DATA/supervisor"
+  tar xzf "$file" -C "$NATIVE_DATA"
+  chown -R "$SERVICE_USER:$SERVICE_USER" "$NATIVE_DATA/home" 2>/dev/null || true
+  [ -d "$NATIVE_DATA/supervisor" ] && chown -R "$SERVICE_USER:$SERVICE_USER" "$NATIVE_DATA/supervisor" 2>/dev/null || true
+}
+
+
+native_rollback() {
+  local cur=$1 snapshot=$2
+  git -c advice.detachedHead=false checkout --detach "$cur" >/dev/null 2>&1 \
+    || warn "could not check out $cur"
+  set_env DSH_SETUP_VERSION "${cur#v}" "$ENV_FILE"
+  chown "root:$SERVICE_USER" "$ENV_FILE" 2>/dev/null || true
+  chmod 640 "$ENV_FILE" 2>/dev/null || true
+  if [ -n "$snapshot" ]; then native_restore "$snapshot" || warn "data restore failed — the snapshot is at $snapshot"; fi
+  systemctl restart dsh.service || warn "could not restart dsh.service"
+  if wait_native_healthy; then
+    verify || warn "rolled back, but verification complained — inspect: journalctl -u dsh.service"
+    warn "rolled back to $cur; the previous setup is running"
+    return 1
+  fi
+  die "rollback failed too — $snapshot remains for recovery"
+}
+
+# Native apply: the "artifact" is the checkout plus the DSH install, and the
+# restart belongs to systemd. Plugins are reconciled by the entrypoint against
+# their own tags and floors.
+
+update_apply() {
+  local cur=$1 target=$2 snapshot=""
+  log "snapshotting data/home and data/supervisor"
+  if ! snapshot="$(native_snapshot "$(date +%Y%m%d-%H%M%S)")"; then
+    warn "snapshot failed; the deployment was not touched"
+    return 1
+  fi
+  log "snapshot: $snapshot"
+
+  log "checking out $target"
+  if ! git -c advice.detachedHead=false checkout --detach "$target"; then
+    warn "checkout failed; still on $cur"
+    return 1
+  fi
+  set_env DSH_SETUP_VERSION "${target#v}" "$ENV_FILE"
+  chown "root:$SERVICE_USER" "$ENV_FILE" 2>/dev/null || true
+  chmod 640 "$ENV_FILE" 2>/dev/null || true
+
+  local target_dsh
+  target_dsh="$(tag_dsh "$target")"
+  if ! command -v dsh >/dev/null 2>&1 || \
+     [ "$(dsh --version 2>/dev/null | tr -d 'v[:space:]')" != "$target_dsh" ]; then
+    log "installing @deepseek-ai/dsh@$target_dsh"
+    npm install -g --loglevel=error --no-fund --no-audit \
+      --allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs \
+      "@deepseek-ai/dsh@$target_dsh" pnpm@11 \
+      || warn "could not install dsh $target_dsh — the health gate will decide"
+  fi
+
+  log "preparing the profile and the pinned connector"
+  local entry
+  if ! entry="$(entrypoint_bin)"; then
+    warn "no entrypoint launcher in /usr/local/bin or $DEPLOY_DIR — rolling back to $cur"
+    native_rollback "$cur" "$snapshot"
+    return 1
+  fi
+  if ! run_as_service "$entry" init; then
+    warn "prepare failed — rolling back to $cur"
+    native_rollback "$cur" "$snapshot"
+    return 1
+  fi
+
+  log "restarting dsh.service"
+  if ! systemctl restart dsh.service; then
+    warn "restart failed — rolling back to $cur"
+    native_rollback "$cur" "$snapshot"
+    return 1
+  fi
+
+  if ! wait_native_healthy; then
+    warn "new tag did not become healthy; rolling back to $cur"
+    native_rollback "$cur" "$snapshot"
+    return 1
+  fi
+
+  verify || warn "healthy, but verification complained — inspect: journalctl -u dsh.service"
+  design_reconcile || warn "the design stack was not reconciled — run ./setup.sh components enable design"
+  repair_deployment || warn "the update is applied, but the health check found something — ./setup.sh update --doctor"
+  log "done — $target is running (detached HEAD)"
+}
+
+
+# The URL this process can reach the runtime at: the public root when one is
+# configured, otherwise the bind address (127.0.0.1 is a real address here, not
+# a published-port indirection).
+
+web_probe_url() {
+  local ip port public
+  ip="$(env_get DSH_BIND_IP)"; port="$(env_get DSH_PORT)"; public="$(env_get DSH_PUBLIC_URL)"
+  [ -n "$port" ] || port=4310
+  if [ -n "$public" ]; then
+    printf '%s' "$public"
+    return 0
+  fi
+  [ -n "$ip" ] || ip=127.0.0.1
+  printf 'http://%s:%s/' "$ip" "$port"
+}
+
+
+web_code() {
+  local url code
+  url="$(web_probe_url)"
+  # a bare origin answers 401 on purpose: the runtime wants the ?token= URL
+  code="$(curl -s -o /dev/null -m 5 -w '%{http_code}' "$url" 2>/dev/null || true)"
+  echo "${code:-000}"
+}
+
+
+web_ready() {
+  case "$(web_code)" in
+    200|302|303|401|403) return 0 ;;
+  esac
+  return 1
+}
+
+
+# --- setup repo updates, tag by tag --------------------------------------
+# The setup repo is deployed at release tags, never off main. `--apply` moves to
+# the latest compatible tag: skipping within the compatible line is allowed, a
+# branch or a tag that is not a descendant is not. Rollback restores the
+# previous checkout and the data snapshot.
+
+
+
+# The tag checked out right now. A deploy box must be on a tag, not main.
+
+current_tag() {
+  local tag
+  tag="$(git describe --tags --exact-match 2>/dev/null)" || {
+    warn "this checkout is not on a release tag — check out the tag you deploy"
+    return 1
+  }
+  printf '%s\n' "$tag"
+}
+
+# v0.2.1-rc.2-0.1.0 → 0.2.1-rc.2 (everything before the last -X.Y.Z).
+
+tag_dsh() {
+  local t=${1#v}
+  printf '%s\n' "${t%-*}"
+}
+
+# v0.2.1-rc.2-0.1.0 → 0.0.1
+
+tag_product() {
+  local t=${1#v}
+  printf '%s\n' "${t##*-}"
+}
+
+
+tag_major() {
+  local product
+  product="$(tag_product "$1")"
+  printf '%s\n' "${product%%.*}"
+}
+
+# Every valid aligned tag newer than the current one, oldest first.
+
+newer_tags() {
+  local cur tags line found=0
+  cur="$(current_tag)" || return 1
+  tags="$(git -c versionsort.suffix=-rc tag --list 'v*' --sort=v:refname \
+    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?-[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+  if ! grep -Fqx -- "$cur" <<<"$tags"; then
+    warn "current tag $cur is not a <dsh>-<major>.<minor>.<patch> tag"
+    return 1
+  fi
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    [ "$found" = 1 ] && printf '%s\n' "$line"
+    [ "$line" = "$cur" ] && found=1
+  done <<<"$tags"
+  return 0
+}
+
+# Latest tag the updater may move to. Without the explicit flag this stays on
+# the same DSH line and the same product major; with it, the latest tag wins.
+
+target_tag() {
+  local allow=${1:-0} cur cur_dsh cur_major tag last=""
+  cur="$(current_tag)" || return 1
+  cur_dsh="$(tag_dsh "$cur")"
+  cur_major="$(tag_major "$cur")"
+  while IFS= read -r tag; do
+    [ -n "$tag" ] || continue
+    git merge-base --is-ancestor "$cur" "$tag" || continue
+    if [ "$allow" != 1 ]; then
+      [ "$(tag_dsh "$tag")" = "$cur_dsh" ] || continue
+      [ "$(tag_major "$tag")" = "$cur_major" ] || continue
+    fi
+    last="$tag"
+  done < <(newer_tags)
+  [ -n "$last" ] || return 1
+  printf '%s\n' "$last"
+}
+
+
+self_check() {
+  local allow=${1:-0} cur target all
+  git fetch --tags --quiet origin || die "git fetch failed"
+  cur="$(current_tag)" || die "cannot determine the deployed tag — check out the tag that is running"
+  all="$(newer_tags)" || die "cannot list newer tags"
+  if [ -z "$all" ]; then
+    log "no newer tag after $cur"
+    exit 0
+  fi
+  target="$(target_tag "$allow" || true)"
+  if [ -z "$target" ]; then
+    warn "no compatible tag after $cur"
+    warn "crossing a product major or a DSH line requires --i-know-versions-are-incompatible"
+    printf '%s\n' "$all" | sed 's/^/    /'
+    exit 2
+  fi
+  log "current tag: $cur"
+  log "target tag:  $target  (latest compatible)"
+  log "available:   $(printf '%s\n' "$all" | tr '\n' ' ')"
+  git --no-pager log --oneline "$cur..$target" | sed 's/^/    /'
+  exit 2
+}
+
+
+
+
+self_update() {
+  local allow=${1:-0} override=${2:-} override_allow=${3:-0} cur target all
+  [ -z "$(git status --porcelain)" ] || die "working tree is dirty — commit or stash first"
+  git fetch --tags --quiet origin || die "git fetch failed"
+  cur="$(current_tag)" || die "cannot determine the deployed tag — check out the tag that is running"
+  all="$(newer_tags)" || die "cannot list newer tags"
+
+  if [ -n "$override" ]; then
+    target="$override"
+    [ "$target" != "$cur" ] || die "target is already running"
+    grep -Fqx -- "$target" <<<"$all" || die "target $target is not a newer aligned tag"
+    git merge-base --is-ancestor "$cur" "$target" || die "target $target is not a descendant of $cur"
+    # --to is the raw explicit path, but it is not a policy bypass: the same
+    # rule as --apply applies unless the caller says it means to cross. The
+    # updater passes the flag only after its own /update check accepted it.
+    if [ "$allow" != 1 ] && [ "$override_allow" != 1 ] &&
+       { [ "$(tag_dsh "$target")" != "$(tag_dsh "$cur")" ] || [ "$(tag_major "$target")" != "$(tag_major "$cur")" ]; }; then
+      die "target $target crosses a DSH line or a product major — pass --i-know-versions-are-incompatible"
+    fi
+  else
+    if [ -z "$all" ]; then
+      log "no newer tag after $cur — nothing to do"
+      return 0
+    fi
+    target="$(target_tag "$allow" || true)"
+    if [ -z "$target" ]; then
+      warn "no compatible tag after $cur"
+      warn "crossing a product major or a DSH line requires --i-know-versions-are-incompatible"
+      return 1
+    fi
+  fi
+
+  log "setup update: $cur → $target"
+  git --no-pager log --oneline "$cur..$target" | sed 's/^/    /'
+  if [ "${ASSUME_YES:-0}" != 1 ]; then
+    read -r -p "apply? [Y/n] " answer
+    case "$answer" in
+      n|N|no|No|NO) log "cancelled"; return 0 ;;
+    esac
+  fi
+
+  # The Penpot token survives the update; ask anyway so rotating it does not
+  # need a separate install. Blank keeps the stored value and is never echoed.
+  if [ "$(env_get DESIGN)" = penpot ]; then
+    local token=""
+    if [ -f design/.env ]; then
+      token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' design/.env | head -1)"
+    fi
+    [ -n "$token" ] || token="$(env_get PENPOT_ACCESS_TOKEN)"
+    PENPOT_ACCESS_TOKEN="$token"
+    ask_penpot_token
+    token="${PENPOT_ACCESS_TOKEN:-}"
+    if [ -n "$token" ]; then
+      set_env PENPOT_ACCESS_TOKEN "$token" "$ENV_FILE"
+      if [ -f design/.env ]; then set_env PENPOT_ACCESS_TOKEN "$token" design/.env; fi
+    fi
+  fi
+
+  update_apply "$cur" "$target"
+}
+
+
+verify() {
+  local code plugin_warn
+  code="$(web_code)"
+  case "$code" in
+    200|302|303|401|403) log "web responds ($code) — runtime is up" ;;
+    *) warn "web did not answer (code $code)"; return 1 ;;
+  esac
+
+  local since
+  since="$(systemctl show -p ActiveEnterTimestamp --value dsh.service 2>/dev/null || true)"
+  [ -n "$since" ] || since="-2 minutes"
+  plugin_warn="$(journalctl -u dsh.service --no-pager --since "$since" 2>/dev/null \
+    | grep -i 'incompatible with dsh\|did not activate\|Adapter install failed' || true)"
+  if [ -n "$plugin_warn" ]; then
+    warn "the harness reported a plugin problem:"
+    printf '%s\n' "$plugin_warn" | sed 's/^/    /'
+    warn "run: ./setup.sh install --yes"
+    return 1
+  fi
+  log "no plugin compatibility complaints since this start"
+  # Native only, and silent unless ufw is active: after a port or bind change
+  # the old rule is harmless but the new port is closed, which looks like a
+  # broken update.
+  ufw_hints "$(env_get DSH_PORT)" "$(env_get DSH_BIND_IP)"
+}
+
+# The same doctor the install and update paths run, from the same file.
+# just rewrote .env and the profile, so this is the cheapest moment to catch a
+# duplicated key or a credential the web UI stored that outranks it.
+
+repair_deployment() {
+  local script="$DEPLOY_DIR/scripts/repair.sh"
+  [ -x "$script" ] || return 0
+  bash "$script" --dir "$DEPLOY_DIR" --fix
+}
+
+
+status() {
+  printf '%-22s %s
+' "setup version" "$(setup_version)"
+  printf '%-22s %s
+' "dsh version" "$(dsh_version)"
+  printf '%-22s %s
+' "service" "$(systemctl is-active dsh.service 2>/dev/null || echo missing)"
+  printf '%-22s %s
+' "updater" "$(systemctl is-active dsh-updater.service 2>/dev/null || echo missing)"
+  printf '%-22s %s
+' "web" "$(web_code)"
+  printf '%-22s %s
+' "telegram adapter" "$(
+    node -p "require('$NATIVE_DATA/home/profiles/web/node_modules/dsh-telegram-connector/package.json').version" 2>/dev/null || echo 'not installed'
+  )"
+  ufw_hints "$(env_get DSH_PORT)" "$(env_get DSH_BIND_IP)"
+}
+
+# --- components ------------------------------------------------------------
+# Optional stacks registered in components.json (the design stack today). The
+# updater calls this with a validated name, action and config, so the shell does
+# the mechanics and the registry stays the single source of truth.
+
+
+component_field() {
+  local name=$1 expr=$2
+  node -e '
+    const [name, expr] = process.argv.slice(1)
+    const c = require("./components.json").components[name]
+    if (!c) process.exit(2)
+    const value = expr.split(".").reduce((o, k) => (o == null ? o : o[k]), c)
+    process.stdout.write(value == null ? "" : String(value))
+  ' "$name" "$expr"
+}
+
+
+component_names() {
+  node -e 'process.stdout.write(Object.keys(require("./components.json").components).join(" "))'
+}
+
+
+restart_runtime() {
+  systemctl restart dsh.service
+}
+
+
+component_running() {
+  local dir=$1 file=$2
+  podman-compose --project-directory "$dir" -f "$file" ps -q 2>/dev/null | grep -q .
+}
+
+
+component_health() {
+  local url=$1 codes=$2 timeout=${3:-${COMPONENT_HEALTH_TIMEOUT:-60}} waited=0 code
+  while [ "$waited" -lt "$timeout" ]; do
+    code="$(curl -s -o /dev/null -m 4 -w '%{http_code}' "$url" 2>/dev/null || true)"
+    case " $codes " in *" $code "*) return 0 ;; esac
+    sleep 5; waited=$((waited + 5))
+  done
+  return 1
+}
+
+# Podman's bridge is not covered by ufw's default policy; without these rules
+# containers cannot resolve each other (aardvark-dns) or reach the host. Docker
+# bypassed ufw, Podman does not. Only called from the root updater path.
+
+component_ufw() {
+  local port=$1 project=$2
+  command -v ufw >/dev/null 2>&1 || return 0
+  ufw_state | head -1 | grep -q 'Status: active' || return 0
+  [ "$(id -u)" = 0 ] || return 0
+  local net iface bind cidr
+  net="$(podman network ls --filter "label=io.podman.compose.project=$project" --format '{{.Name}}' 2>/dev/null | head -1)"
+  [ -n "$net" ] || return 0
+  iface="$(podman network inspect "$net" --format '{{.NetworkInterface}}' 2>/dev/null || true)"
+  [ -n "$iface" ] || return 0
+  bind="$(env_get DSH_BIND_IP)"; [ -n "$bind" ] || bind=127.0.0.1
+  cidr="$(lan_network "$bind")"
+  local lan_if=""
+  lan_if="$(ip -o route get "$bind" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -1)"
+  ufw allow in on "$iface" >/dev/null 2>&1 || warn "ufw: could not allow $iface"
+  ufw route allow in on "$iface" out on "$iface" >/dev/null 2>&1 || warn "ufw: could not route $iface"
+  if [ -n "$lan_if" ] && [ "$lan_if" != "$iface" ]; then
+    ufw route allow in on "$lan_if" out on "$iface" >/dev/null 2>&1 \
+      || warn "ufw: could not route $lan_if → $iface"
+  fi
+  ufw allow from "$cidr" to any port "$port" proto tcp >/dev/null 2>&1 \
+    || warn "ufw: could not allow $port from $cidr"
+  local tls_port
+  tls_port="$(env_get DSH_DESIGN_TLS_PORT)"; [ -n "$tls_port" ] || tls_port=8443
+  ufw allow from "$cidr" to any port "$tls_port" proto tcp >/dev/null 2>&1 \
+    || warn "ufw: could not allow $tls_port from $cidr"
+  log "ufw: allowed the Podman bridge $iface, $lan_if → $iface and ports $port/$tls_port from $cidr"
+}
+
+# Penpot's images run as uid 1001 and write assets — including the export
+# tempfile bucket — under design/data/assets. Podman creates a missing bind
+# mount as root, and a root-owned directory makes every export fail with
+# io-exception. Create it and hand it to the container user before `up -d`.
+
+design_reconcile() {
+  [ "$(env_get DESIGN)" = penpot ] || return 0
+  [ "$(env_get PENPOT_ENABLED)" = 1 ] || return 0
+  local dir="$DEPLOY_DIR/design"
+  [ -f "$dir/compose.yaml" ] || return 0
+  component_running "$dir" "$dir/compose.yaml" || return 0
+  local bind tls_port
+  bind="$(env_get DSH_BIND_IP)"; [ -n "$bind" ] || bind=127.0.0.1
+  tls_port="$(sed -n 's/^DSH_DESIGN_TLS_PORT=//p' "$dir/.env" | head -1)"
+  [ -n "$tls_port" ] || tls_port=8443
+  set_env DSH_DESIGN_TLS_PORT "$tls_port" "$dir/.env" 2>/dev/null || true
+  set_env DSH_DESIGN_TLS_PORT "$tls_port" "$ENV_FILE" 2>/dev/null || true
+  prepare_penpot_data "$dir"
+  prepare_penpot_tls "$dir" "$bind" || warn "Penpot HTTPS front skipped (certificate generation failed)"
+  ( cd "$dir" && podman-compose -f compose.yaml up -d ) \
+    || { warn "design stack reconcile failed — run ./setup.sh components enable design"; return 0; }
+  local http_port
+  http_port="$(env_get DSH_DESIGN_PORT)"; [ -n "$http_port" ] || http_port=8090
+  component_ufw "$http_port" "$(basename "$dir")"
+  penpot_tls_hint "$dir" "$bind" "$tls_port"
+}
+
+
+component_apply() {
+  local name=$1 action=$2 port=${3:-}
+  local names
+  names="$(component_names 2>/dev/null || true)"
+  case " $names " in
+    *" $name "*) ;;
+    *) die "unknown component: $name (known: ${names:-none})" ;;
+  esac
+  case "$action" in enable|disable|configure) ;; *) die "unknown action: $action" ;; esac
+
+  local compose_dir env_file template flag
+  compose_dir="$(component_field "$name" projectDir)"
+  env_file="$(component_field "$name" envFile)"
+  template="$(component_field "$name" template)"
+  flag="$(component_field "$name" flag)"
+  [ -n "$compose_dir" ] && [ -n "$env_file" ] || die "components.json entry for $name is incomplete"
+
+  if [ -n "$port" ]; then
+    case "$port" in ''|*[!0-9]*) die "port must be a number" ;; esac
+    [ "$port" -ge 1024 ] && [ "$port" -le 65535 ] || die "port must be between 1024 and 65535"
+  fi
+
+  if [ ! -f "$env_file" ]; then
+    [ "$action" = disable ] && { log "$name is not installed; nothing to disable"; return 0; }
+    [ -f "$template" ] || die "no $env_file and no $template to create it from"
+    mkdir -p "$compose_dir"
+    cp "$template" "$env_file"
+    set_env PENPOT_DB_PASSWORD "$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')" "$env_file"
+    set_env PENPOT_SECRET_KEY "$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')" "$env_file"
+    chmod 600 "$env_file"
+  fi
+
+  local bind port_default
+  bind="$(env_get DSH_BIND_IP)"; [ -n "$bind" ] || bind=127.0.0.1
+  port_default="$(component_field "$name" config.port.default)"
+  [ -n "$port" ] || port="$(sed -n "s/^$(component_field "$name" config.port.env)=//p" "$env_file" | head -1)"
+  [ -n "$port" ] || port="$port_default"
+
+  local port_key
+  port_key="$(component_field "$name" config.port.env)"
+  set_env DSH_BIND_IP "$bind" "$env_file"
+  if [ -n "$port_key" ]; then set_env "$port_key" "$port" "$env_file"; fi
+
+  local compose_file
+  compose_file="$(basename "$(component_field "$name" compose)")"
+  local running=0
+  if component_running "$compose_dir" "$compose_dir/$compose_file"; then running=1; fi
+
+  # Configuring a stopped stack is a preference, not a start: save the value and
+  # leave the runtime alone. Only a running stack is recreated for a new port.
+  if [ "$action" = configure ] && [ "$running" = 0 ]; then
+    log "$name is not running; port $port saved — enable it to start"
+    return 0
+  fi
+
+  case "$action" in
+    enable|configure)
+      log "starting $name on $bind:$port"
+      local tls_port="${DSH_DESIGN_TLS_PORT:-}"
+      [ -n "$tls_port" ] || tls_port="$(sed -n 's/^DSH_DESIGN_TLS_PORT=//p' "$env_file" | head -1)"
+      [ -n "$tls_port" ] || tls_port="$(env_get DSH_DESIGN_TLS_PORT)"
+      [ -n "$tls_port" ] || tls_port=8443
+      set_env DSH_DESIGN_TLS_PORT "$tls_port" "$env_file"
+      set_env DSH_DESIGN_TLS_PORT "$tls_port" "$ENV_FILE"
+      prepare_penpot_data "$compose_dir"
+      prepare_penpot_tls "$compose_dir" "$bind" || warn "Penpot will be reachable over HTTP only"
+      ( cd "$compose_dir" && podman-compose -f "$compose_file" up -d ) || die "podman-compose failed for $name"
+      component_ufw "$port" "$(basename "$compose_dir")"
+      set_env "$flag" 1 "$ENV_FILE"
+      # The agent calls design/penpot.mjs from inside the runtime, so the
+      # runtime environment needs the API root and the token.
+      set_env PENPOT_ENABLED 1 "$ENV_FILE"
+      local plugin_ref
+      plugin_ref="$(node -e 'const p = require("./plugins.json").plugins["dsh-penpot-plugin"]; process.stdout.write(p.spec ?? p.ref ?? "")' 2>/dev/null || true)"
+      if [ -n "$plugin_ref" ]; then set_env PENPOT_PLUGIN_REF "$plugin_ref" "$ENV_FILE"; fi
+      set_env PENPOT_API_URL "http://$bind:$port" "$ENV_FILE"
+      # The token is asked on every interactive enable/configure: a stored one
+      # is the default, so Enter keeps it; a first start has none yet.
+      local token
+      token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
+      [ -n "$token" ] || token="$(env_get PENPOT_ACCESS_TOKEN)"
+      PENPOT_ACCESS_TOKEN="$token"
+      ask_penpot_token
+      token="${PENPOT_ACCESS_TOKEN:-}"
+      if [ -n "$token" ]; then
+        set_env PENPOT_ACCESS_TOKEN "$token" "$env_file"
+        set_env PENPOT_ACCESS_TOKEN "$token" "$ENV_FILE"
+      fi
+      log "restarting the runtime so the tools appear"
+      restart_runtime || warn "could not restart the runtime"
+      ;;
+    disable)
+      log "stopping $name (data stays in $compose_dir/data)"
+      ( cd "$compose_dir" && podman-compose -f "$compose_file" down ) || warn "podman-compose down failed"
+      set_env "$flag" 0 "$ENV_FILE"
+      set_env PENPOT_ENABLED 0 "$ENV_FILE"
+      set_env PENPOT_ACCESS_TOKEN "" "$ENV_FILE"
+      log "restarting the runtime so the tools disappear"
+      restart_runtime || warn "could not restart the runtime"
+      ;;
+  esac
+
+  local codes
+  codes="$(component_field "$name" health.codes | tr ',' ' ')"
+  if [ "$action" != disable ]; then
+    # The probe runs from the host against the published address. A failed
+    # probe is advisory — compose already reported the containers up, and a host
+    # firewall may block the path.
+    local probe_url
+    probe_url="$(printf '%s' "$(component_field "$name" health.url)" | sed -e "s/{bind}/$bind/" -e "s/{port}/$port/")"
+    if component_health "$probe_url" "${codes:-200}"; then
+      log "$name is up"
+    else
+      warn "$name containers are up, but $probe_url did not answer — check the port"
+      ( cd "$compose_dir" && podman-compose -f "$compose_file" ps ) 2>/dev/null \
+        | sed 's/^/    /' >&2 || true
+    fi
+    local tls_port_hint
+    tls_port_hint="$(env_get DSH_DESIGN_TLS_PORT)"; [ -n "$tls_port_hint" ] || tls_port_hint=8443
+    if [ -f "$compose_dir/certs/server.crt" ]; then
+      if curl -sk -o /dev/null -m 5 -w '%{http_code}' "https://$bind:$tls_port_hint/" 2>/dev/null | grep -qE '200|302|303|304'; then
+        log "HTTPS front answers on https://$bind:$tls_port_hint/"
+      else
+        warn "the HTTPS front did not answer — check the penpot-tls container"
+      fi
+    fi
+    penpot_tls_hint "$compose_dir" "$bind" "$tls_port_hint"
+  fi
+}
+
+
+dsh_version() {
+  local v
+  v="$(setup_version)"
+  printf '%s\n' "${v%-*}"
+}
+
+setup_version() { tr -d '\n' < VERSION; }
+
+help_for() {
+  case "${1:-}" in
+    install)
+      cat <<'EOF'
+setup.sh install — install or repair the deployment.
+
+  sudo ./setup.sh install
+  sudo ./setup.sh install --check
+  sudo ./setup.sh install --yes --config answers.env
+  sudo ./setup.sh install --design penpot
+
+Options:
+  --design penpot|none   optional Penpot stack (default: ask, else none)
+  --containers podman    rootless Podman for the agent's containers
+  --ref REF              release tag to fetch (default: v<VERSION>)
+  --dir PATH             deployment directory (default: /srv/dsh)
+  --check                print the plan, change nothing
+  --yes, -y              unattended, all defaults
+  --config FILE          answers from a file (see install.example.env)
+  --no-deps              do not install Node/Podman; fail with the command to run
+  --rotate-key           replace the provider key
+  --clean-source         remove the bootstrap download after install
+
+Running it again is a repair: stored answers are the defaults, secrets are kept,
+and the service is restarted once.
+EOF
+      ;;
+    update)
+      cat <<'EOF'
+setup.sh update — move to the newest compatible release.
+
+  ./setup.sh update                 # newest compatible tag
+  ./setup.sh update --check         # what would happen, change nothing
+  ./setup.sh update --to v0.2.1-rc.5-0.13.8
+  ./setup.sh update --allow-incompatible
+
+Options:
+  --to TAG                 exact target (the updater service uses this)
+  --check                  print the target and the commits, change nothing
+  --allow-incompatible     allow a different DSH line or product major
+  --yes, -y                do not ask to apply
+  --dir PATH               deployment directory (default: /srv/dsh)
+
+The update snapshots data/home, checks out the tag, installs DSH, restarts the
+service and rolls back if the health gate fails. Tags are immutable; the
+target must be a descendant of the current tag.
+
+Exit codes: 0 nothing newer or applied, 1 error, 2  a newer tag exists (--check).
+EOF
+      ;;
+    status)
+      cat <<'EOF'
+setup.sh status — the deployment at a glance.
+
+  ./setup.sh status
+
+Prints the setup and DSH versions, the service and updater states, the web
+answer, the installed Telegram adapter version, and the firewall hint.
+EOF
+      ;;
+    doctor)
+      cat <<'EOF'
+setup.sh doctor — check the deployment.
+
+  ./setup.sh doctor
+  sudo ./setup.sh doctor --fix
+
+Checks the env file, provider key, stored credential, patch layer, registry,
+instance lock, version, service, web port, design assets, TLS certificate and
+Penpot token. --fix repairs the safe subset and needs root for ownership.
+EOF
+      ;;
+    components)
+      cat <<'EOF'
+setup.sh components — manage the optional design stack.
+
+  ./setup.sh components list
+  sudo ./setup.sh components enable design
+  sudo ./setup.sh components disable design
+  sudo ./setup.sh components port design 8091
+
+The design stack is Penpot on Podman: the runtime, the penpot CLI and the DSH
+plugin. Disable stops the containers and keeps design/data.
+EOF
+      ;;
+    uninstall)
+      cat <<'EOF'
+setup.sh uninstall — remove the services.
+
+  sudo ./setup.sh uninstall
+  sudo ./setup.sh uninstall --check
+  sudo ./setup.sh uninstall --purge
+
+Removes dsh.service, dsh-updater.service and the /usr/local/bin launchers.
+Data, .env and backups stay unless --purge is given. --check prints the plan.
+EOF
+      ;;
+    help|"")
+      usage
+      ;;
+    *)
+      die "no help for '$1' — commands: install, update, status, doctor, components, uninstall"
+      ;;
+  esac
+}
+
+# The commands below share the deployment globals the update path expects.
+set_deployment() {
+  if [ -z "${DIR:-}" ]; then
+    # Run from the deployment when that is where the caller stands; otherwise
+    # fall back to the documented default.
+    if [ -f "$PWD/.env" ]; then DIR="$PWD"; else DIR=/srv/dsh; fi
+  fi
+  DEPLOY_DIR="$(cd "$DIR" 2>/dev/null && pwd -P || printf '%s' "$DIR")"
+  ENV_FILE="$DEPLOY_DIR/.env"
+  NATIVE_DATA="$DEPLOY_DIR/data"
+  BACKUP_DIR="$DEPLOY_DIR/backups"
+  SERVICE_USER="${SERVICE_USER:-dsh}"
+  HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
+}
+
+cmd_help() {
+  if [ $# -eq 0 ]; then usage; else help_for "$1"; fi
+}
+
+
+# --- commands --------------------------------------------------------------
+# One entry point, one vocabulary. `install` is the default so the old habit of
+# running the file with no arguments still does the safe thing; everything else
+# is an explicit verb.
+
+cmd_status() {
+  local json=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) json=1; shift ;;
+      --dir) DIR="${2:?--dir needs a value}"; shift 2 ;;
+      --dir=*) DIR="${1#*=}"; shift ;;
+      -h|--help) help_for status; return 0 ;;
+      *) die "unknown option for status: $1" ;;
+    esac
+  done
+  set_deployment
+  [ -f "$ENV_FILE" ] || die "no $ENV_FILE in $DIR — run setup.sh install first"
+  cd "$DIR" || die "cannot enter $DIR"
+  if [ "$json" = 1 ]; then
+    printf '{"setup":"%s","dsh":"%s","service":"%s","updater":"%s","web":"%s"}\n' \
+      "$(setup_version)" "$(dsh_version)" \
+      "$(systemctl is-active dsh.service 2>/dev/null || echo missing)" \
+      "$(systemctl is-active dsh-updater.service 2>/dev/null || echo missing)" \
+      "$(web_code)"
+    return 0
+  fi
+  status
+}
+
+cmd_doctor() {
+  local fix=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --fix) fix=1; shift ;;
+      --dir) DIR="${2:?--dir needs a value}"; shift 2 ;;
+      --dir=*) DIR="${1#*=}"; shift ;;
+      -h|--help) help_for doctor; return 0 ;;
+      *) die "unknown option for doctor: $1" ;;
+    esac
+  done
+  set_deployment
+  [ -f "$ENV_FILE" ] || die "no $ENV_FILE in $DIR — run setup.sh install first"
+  [ -x "$SETUP_ROOT/scripts/repair.sh" ] || die "scripts/repair.sh is missing — run this from a release checkout"
+  local args=(--dir "$DIR")
+  [ "$fix" = 1 ] && args+=(--fix)
+  exec bash "$SETUP_ROOT/scripts/repair.sh" "${args[@]}"
+}
+
+cmd_components() {
+  local action="${1:-list}" name="" port=""
+  shift || true
+  local verb="$action"
+  case "$action" in
+    list) ;;
+    enable|disable)
+      name="${1:?usage: setup.sh components $action <name> [port]}"; shift || true
+      [ "$action" = enable ] && { port="${1:-}"; shift || true; }
+      ;;
+    configure)
+      action=configure
+      name="${1:?usage: setup.sh components configure <name> [port]}"; shift || true
+      port="${1:-}"; shift || true
+      ;;
+    port|set-port)
+      action=configure
+      name="${1:?usage: setup.sh components port <name> <port>}"; shift || true
+      port="${1:?usage: setup.sh components port <name> <port>}"; shift || true
+      ;;
+    -h|--help) help_for components; return 0 ;;
+    *) name="${1:-}"; shift || true ;;
+  esac
+  set_deployment
+  [ -f "$DIR/components.json" ] || die "no $DIR/components.json — run setup.sh install first"
+  cd "$DIR" || die "cannot enter $DIR"
+  if [ "$action" = list ]; then
+    local n
+    for n in $(component_names); do
+      printf '%s\t%s\n' "$n" "$(component_field "$n" label)"
+    done
+    return 0
+  fi
+  [ -n "$name" ] || die "components $action needs a component name"
+  component_apply "$name" "$action" "$port"
+}
+
+cmd_update() {
+  local check=0 allow=0 to="" yes=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --check) check=1; shift ;;
+      --to) to="${2:?--to needs a tag}"; shift 2 ;;
+      --to=*) to="${1#*=}"; shift ;;
+      --allow-incompatible|--i-know-versions-are-incompatible) allow=1; shift ;;
+      --yes|-y) yes=1; shift ;;
+      --dir) DIR="${2:?--dir needs a value}"; shift 2 ;;
+      --dir=*) DIR="${1#*=}"; shift ;;
+      -h|--help) help_for update; return 0 ;;
+      *) die "unknown option for update: $1 (try setup.sh help update)" ;;
+    esac
+  done
+  set_deployment
+  [ -f "$ENV_FILE" ] || die "no $ENV_FILE in $DIR — run setup.sh install first"
+  cd "$DIR" || die "cannot enter $DIR"
+  ASSUME_YES=$yes
+  if [ "$check" = 1 ]; then
+    self_check "$allow"
+  else
+    self_update "$allow" "$to" "$allow"
+  fi
+}
+
+cmd_uninstall() {
+  local purge=0 check=0 yes=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --purge) purge=1; shift ;;
+      --check) check=1; shift ;;
+      --yes|-y) yes=1; shift ;;
+      --dir) DIR="${2:?--dir needs a value}"; shift 2 ;;
+      --dir=*) DIR="${1#*=}"; shift ;;
+      -h|--help) help_for uninstall; return 0 ;;
+      *) die "unknown option for uninstall: $1" ;;
+    esac
+  done
+  set_deployment
+  PURGE=$purge; CHECK=$check; YES=$yes
+  DIR="$(assert_safe_dir "$DIR")"
+  echo
+  log "uninstall plan"
+  uninstall_plan
+  if [ "$CHECK" = 1 ]; then
+    echo
+    log "check only — nothing was changed"
+    return 0
+  fi
+  if [ "$(id -u)" != 0 ]; then
+    die "removing the systemd units needs root — run with sudo"
+  fi
+  DIR="$(assert_deployment_dir "$DIR")"
+  if [ "$YES" != 1 ]; then
+    can_ask || die "refusing to uninstall without a terminal — add --yes to confirm"
+    printf 'Type "yes" to continue: ' >&2
+    answer="$(read_from_terminal)"
+    [ "$answer" = yes ] || die "cancelled"
+  fi
+  if [ "$PURGE" = 1 ]; then
+    if [ "$YES" != 1 ]; then
+      printf 'Type the deployment path to delete its data (%s): ' "$DIR" >&2
+      answer="$(read_from_terminal)"
+      [ "$answer" = "$DIR" ] || die "path did not match — cancelled"
+    fi
+  fi
+  uninstall_run
+}
+
+[ "$SETUP_SOURCED" = 1 ] && return 0
+
+# Other commands run here; install falls through to the flow below.
+case "$COMMAND" in
+  install) : ;;
+  update)    cmd_update "${COMMAND_ARGS[@]}"; exit $? ;;
+  status)    cmd_status "${COMMAND_ARGS[@]}"; exit $? ;;
+  doctor)    cmd_doctor "${COMMAND_ARGS[@]}"; exit $? ;;
+  components) cmd_components "${COMMAND_ARGS[@]}"; exit $? ;;
+  uninstall) cmd_uninstall "${COMMAND_ARGS[@]}"; exit $? ;;
+  help)      cmd_help "${COMMAND_ARGS[@]}"; exit $? ;;
+  *)         die "unknown command: $COMMAND — run setup.sh help" ;;
+esac
 
 # --- doctor ----------------------------------------------------------------
 # One health check, shared with update.sh, so an install and a repair answer
@@ -1718,7 +2820,7 @@ design_apply() {
   else
     warn "create the first account at https://$DSH_BIND_IP:$tls_port/ (after trusting the CA below)"
     warn "or at http://$DSH_BIND_IP:$DSH_DESIGN_PORT/ then Settings -> Access tokens,"
-    warn "and re-run ./install.sh (or ./update.sh --component design enable) to paste it"
+    warn "and re-run ./setup.sh (or ./update.sh --component design enable) to paste it"
   fi
   penpot_tls_hint "$dir" "$DSH_BIND_IP" "$tls_port"
 }
@@ -1954,7 +3056,7 @@ native_apply() {
   log "waiting for health"
   if ! wait_health 180; then
     journalctl -u dsh.service --no-pager -n 40 2>/dev/null || true
-    die "dsh did not become healthy. The deployment is partially applied and was not rolled back. Fix the cause above, then re-run ./install.sh — it keeps your answers and is safe to repeat. Logs: journalctl -u dsh.service -f"
+    die "dsh did not become healthy. The deployment is partially applied and was not rolled back. Fix the cause above, then re-run ./setup.sh — it keeps your answers and is safe to repeat. Logs: journalctl -u dsh.service -f"
   fi
   design_apply
   # The port is bound now. Say it again only if the plan did not already have:
@@ -1989,7 +3091,7 @@ printf '    update:  /system update setup (Telegram) or ./update.sh --apply (hos
 echo
 if [ -x "$SRC_DIR/scripts/repair.sh" ]; then
   bash "$SRC_DIR/scripts/repair.sh" --dir "$DIR" --fix \
-    || warn "the health check found something above — ./install.sh --doctor"
+    || warn "the health check found something above — ./setup.sh --doctor"
 fi
 
 # --- the download is not the deployment ------------------------------------

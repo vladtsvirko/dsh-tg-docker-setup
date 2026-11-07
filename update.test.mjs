@@ -71,7 +71,7 @@ async function deployment({ env = 'DSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n', bins
 /** Source update.sh in `dir` and run `script`; returns stdout. */
 async function source(dir, script) {
   const file = join(dir, 'probe.sh')
-  await writeFile(file, `set -eu\n. "${join(here, 'update.sh')}"\n${script}\n`)
+  await writeFile(file, `set -eu\n. "${join(here, 'setup.sh')}"\n${script}\n`)
   const bin = join(dir, 'bin')
   const { stdout } = await exec('bash', [file], {
     cwd: dir,
@@ -189,7 +189,7 @@ needsExec('the tag split keeps the DSH part intact', async () => {
 /** A tagged checkout, for the update-policy tests that stop before apply. */
 async function taggedDeployment() {
   const dir = await mkdtemp(join(tmpRoot, 'update-tags-'))
-  await copyFile(join(here, 'update.sh'), join(dir, 'update.sh'))
+  await copyFile(join(here, 'setup.sh'), join(dir, 'setup.sh'))
   await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.4.11\n')
   await writeFile(join(dir, '.env'), [
     'DSH_PORT=4310',
@@ -226,7 +226,7 @@ needsExec('--to refuses a cross-major target without the incompatibility flag', 
     await git('tag', 'v0.2.1-rc.2-1.0.0')
     await git('checkout', '-q', '--detach', 'v0.2.1-rc.2-0.4.11')
 
-    const failure = await exec('bash', [join(dir, 'update.sh'), '--to', 'v0.2.1-rc.2-1.0.0'], {
+    const failure = await exec('bash', [join(dir, 'setup.sh'), 'update', '--to', 'v0.2.1-rc.2-1.0.0'], {
       cwd: dir,
       env: { ...process.env, ASSUME_YES: '1' },
       timeout: 30000,
@@ -261,7 +261,7 @@ needsExec('the native entrypoint runs from the workspace directory', async () =>
 test('verify only reads the log of the current start', () => {
   // Re-reading the unit's whole journal reported a plugin failure from a
   // previous boot, so a healthy update said "verification complained".
-  const source = readFileSync(join(here, 'update.sh'), 'utf8')
+  const source = readFileSync(join(here, 'setup.sh'), 'utf8')
   const verify = source.slice(source.indexOf('verify() {'), source.indexOf('\n}\n', source.indexOf('verify() {')))
   assert.match(verify, /systemctl show -p ActiveEnterTimestamp/)
   assert.match(verify, /journalctl -u dsh\.service --no-pager --since "\$since"/)
@@ -315,7 +315,7 @@ needsExec('ufw_hints stays quiet when the rule exists, ufw is inactive or the bi
 needsExec('--check resolves the target without applying it', async () => {
   const { dir } = await taggedDeployment()
   try {
-    const result = await exec('bash', [join(dir, 'update.sh'), '--check'], { cwd: dir, env: { ...process.env } })
+    const result = await exec('bash', [join(dir, 'setup.sh'), 'update', '--check'], { cwd: dir, env: { ...process.env } })
       .then((r) => ({ code: 0, out: r.stdout + r.stderr }), (error) => ({ code: error.code ?? 1, out: String(error.stdout ?? '') + String(error.stderr ?? '') }))
     assert.equal(result.code, 2, 'a newer compatible tag exits 2')
     assert.match(result.out, /target tag:\s+v0\.2\.1-rc\.2-0\.5\.0/)
@@ -362,7 +362,7 @@ test('the Penpot token prompt warns when the paste is not a 5-part token', async
   try {
     const file = join(dir, 'probe.sh')
     await writeFile(file, `set -eu
-. "${join(here, 'update.sh')}"
+. "${join(here, 'setup.sh')}"
 can_ask() { return 0; }
 read_secret() { printf '%s' "$FAKE"; }
 PENPOT_ACCESS_TOKEN=stored
@@ -378,7 +378,7 @@ printf 'val=[%s]\\n' "$PENPOT_ACCESS_TOKEN"
 })
 
 test('--help works without a deployment and exits 0', async () => {
-  const result = await exec('bash', [join(here, 'update.sh'), '--help'])
+  const result = await exec('bash', [join(here, 'setup.sh'), 'help', 'update'])
     .then((r) => ({ code: 0, out: r.stdout + r.stderr }), (error) => ({ code: error.code ?? 1, out: String(error.stdout ?? '') + String(error.stderr ?? '') }))
   assert.equal(result.code, 0)
   assert.match(result.out, /Exit codes:/)
@@ -386,7 +386,7 @@ test('--help works without a deployment and exits 0', async () => {
 })
 
 test('the apply prompt defaults to yes', async () => {
-  const source = await readFile(join(here, 'update.sh'), 'utf8')
+  const source = await readFile(join(here, 'setup.sh'), 'utf8')
   assert.match(source, /apply\? \[Y\/n\]/)
   assert.doesNotMatch(source, /apply\? \[y\/N\]/)
 })

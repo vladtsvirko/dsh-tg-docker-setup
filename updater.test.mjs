@@ -90,7 +90,7 @@ test('endpoint validates token and returns a job', async () => {
 test('apply runs update.sh and records the result', async () => {
   const repo = await mkdtemp(join(tmpdir(), 'updater-apply-'))
   try {
-    await writeFile(join(repo, 'update.sh'), '#!/usr/bin/env bash\necho building dsh\nsleep 0.2\necho stopping dsh\necho starting dsh\nexit 0\n')
+    await writeFile(join(repo, 'setup.sh'), '#!/usr/bin/env bash\necho building dsh\nsleep 0.2\necho stopping dsh\necho starting dsh\nexit 0\n')
     const app = createUpdater({ repo, token: 'secret', apply: true, tags: async () => tags, current: async () => current, exit: () => {} })
     const { server, base } = await start(app)
     try {
@@ -143,7 +143,7 @@ test('components: catalog, validation and a fixed apply command', async () => {
       },
     }))
     await writeFile(join(dir, '.env'), 'DSH_DESIGN_ENABLED=0\nDSH_DESIGN_PORT=8090\n')
-    await writeFile(join(dir, 'update.sh'), '#!/bin/sh\necho "$*" > "$PWD/component.log"\nexit 0\n', { mode: 0o755 })
+    await writeFile(join(dir, 'setup.sh'), '#!/bin/sh\necho "$*" > "$PWD/component.log"\nexit 0\n', { mode: 0o755 })
 
     const app = createUpdater({ repo: dir, token: 'secret', apply: true, tags: async () => tags, current: async () => current })
     const { server, base } = await start(app)
@@ -178,7 +178,7 @@ test('components: catalog, validation and a fixed apply command', async () => {
         await new Promise((resolve) => setTimeout(resolve, 100))
         ran = await readFile(logFile, 'utf8').catch(() => '')
       }
-      assert.match(ran, /^--component design enable --port 8091/m)
+      assert.match(ran, /^components enable design 8091/m)
 
       const status = await fetch(`${base}/status`, { headers: { authorization: 'Bearer secret' } })
       const job = (await status.json()).job
@@ -209,7 +209,7 @@ test('components: the endpoint runs the real update.sh and wires the runtime', a
 
   const originalPath = process.env.PATH
   try {
-    await copyFile(new URL('./update.sh', import.meta.url), join(repo, 'update.sh'))
+    await copyFile(new URL('./setup.sh', import.meta.url), join(repo, 'setup.sh'))
     await copyFile(new URL('./components.json', import.meta.url), join(repo, 'components.json'))
     await mkdir(join(repo, 'design'), { recursive: true })
     await copyFile(new URL('./design/.env.example', import.meta.url), join(repo, 'design', '.env.example'))
@@ -260,7 +260,7 @@ test('a job that runs past its deadline is killed and reported as failed', async
   try {
     // Ignores SIGTERM's default only in the sense that it never finishes on its
     // own: the updater must kill it, not wait for it.
-    await writeFile(join(repo, 'update.sh'), '#!/usr/bin/env bash\necho building dsh\nsleep 30\n')
+    await writeFile(join(repo, 'setup.sh'), '#!/usr/bin/env bash\necho building dsh\nsleep 30\n')
     const app = createUpdater({
       repo, token: 'secret', apply: true,
       tags: async () => tags, current: async () => current,
@@ -297,7 +297,7 @@ test('a job that runs past its deadline is killed and reported as failed', async
 test('cancel stops a running job and says so', async () => {
   const repo = await mkdtemp(join(tmpdir(), 'updater-cancel-'))
   try {
-    await writeFile(join(repo, 'update.sh'), '#!/usr/bin/env bash\necho building dsh\nsleep 30\n')
+    await writeFile(join(repo, 'setup.sh'), '#!/usr/bin/env bash\necho building dsh\nsleep 30\n')
     const app = createUpdater({
       repo, token: 'secret', apply: true,
       tags: async () => tags, current: async () => current,

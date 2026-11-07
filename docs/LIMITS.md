@@ -33,7 +33,7 @@ runtime.
 These cannot be done through the bot, by design or by physics:
 
 - the deployment checkout: first install, editing `.env`, changing the units;
-- running `update.sh` or `install.sh` from a workspace **inside the runtime** —
+- running `setup.sh update` or `setup.sh` from a workspace **inside the runtime** —
   the service user cannot write the root-owned checkout or restart the unit.
   Node/npm tests and static checks do work there;
 - changing the updater service's unit or the host packages it uses (Node, git,
@@ -77,7 +77,7 @@ it cannot repair a dead bot, a dead updater, or a dead systemd.
 - The updater refuses older targets. It only moves forward.
 - The updater updates the **dsh** service; it does not rewrite its own unit. Its
   code is the checkout it runs, so a unit change needs
-  `sudo ./install.sh --yes`, not an update.
+  `sudo ./setup.sh --yes`, not an update.
 - A crash of the updater during apply is not automatically resumed. The persisted
   `data/update/result.json`, the checkout and the snapshot are the recovery
   inputs.

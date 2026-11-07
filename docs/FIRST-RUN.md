@@ -39,7 +39,7 @@ The last one can be created after the install: the bot prints a one-tap
 ## 1. Install
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/setup.sh | bash
 ```
 
 Run it as your normal user (with `sudo` available) or as root. It fetches the
@@ -51,10 +51,10 @@ on `dsh.service`.
 Want to see the plan without touching the host?
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/install.sh | bash -s -- --check
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/main/setup.sh | bash -s -- --check
 ```
 
-Or from a checkout: `git clone … && cd dsh-tg-docker-setup && ./install.sh`.
+Or from a checkout: `git clone … && cd dsh-tg-docker-setup && ./setup.sh`.
 
 What it sets up that a hand-rolled `dsh` service does not: the updater token
 (`/system update setup` needs it), the agent's git author, the profile repair pass,
@@ -159,18 +159,18 @@ and recovering from a dead runtime. [LIMITS.md](LIMITS.md) is the exact boundary
 
 ```sh
 # what is installed, and is it healthy
-./update.sh --status
-./install.sh --doctor            # add --fix to repair the safe subset
+./setup.sh status
+./setup.sh --doctor            # add --fix to repair the safe subset
 
 # update the whole setup (the bot does this too, via /system update setup)
-./update.sh --check         # what would change
-sudo ./update.sh --apply          # check out, install, health gate, automatic rollback
+./setup.sh update --check         # what would change
+sudo ./setup.sh update          # check out, install, health gate, automatic rollback
 
 # change a setting: edit .env, then restart (the unit re-reads it on start)
 sudo systemctl restart dsh.service
 ```
 
-`update.sh --apply` needs root (`sudo ./update.sh --apply`); it writes the
+`setup.sh update` needs root (`sudo ./setup.sh update`); it writes the
 root-owned checkout and restarts `dsh.service`.
 
 **Add a project.** Create the workspace (`/workspace new <name>`), then clone
@@ -206,7 +206,7 @@ chat.
 | install ended before the summary | `journalctl -u dsh.service -n 100` |
 | web UI loads but reconnects forever | set `DSH_PUBLIC_URL` to the URL you actually open, then `sudo systemctl restart dsh.service` |
 | bot silent | check `ALLOWED_USER_IDS`, privacy mode, and `journalctl -u dsh.service \| grep -i telegram` |
-| model calls fail | `./install.sh --doctor` (a key saved in the web UI can outrank `.env`) |
+| model calls fail | `./setup.sh --doctor` (a key saved in the web UI can outrank `.env`) |
 | an update went wrong | `/system status`, then [UPGRADE.md](UPGRADE.md) |
 
 ## Where to read next

@@ -27,7 +27,7 @@ v0.2.1-rc.5-0.13.8
     feature, and `1.0.0` (or any new major) marks an incompatible change.
   - Never ship a breaking change in the `0.x` line.
 - The tag and `VERSION` must agree; the DSH part is the prefix of `VERSION` and
-  `install.sh` installs `@deepseek-ai/dsh@<DSH part>`. There is no `.env` DSH
+  `setup.sh` installs `@deepseek-ai/dsh@<DSH part>`. There is no `.env` DSH
   pin.
 
 ## Plugin scheme
@@ -92,7 +92,7 @@ Plain semver, one tag per plugin repository:
 | `/system update plugin <name>` | any npm- or GitHub-installed bundle | same as Penpot |
 | `/system restart` | nothing (restarts current state) | trial |
 | `/system rollback` | profile only | does not move the setup checkout or DSH |
-| host `./update.sh --apply` | same as setup update | same health gate |
+| host `./setup.sh update` | same as setup update | same health gate |
 
 Plugin updates and setup updates are independent. A setup release no longer
 forces a connector version, and a connector release no longer needs a setup
@@ -135,7 +135,7 @@ the target must be a descendant of the running tag. Ordering is release-aware
 3. If the release needs newer plugin behaviour, bump that plugin's `minimum` in
    `plugins.json` (and its `spec`/`fallback`). The version must already exist on
    npm.
-4. Run `node --test *.test.mjs`, `bash -n update.sh install.sh entrypoint.sh
+4. Run `node --test *.test.mjs`, `bash -n setup.sh entrypoint.sh
    healthcheck.sh scripts/repair.sh`, `node scripts/check-version.mjs` with
    `GITHUB_REF_NAME=v<VERSION>`, and `node scripts/plugin-preflight.mjs`
    (`--remote` after the npm versions are published and the tags are pushed).

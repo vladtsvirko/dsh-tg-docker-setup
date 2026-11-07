@@ -54,7 +54,7 @@ jobs:
         run: node --test entrypoint.test.mjs
 
       - name: Shell syntax
-        run: bash -n entrypoint.sh healthcheck.sh update.sh install.sh scripts/repair.sh scripts/design-tls.sh
+        run: bash -n setup.sh entrypoint.sh healthcheck.sh scripts/repair.sh scripts/design-tls.sh
 
       - name: Scripts and design stack
         run: |

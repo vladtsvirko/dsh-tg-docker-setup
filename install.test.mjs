@@ -30,7 +30,12 @@ async function install(args, { env = {}, cwd = here } = {}) {
   const scratch = (args.includes('--check') || args.includes('--uninstall')) && !hasTarget
     ? await mkdtemp(join(tmpdir(), 'install-scratch-'))
     : undefined
-  const argv = scratch === undefined ? args : [...args, '--dir', scratch]
+  const command = args.includes('--uninstall') ? 'uninstall'
+    : args.includes('--doctor') ? 'doctor'
+    : args.includes('--status') ? 'status'
+    : 'install'
+  const cleaned = args.filter((arg) => !['--uninstall', '--doctor', '--status'].includes(arg))
+  const argv = scratch === undefined ? cleaned : [...cleaned, '--dir', scratch]
   try {
     // The test process may itself be running under the deployment (the agent's
     // shell inherits the service environment). Strip every deployment key so a
@@ -50,7 +55,7 @@ async function install(args, { env = {}, cwd = here } = {}) {
       if (value === undefined) delete merged[key]
       else merged[key] = value
     }
-    const { stdout, stderr } = await exec('bash', [join(here, 'install.sh'), ...argv], {
+    const { stdout, stderr } = await exec('bash', [join(here, 'setup.sh'), command, ...argv], {
       cwd,
       env: merged,
     })
@@ -167,7 +172,7 @@ test('native plan stays quiet when ufw already allows the port', async () => {
 async function deploy() {
   const dir = await mkdtemp(join(tmpdir(), 'update-status-'))
   const version = (await readFile(join(here, 'VERSION'), 'utf8')).trim()
-  await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
+  await cp(join(here, 'setup.sh'), join(dir, 'setup.sh'))
   await writeFile(join(dir, 'VERSION'), `${version}\n`)
   await writeFile(join(dir, '.env'), 'DSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n')
   return dir
@@ -176,7 +181,7 @@ async function deploy() {
 test('update.sh reports the services and the installed versions', async () => {
   const dir = await deploy()
   try {
-    const { stdout } = await exec('bash', [join(dir, 'update.sh'), '--status'], { timeout: 20000 })
+    const { stdout } = await exec('bash', [join(dir, 'setup.sh'), 'status'], { timeout: 20000 })
     assert.match(stdout, /setup version\s+\S+/)
     assert.match(stdout, /dsh version\s+\S+/)
     assert.match(stdout, /service\s+/)
@@ -221,7 +226,7 @@ test('update.sh --to applies natively: checkout, env, restart, health gate', asy
     return
   }
   try {
-    await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
+    await cp(join(here, 'setup.sh'), join(dir, 'setup.sh'))
     await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.1.18\n')
     await writeFile(join(dir, '.env'), 'DSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n')
     await writeFile(join(dir, 'data'), '')
@@ -258,7 +263,7 @@ test('update.sh --to applies natively: checkout, env, restart, health gate', asy
     await stub(bins, 'curl', 'printf 200')
     await stub(bins, 'runuser', 'while [ "$1" != "--" ]; do shift; done; shift; exec "$@"')
 
-    const { stdout } = await exec('bash', [join(dir, 'update.sh'), '--to', 'v0.2.1-rc.2-0.1.19', '--yes'], {
+    const { stdout } = await exec('bash', [join(dir, 'setup.sh'), 'update', '--to', 'v0.2.1-rc.2-0.1.19', '--yes'], {
       env: { ...process.env, PATH: `${bins}:${process.env.PATH}`, DSH_ENTRYPOINT: join(bins, 'dsh-entrypoint') },
       timeout: 30000,
     })
@@ -298,7 +303,7 @@ test('an unknown design value is refused', async () => {
 test('update.sh --component validates the registry, the action and the port', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'update-component-'))
   try {
-    await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
+    await cp(join(here, 'setup.sh'), join(dir, 'setup.sh'))
     await cp(join(here, 'components.json'), join(dir, 'components.json'))
     await mkdir(join(dir, 'design'), { recursive: true })
     await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
@@ -307,22 +312,22 @@ test('update.sh --component validates the registry, the action and the port', as
 
     const run = async (args) => {
       try {
-        const { stdout, stderr } = await exec('bash', [join(dir, 'update.sh'), ...args], { timeout: 20000 })
+        const { stdout, stderr } = await exec('bash', [join(dir, 'setup.sh'), ...args], { timeout: 20000 })
         return { code: 0, out: stdout + stderr }
       } catch (error) {
         return { code: error.code ?? 1, out: String(error.stdout ?? '') + String(error.stderr ?? '') }
       }
     }
 
-    const unknown = await run(['--component', 'nope', 'enable'])
+    const unknown = await run(['components', 'enable', 'nope'])
     assert.notEqual(unknown.code, 0)
     assert.match(unknown.out, /unknown component: nope/)
 
-    const badAction = await run(['--component', 'design', 'explode'])
+    const badAction = await run(['components', 'explode', 'design'])
     assert.notEqual(badAction.code, 0)
     assert.match(badAction.out, /unknown action: explode/)
 
-    const badPort = await run(['--component', 'design', 'enable', '--port', '80'])
+    const badPort = await run(['components', 'port', 'design', '80'])
     assert.notEqual(badPort.code, 0)
     assert.match(badPort.out, /port must be between 1024 and 65535/)
   } finally {
@@ -343,7 +348,7 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     return
   }
   try {
-    await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
+    await cp(join(here, 'setup.sh'), join(dir, 'setup.sh'))
     await cp(join(here, 'components.json'), join(dir, 'components.json'))
     await cp(join(here, 'plugins.json'), join(dir, 'plugins.json'))
     await mkdir(join(dir, 'design'), { recursive: true })
@@ -356,12 +361,13 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     await stub(bins, 'curl', 'printf 200')
     await stub(bins, 'systemctl', 'exit 0')
 
-    const run = (args) => exec('bash', [join(dir, 'update.sh'), ...args], {
+    const run = (args) => exec('bash', [join(dir, 'setup.sh'), ...args], {
+      cwd: dir,
       env: { ...process.env, PATH: `${bins}:${process.env.PATH}` },
       timeout: 30000,
     })
 
-    await run(['--component', 'design', 'enable', '--port', '8091'])
+    await run(['components', 'enable', 'design', '8091'])
     const designEnv = await readFile(join(dir, 'design', '.env'), 'utf8')
     const mainEnv = await readFile(join(dir, '.env'), 'utf8')
     const log = await readFile(calls, 'utf8')
@@ -375,7 +381,7 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:8091/)
     assert.match(log, /podman-compose -f compose\.yaml up -d/)
 
-    await run(['--component', 'design', 'disable'])
+    await run(['components', 'disable', 'design'])
     const after = await readFile(join(dir, '.env'), 'utf8')
     const log2 = await readFile(calls, 'utf8')
     assert.match(after, /DSH_DESIGN_ENABLED=0/)
@@ -393,7 +399,7 @@ test('enabling the design stack mirrors a stored Penpot token into both env file
   await mkdir(dir, { recursive: true })
   if (!(await canExec(outer))) { await rm(outer, { recursive: true, force: true }); return }
   try {
-    await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
+    await cp(join(here, 'setup.sh'), join(dir, 'setup.sh'))
     await cp(join(here, 'components.json'), join(dir, 'components.json'))
     await cp(join(here, 'plugins.json'), join(dir, 'plugins.json'))
     await mkdir(join(dir, 'design'), { recursive: true })
@@ -405,7 +411,8 @@ test('enabling the design stack mirrors a stored Penpot token into both env file
     await stub(bins, 'curl', 'printf 200')
     await stub(bins, 'systemctl', 'exit 0')
 
-    await exec('bash', [join(dir, 'update.sh'), '--component', 'design', 'enable', '--port', '8095'], {
+    await exec('bash', [join(dir, 'setup.sh'), 'components', 'enable', 'design', '8095'], {
+      cwd: dir,
       env: { ...process.env, PATH: `${bins}:${process.env.PATH}` },
       timeout: 30000,
     })
@@ -426,7 +433,7 @@ test('configuring a stopped stack saves the port and does not start it', async (
   await mkdir(dir, { recursive: true })
   if (!(await canExec(outer))) { await rm(outer, { recursive: true, force: true }); return }
   try {
-    await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
+    await cp(join(here, 'setup.sh'), join(dir, 'setup.sh'))
     await cp(join(here, 'components.json'), join(dir, 'components.json'))
     await mkdir(join(dir, 'design'), { recursive: true })
     await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
@@ -437,7 +444,7 @@ test('configuring a stopped stack saves the port and does not start it', async (
     await stub(bins, 'podman-compose', `echo "podman-compose $*" >> ${calls}; exit 0`)
     await stub(bins, 'curl', 'printf 200')
 
-    const { stdout } = await exec('bash', [join(dir, 'update.sh'), '--component', 'design', 'configure', '--port', '8093'], {
+    const { stdout } = await exec('bash', [join(dir, 'setup.sh'), 'components', 'configure', 'design', '8093'], {
       env: { ...process.env, PATH: `${bins}:${process.env.PATH}` },
       timeout: 30000,
     })
@@ -463,7 +470,7 @@ test('configuring a running stack recreates it on the new port', async () => {
   await mkdir(dir, { recursive: true })
   if (!(await canExec(outer))) { await rm(outer, { recursive: true, force: true }); return }
   try {
-    await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
+    await cp(join(here, 'setup.sh'), join(dir, 'setup.sh'))
     await cp(join(here, 'components.json'), join(dir, 'components.json'))
     await mkdir(join(dir, 'design'), { recursive: true })
     await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
@@ -474,7 +481,7 @@ test('configuring a running stack recreates it on the new port', async () => {
     await stub(bins, 'podman-compose', `echo "podman-compose $*" >> ${calls}; case "$*" in *"ps -q"*) echo abc123 ;; esac; exit 0`)
     await stub(bins, 'curl', 'printf 200')
 
-    const { stdout } = await exec('bash', [join(dir, 'update.sh'), '--component', 'design', 'configure', '--port', '8094'], {
+    const { stdout } = await exec('bash', [join(dir, 'setup.sh'), 'components', 'configure', 'design', '8094'], {
       env: { ...process.env, PATH: `${bins}:${process.env.PATH}` },
       timeout: 30000,
     })
@@ -497,7 +504,7 @@ test('a component whose probe never answers is still considered applied', async 
   await mkdir(dir, { recursive: true })
   if (!(await canExec(outer))) { await rm(outer, { recursive: true, force: true }); return }
   try {
-    await cp(join(here, 'update.sh'), join(dir, 'update.sh'))
+    await cp(join(here, 'setup.sh'), join(dir, 'setup.sh'))
     await cp(join(here, 'components.json'), join(dir, 'components.json'))
     await mkdir(join(dir, 'design'), { recursive: true })
     await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
@@ -508,7 +515,7 @@ test('a component whose probe never answers is still considered applied', async 
     // The probe cannot reach the service (firewall, wrong address): 000.
     await stub(bins, 'curl', 'printf 000')
 
-    const { stdout, stderr } = await exec('bash', [join(dir, 'update.sh'), '--component', 'design', 'enable'], {
+    const { stdout, stderr } = await exec('bash', [join(dir, 'setup.sh'), 'components', 'enable', 'design'], {
       env: { ...process.env, PATH: `${bins}:${process.env.PATH}`, COMPONENT_HEALTH_TIMEOUT: '2' },
       timeout: 30000,
     })
@@ -576,14 +583,14 @@ test('an .env from an older release is repaired, not rejected', async () => {
   }
 })
 
-test('a lone install.sh fetches a release and shows the full plan', async (t) => {
+test('a lone setup.sh fetches a release and shows the full plan', async (t) => {
   // The wget case: one file, no checkout. It clones into a throwaway directory,
   // runs the real installer's --check against the requested target, and leaves
   // the target untouched.
   const lone = await mkdtemp(join(tmpdir(), 'lone-'))
   const target = join(await mkdtemp(join(tmpdir(), 'lone-target-')), 'deployment')
   try {
-    await copyFile(join(here, 'install.sh'), join(lone, 'install.sh'))
+    await copyFile(join(here, 'setup.sh'), join(lone, 'setup.sh'))
     // A tag that exists: VERSION moves before the tag is cut, and the bootstrap
     // can only clone what the repository already has.
     const { stdout: tagList } = await exec('git', ['tag', '--sort=-v:refname'], { cwd: here })
@@ -595,13 +602,13 @@ test('a lone install.sh fetches a release and shows the full plan', async (t) =>
       return
     }
     const version = tag.replace(/^v/, '')
-    const { stdout } = await exec('bash', ['install.sh', '--check', '--ref', tag, '--dir', target], {
+    const { stdout } = await exec('bash', ['setup.sh', '--check', '--ref', 'main', '--dir', target], {
       cwd: lone,
       env: { ...process.env, DSH_SETUP_REPO: here },
       timeout: 120000,
     })
     assert.match(stdout, /the setup is not here — fetching a release first/)
-    assert.match(stdout, /fetching v[^ ]+ to preview the plan/)
+    assert.match(stdout, /fetching main to preview the plan/)
     assert.match(stdout, new RegExp(`version:\\s+${version.replace(/\./g, '\\.')}`))
     assert.match(stdout, /check only — nothing was changed/)
     // The preview runs in a temporary checkout: the target is not created.
@@ -615,8 +622,8 @@ test('a lone install.sh fetches a release and shows the full plan', async (t) =>
 test('the bootstrap help names the one-liner and its options', async () => {
   const lone = await mkdtemp(join(tmpdir(), 'lone-help-'))
   try {
-    await copyFile(join(here, 'install.sh'), join(lone, 'install.sh'))
-    const { stdout } = await exec('bash', ['install.sh', '--help'], { cwd: lone, timeout: 30000 })
+    await copyFile(join(here, 'setup.sh'), join(lone, 'setup.sh'))
+    const { stdout } = await exec('bash', ['setup.sh', '--help'], { cwd: lone, timeout: 30000 })
     assert.match(stdout, /wget -qO-/)
     assert.match(stdout, /--ref REF/)
     assert.match(stdout, /--no-deps/)

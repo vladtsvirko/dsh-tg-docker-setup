@@ -3,8 +3,8 @@
 # Check — and with --fix, repair — a deployed DSH setup.
 #
 # This is the one implementation of "is this deployment healthy, and what is
-# still wrong with it". install.sh runs it at the end of every install/repair,
-# update.sh runs it after every successful self-update, and both expose it as
+# still wrong with it". setup.sh runs it at the end of every install/repair,
+# setup.sh update runs it after every successful self-update, and both expose it as
 # `--doctor`. Keeping it out of both scripts is what makes an install, a repair
 # and an update answer the same questions in the same words.
 #
@@ -27,7 +27,7 @@
 #                     makes an update believe it is somewhere it is not.
 #   service           the unit is the deployment, not the checkout.
 #   web               the port the operator will open, actually listening.
-#   data-owner        a root-owned data directory after a `sudo ./install.sh`
+#   data-owner        a root-owned data directory after a `sudo ./setup.sh`
 #                     run is the classic "cannot write to /data" first boot.
 #
 # Every line is `ok|warn|fix|fail  <check>  <sentence>`, so the output is stable
@@ -481,7 +481,7 @@ check_data_owner() {
 main() {
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   DATA_DIR="$DIR/data"
-  # `sudo ./install.sh` runs this as root; the files it touches belong to the
+  # `sudo ./setup.sh` runs this as root; the files it touches belong to the
   # runtime user, so every repair is chowned afterwards.
   RUNTIME_UID="$(id -u "$SERVICE_USER" 2>/dev/null || echo 0)"
   RUNTIME_GID="$(id -g "$SERVICE_USER" 2>/dev/null || echo 0)"

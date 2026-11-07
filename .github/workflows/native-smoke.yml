@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # update.sh resolves release tags and install.sh fetches them.
+          # setup.sh update resolves release tags and setup.sh fetches them.
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -46,10 +46,10 @@ jobs:
 
       - name: Install this release
         # It installs the release under test (the tag this workflow was triggered
-        # by), then `--tg-connector` below runs the same prepare, restart and health
-        # path an update takes — from the deployment directory, which is where a
+        # by), then the update-path run below exercises the same prepare, restart and
+        # health path an update takes — from the deployment directory, which is where a
         # real one is run.
-        run: sudo -E ./install.sh --config .github/native-answers.env --yes --ref "${{ steps.release.outputs.ref }}"
+        run: sudo -E ./setup.sh --config .github/native-answers.env --yes --ref "${{ steps.release.outputs.ref }}"
 
       - name: Both services are active
         run: |
@@ -69,26 +69,25 @@ jobs:
           sudo journalctl -u dsh.service --no-pager -n 80
           exit 1
 
-      - name: The launcher exists where update.sh looks for it
+      - name: The launcher exists where setup.sh update looks for it
         # The native update path used to run $DEPLOY_DIR/dsh-entrypoint, which no
         # installer creates: every native update failed to prepare and rolled back.
         run: test -x /usr/local/bin/dsh-entrypoint
 
       - name: An update-path run from the deployment directory
-        # `--tg-connector` re-resolves the connector through run_as_service, then
-        # restarts the unit and waits for health — the same steps an update runs,
+        # The update path runs prepare, restarts the unit and waits for health — the same steps an update runs,
         # including the working directory that made prepare fail.
         run: |
           set -o pipefail
-          if ! sudo -E bash -c 'cd /srv/dsh-ci && ASSUME_YES=1 ./update.sh --tg-connector' 2>&1 | tee /tmp/plugin.log; then
-            echo "::error::update.sh --tg-connector failed"; tail -40 /tmp/plugin.log
+          if ! sudo -E bash -c 'cd /srv/dsh-ci && ASSUME_YES=1 ./setup.sh update' 2>&1 | tee /tmp/plugin.log; then
+            echo "::error::setup.sh update failed"; tail -40 /tmp/plugin.log
             sudo journalctl -u dsh.service --no-pager -n 60 || true
             exit 1
           fi
           sudo systemctl is-active --quiet dsh.service
 
       - name: The plan is readable and idempotent
-        run: sudo -E ./install.sh --check --config .github/native-answers.env
+        run: sudo -E ./setup.sh --check --config .github/native-answers.env
 
       - name: The updater answers on loopback only
         run: |
@@ -101,7 +100,7 @@ jobs:
 
       - name: Uninstall removes the units and keeps the data
         run: |
-          sudo -E ./install.sh --uninstall --yes --config .github/native-answers.env
+          sudo -E ./setup.sh --uninstall --yes --config .github/native-answers.env
           if sudo systemctl is-active --quiet dsh.service; then
             echo "dsh.service is still active after uninstall"
             exit 1

@@ -19,22 +19,22 @@ The runtime calls the frontend on its published address
 ## Install
 
 ```sh
-./install.sh --design penpot          # add the stack
-./install.sh --design none            # skip it (the default when unattended)
+./setup.sh --design penpot          # add the stack
+./setup.sh --design none            # skip it (the default when unattended)
 ```
 
-Interactive installs ask once. Re-running `install.sh` later is how you **add it
+Interactive installs ask once. Re-running `setup.sh` later is how you **add it
 afterwards**: the answers already in `.env` are preserved.
 
 The stack always runs on Podman: Penpot has no supported machine install. The
 updater runs it rootful (the Penpot images need normal container networking),
-while the agent's own containers are rootless. `install.sh` skips the stack with
+while the agent's own containers are rootless. `setup.sh` skips the stack with
 a warning when Podman is absent, and the runtime keeps working without it.
 
 ## Firewall
 
 Podman does **not** bypass ufw the way Docker does. When ufw is active, the
-installer (and `update.sh --component design enable`) adds the three rules the
+installer (and `setup.sh components enable design`) adds the three rules the
 stack needs:
 
 ```sh
@@ -50,7 +50,7 @@ container port; without it `localhost` works and the LAN times out. Without the
 bridge rules the containers cannot resolve each other through `aardvark-dns`,
 so the frontend fails with `host not found in upstream "penpot-backend"` and the
 backend with `UnknownHostException: penpot-postgres`. The rules are not removed
-by `install.sh --uninstall`; delete them with `ufw delete` if you remove the
+by `setup.sh --uninstall`; delete them with `ufw delete` if you remove the
 stack.
 
 ## First run
@@ -63,15 +63,15 @@ stack.
    button works. On `http://` the browser clipboard API is unavailable: the
    button errors and the clipboard keeps the previous value, so select the
    token text in the field instead.
-3. The host tools ask for it: `./install.sh`, `./update.sh --apply` and
-   `./update.sh --component design enable` write the token to
+3. The host tools ask for it: `./setup.sh`, `./setup.sh update` and
+   `./setup.sh components enable design` write the token to
    `/srv/dsh/design/.env` and mirror it into `/srv/dsh/.env`. Enter keeps the
    stored token, so a re-run never requires entering it again. The installer
    warns when the value is not a 5-part Penpot token, and `--doctor` probes the
    stored one against the API.
 4. On a first install the stack is not up yet when the prompt appears, so leave
-   it blank; once the account exists, re-run `./update.sh --component design
-   enable` (or `./install.sh`) and paste it. From Telegram, `/system components`
+   it blank; once the account exists, re-run `./setup.sh components design
+   enable` (or `./setup.sh`) and paste it. From Telegram, `/system components`
    → Enable reuses the stored token — the bot never asks for secrets.
 
 ## HTTPS and the token Copy button

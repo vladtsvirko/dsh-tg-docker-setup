@@ -106,7 +106,7 @@ administration, so the deployment token was granted that permission once.
 | Telegram polling, sessions, topics | connector |
 | Penpot RPC and tool schemas | Penpot plugin |
 | Supervised restarts, profile snapshots | setup (`supervisor.mjs`) |
-| Setup checkout, DSH install, health gate | setup (`update.sh`, `updater.mjs`) |
+| Setup checkout, DSH install, health gate | setup (`setup.sh update`, `updater.mjs`) |
 | Plugin tags and compatibility rows | each plugin repository |
 | Recommended pins and floors | setup (`plugins.json`) |
 

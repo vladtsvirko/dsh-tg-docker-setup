@@ -17,7 +17,7 @@ const dsh = match[1]
 const version = (await readFile(new URL('../VERSION', import.meta.url), 'utf8')).trim()
 if (version !== tag) fail(`VERSION is ${version}, tag is ${tag}`)
 
-// The runtime version is the DSH part of VERSION; install.sh derives it and
+// The runtime version is the DSH part of VERSION; setup.sh derives it and
 // installs @deepseek-ai/dsh@$DSH_VERSION. A separate pin would be a second
 // source of truth, so its absence is part of the contract.
 const env = await readFile(new URL('../.env.example', import.meta.url), 'utf8')

@@ -8,12 +8,12 @@ upgrade plan and a short list of decisions for a human — never with an upgrade
 |---|---|
 | Schedule | daily 08:00 Europe/Minsk, DSH session schedule (id `schedule-e995eea8`) |
 | Pinned version | `VERSION` — the prefix before the last `-<major>.<minor>.<patch>` is the DSH part |
-| Installed by | `install.sh` / `update.sh` as `@deepseek-ai/dsh@<DSH part>` |
+| Installed by | `setup.sh` / `setup.sh update` as `@deepseek-ai/dsh@<DSH part>` |
 | Report | the chat message with the upgrade plan; no files are written |
 | No-op | pinned == newest RC → say so in one line, write nothing |
 
 `VERSION` is `<dsh>-<product>`: for `0.2.1-rc.5-0.13.8` the DSH part is
-`0.2.1-rc.5`. `install.sh` installs exactly that version; there is no separate
+`0.2.1-rc.5`. `setup.sh` installs exactly that version; there is no separate
 pin.
 
 If the schedule is lost (session reset, new host), recreate it from this page:
@@ -125,7 +125,7 @@ Post the answer in the chat, using this skeleton:
 2. **What ships** — table of user-visible changes and whether they touch us.
 3. **Compatibility findings** — verdict first, then the evidence table, then
    residual risks. Separate *breaks* from *annoyances* from *needs UAT*.
-4. **Upgrade plan** — setup tag → `install.sh` / `update.sh` → plugin floors in
+4. **Upgrade plan** — setup tag → `setup.sh` / `setup.sh update` → plugin floors in
    `plugins.json` → checks → rollback, using the release checklist in
    `AGENTS.md`.
 5. **Decisions needed** — only real forks: product scope, model route, policy.

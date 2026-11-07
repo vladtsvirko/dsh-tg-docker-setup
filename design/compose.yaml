@@ -1,6 +1,6 @@
 # Optional design stack: Penpot for design work.
 #
-# Started by install.sh --design penpot (or by re-running install.sh later).
+# Started by setup.sh --design penpot (or by re-running setup.sh later).
 # It is a separate compose project on purpose: it has its own lifecycle, its own
 # data, and it can be removed without touching the runtime.
 #

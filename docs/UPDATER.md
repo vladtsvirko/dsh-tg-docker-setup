@@ -28,7 +28,7 @@ connector (dsh.service, user dsh)
 dsh-updater.service (root, 127.0.0.1:8787)
    ├─ validate token/mode/target
    ├─ send "update started" via Bot API
-   ├─ bash update.sh --to <target>
+   ├─ bash setup.sh update --to <target>
    │    ├─ snapshot data/home + data/supervisor
    │    ├─ checkout target
    │    ├─ install @deepseek-ai/dsh@<DSH part> when it changes
@@ -91,12 +91,12 @@ bump is a break. The product part resets to `0.0.0` on a new DSH alignment.
   `/system update setup --i-know-versions-are-incompatible`; it may cross a DSH
   line or product major.
 - `exact`: the updater's explicit target; must be newer than the current tag,
-  never an older one. The apply step (`update.sh --to`) additionally
+  never an older one. The apply step (`setup.sh update --to`) additionally
   refuses a tag that is not a descendant of the running one.
 - `rollback` mode is deliberately not exposed. A failed health gate rolls back
   automatically; a manual tag rollback is a host operation.
 
-`VERSION` is the setup release: its prefix is the DSH part that `update.sh`
+`VERSION` is the setup release: its prefix is the DSH part that `setup.sh update`
 installs globally. CI checks that `VERSION` and the tag agree. Plugins are
 versioned independently; the entrypoint applies their `plugins.json` floor after
 a setup update but does not force a matching tag — see
@@ -191,7 +191,7 @@ node --test updater.test.mjs
 
 Fake apply (no real dsh):
 
-- a temporary git repo with two tags and a fake `update.sh` that prints
+- a temporary git repo with two tags and a fake `setup.sh update` that prints
   `snapshot/checkout/restart` and exits 0;
 - `POST /update`, then `GET /status` shows `done` and the log tail.
 
@@ -223,7 +223,7 @@ Real stack, disposable setup:
   half-applied checkout; the snapshot and the previous checkout are the recovery
   inputs. A stuck session blocks the drain, not the apply.
 - The updater's **code** is the checkout it runs, but its **unit** is not
-  rewritten by `--apply`. A change to the unit needs `sudo ./install.sh --yes`
+  rewritten by `--apply`. A change to the unit needs `sudo ./setup.sh --yes`
   (idempotent; it keeps `.env`), not an update.
 - A crash of the updater mid-apply is not automatically resumed. `result.json`,
   the checkout and the snapshot are the recovery inputs.
