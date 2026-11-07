@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.1
+
+### Fixed
+
+- **The lone-download test clones a tag, not `main`.** A CI checkout of a tag
+  has no local `main` branch, so the bootstrap test failed there while passing
+  in a developer clone. The test now uses the newest tag, which is what the
+  bootstrap fetches anyway.
+
 ## 0.2.1-rc.5-0.14.0
 
 ### Changed

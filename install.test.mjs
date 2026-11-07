@@ -602,13 +602,13 @@ test('a lone setup.sh fetches a release and shows the full plan', async (t) => {
       return
     }
     const version = tag.replace(/^v/, '')
-    const { stdout } = await exec('bash', ['setup.sh', '--check', '--ref', 'main', '--dir', target], {
+    const { stdout } = await exec('bash', ['setup.sh', '--check', '--ref', tag, '--dir', target], {
       cwd: lone,
       env: { ...process.env, DSH_SETUP_REPO: here },
       timeout: 120000,
     })
     assert.match(stdout, /the setup is not here — fetching a release first/)
-    assert.match(stdout, /fetching main to preview the plan/)
+    assert.match(stdout, /fetching v[^ ]+ to preview the plan/)
     assert.match(stdout, new RegExp(`version:\\s+${version.replace(/\./g, '\\.')}`))
     assert.match(stdout, /check only — nothing was changed/)
     // The preview runs in a temporary checkout: the target is not created.
