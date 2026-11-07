@@ -1,4 +1,4 @@
-# Change report — setup `0.14.1` (and the 0.13.x UAT fixes)
+# Change report — setup `0.14.2` (and the 0.13.x UAT fixes)
 
 Reviewer's summary of the autonomous work: the two host scripts are now one
 `setup.sh` with an explicit command surface, the Penpot stack fixes from the
@@ -6,7 +6,7 @@ UAT are folded in, and the Telegram connector rework is specified but
 deliberately **not** implemented yet (reasoning at the end).
 
 Live deployment at the time of writing: **`0.2.1-rc.5-0.13.3`**. The last
-section is the one action needed to move it to `0.14.1`.
+section is the one action needed to move it to `0.14.2`.
 
 ---
 
@@ -115,6 +115,7 @@ These were found while testing Penpot and are part of the same line:
 | `0.13.8` | `design/certs` traversable so the CA can be `scp`'d |
 | `0.14.0` | one `setup.sh` command surface (this work) |
 | `0.14.1` | CI-only: the lone-download test clones a tag, not `main` |
+| `0.14.2` | `uninstall` and `update` accept `--config` (the smoke workflow drives them from an answers file) |
 
 The HTTPS front makes Penpot's token **Copy** button work (the clipboard API
 needs a secure origin). The CA is generated once under `design/certs/`, the
@@ -132,9 +133,11 @@ update applies it without a component action.
 - `GITHUB_REF_NAME=v$(cat VERSION) node scripts/check-version.mjs` — ok.
 - `node scripts/plugin-preflight.mjs --remote` — connector 0.13.1 and Penpot
   plugin 0.3.1 exist on npm with their tags.
-- CI for `v0.2.1-rc.5-0.14.1` — see the badge/run; the `0.14.0` tag's CI failed
-  only on the lone-download test (fixed in `0.14.1`).
-- Detached-HEAD simulation (`git clone --branch v0.2.1-rc.5-0.14.1`) runs the
+- CI for `v0.2.1-rc.5-0.14.2` — **success**; the Native smoke workflow —
+  **success**. The `0.14.0` tag's CI failed only on the lone-download test
+  (fixed in `0.14.1`), and `0.14.1`'s smoke failed on `uninstall --config`
+  (fixed in `0.14.2`).
+- Detached-HEAD simulation (`git clone --branch v0.2.1-rc.5-0.14.2`) runs the
   installer tests green, which is the CI shape.
 - The TLS sidecar was exercised locally: nginx started with a generated
   certificate and completed a TLS handshake (502 from the absent upstream, as
@@ -152,9 +155,9 @@ The host is still on `0.13.3`. Run:
 /system update setup
 ```
 
-It targets `0.14.1`. The transition is safe:
+It targets `0.14.2`. The transition is safe:
 
-1. the old updater runs the old `update.sh`; it checks out `0.14.1` and restarts
+1. the old updater runs the old `update.sh`; it checks out `0.14.2` and restarts
    `dsh.service`;
 2. the boot installs Penpot plugin `0.3.1` (floor raised) and repairs the
    profile;
@@ -227,8 +230,8 @@ routed through the same handlers, then bump the setup's `plugins.json` floor.
 
 ## 6. Open items / notes
 
-- `0.14.0`'s tag CI is red on the lone-download test; `0.14.1` supersedes it and
-  is the tag to deploy.
+- `0.14.0`'s tag CI and `0.14.1`'s smoke are red for the two test/workflow
+  reasons above; `0.14.2` is the tag to deploy (CI and smoke green).
 - The Penpot images are pinned to `2.18.6`; the running stack is already that
   version, and the reconcile applies the pin on the next `up -d`.
 - `--i-know-versions-are-incompatible` is retained only for the updater's
