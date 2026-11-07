@@ -4,9 +4,9 @@ Three artifacts, two release tracks:
 
 | Artifact | Repository | Version | Released with |
 |---|---|---|---|
-| setup | `dsh-tg-docker-setup` | `0.2.1-rc.5-0.13.3` | DSH, as one tag |
+| setup | `dsh-tg-docker-setup` | `0.2.1-rc.5-0.13.4` | DSH, as one tag |
 | connector | `dsh-telegram-connector` | `0.13.1` | its own tag |
-| Penpot plugin | `dsh-penpot-plugin` | `0.3.0` | its own tag |
+| Penpot plugin | `dsh-penpot-plugin` | `0.3.1` | its own tag |
 
 The setup is released as one unit with DSH. Each plugin is released on its own
 and pinned by the setup's `plugins.json`; plugin tags do not match the setup tag
@@ -16,12 +16,12 @@ and do not have to.
 
 ```
 <dsh-version>-<major>.<minor>.<patch>          tag: v<same>
-v0.2.1-rc.5-0.13.3
+v0.2.1-rc.5-0.13.4
 ```
 
 - **DSH part** (`0.2.1-rc.5`) is the exact DSH release the setup was built and
   tested against. Prerelease suffixes are part of the version.
-- **Product part** (`0.13.3`) is ours.
+- **Product part** (`0.13.4`) is ours.
   - It resets to `0.0.0` when the setup aligns to a new DSH line.
   - `0.x` is the compatible line. A patch is a fix, a minor is a compatible
     feature, and `1.0.0` (or any new major) marks an incompatible change.
@@ -62,9 +62,9 @@ Plain semver, one tag per plugin repository:
       "repository": "vladtsvirko/dsh-telegram-connector"
     },
     "dsh-penpot-plugin": {
-      "spec": "dsh-penpot-plugin@0.3.0",
-      "fallback": "github:vladtsvirko/dsh-penpot-plugin#v0.3.0",
-      "minimum": "0.3.0",
+      "spec": "dsh-penpot-plugin@0.3.1",
+      "fallback": "github:vladtsvirko/dsh-penpot-plugin#v0.3.1",
+      "minimum": "0.3.1",
       "repository": "vladtsvirko/dsh-penpot-plugin"
     }
   }

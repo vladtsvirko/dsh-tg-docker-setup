@@ -52,7 +52,7 @@ services:
     networks: [design]
 
   penpot-backend:
-    image: docker.io/penpotapp/backend:2.18
+    image: docker.io/penpotapp/backend:2.18.6
     restart: unless-stopped
     depends_on:
       penpot-postgres:
@@ -68,7 +68,7 @@ services:
     networks: [design]
 
   penpot-exporter:
-    image: docker.io/penpotapp/exporter:2.18
+    image: docker.io/penpotapp/exporter:2.18.6
     restart: unless-stopped
     depends_on: [penpot-redis]
     environment:
@@ -80,7 +80,7 @@ services:
     networks: [design]
 
   penpot-frontend:
-    image: docker.io/penpotapp/frontend:2.18
+    image: docker.io/penpotapp/frontend:2.18.6
     restart: unless-stopped
     depends_on: [penpot-backend, penpot-exporter]
     environment:

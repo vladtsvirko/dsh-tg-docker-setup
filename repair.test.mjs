@@ -375,6 +375,20 @@ test('a data directory owned by another user is a failure, not a warning', async
   }
 })
 
+test('a Penpot assets directory the containers cannot write is a failure', async () => {
+  // The Penpot images run as uid 1001; podman creates the bind mount as root,
+  // and every export then fails with io-exception. The doctor must name it.
+  const dir = await fixture('docker', { DSH_DESIGN_ENABLED: '1' })
+  try {
+    await mkdir(join(dir, 'design', 'data', 'assets'), { recursive: true })
+    const { code, out } = await run(['--dir', dir])
+    assert.equal(code, 1)
+    assert.match(out, /fail\s+design-assets\s+.*is owned by .*, not 1001:1001/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 // --- the instance marker the entrypoint writes ------------------------------
 // The plugin reads this file to tell "another client in this runtime" from
 // "another runtime over the same data directory", and the doctor reads it to

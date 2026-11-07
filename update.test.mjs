@@ -357,6 +357,26 @@ test('the Penpot token prompt is a no-op without a terminal', async () => {
   }
 })
 
+test('the Penpot token prompt warns when the paste is not a 5-part token', async () => {
+  const dir = await deployment()
+  try {
+    const file = join(dir, 'probe.sh')
+    await writeFile(file, `set -eu
+. "${join(here, 'update.sh')}"
+can_ask() { return 0; }
+read_secret() { printf '%s' "$FAKE"; }
+PENPOT_ACCESS_TOKEN=stored
+FAKE='a.b.c.d' ask_penpot_token
+printf 'val=[%s]\\n' "$PENPOT_ACCESS_TOKEN"
+`)
+    const { stdout, stderr } = await exec('bash', [file], { cwd: dir, env: { ...process.env } })
+    assert.match(stderr, /5 dot-separated parts/)
+    assert.match(stdout, /val=\[a\.b\.c\.d\]/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('--help works without a deployment and exits 0', async () => {
   const result = await exec('bash', [join(here, 'update.sh'), '--help'])
     .then((r) => ({ code: 0, out: r.stdout + r.stderr }), (error) => ({ code: error.code ?? 1, out: String(error.stdout ?? '') + String(error.stderr ?? '') }))

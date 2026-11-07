@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.1-rc.5-0.13.4
+
+### Fixed
+
+- **Penpot export works on a fresh stack.** Podman creates the
+  `design/data/assets` bind mount as root, while the Penpot images run as uid
+  1001, so the backend failed every `export-binfile` with `io-exception` (media
+  writes would fail too). `install.sh`, `update.sh --component design enable`
+  and `--doctor --fix` now create the directory and chown it to 1001; the
+  doctor reports a wrong owner instead of leaving it silent.
+- **The design stack is pinned to Penpot `2.18.6`** instead of the floating
+  `2.18` tag, so a deployment runs the tested release.
+- **A truncated Penpot token is caught at the prompt.** On an `http://` origin
+  the browser has no clipboard API, so Penpot's Copy button fails and the
+  clipboard keeps an older value. The installer now warns when the pasted value
+  is not a 5-part token, and `--doctor` probes the stored token with
+  `get-profile` instead of trusting the file.
+- **The `penpot` CLI asks for JSON and reads Penpot's real export/import.**
+  Penpot answers transit without `Accept: application/json`, and both binfile
+  endpoints are SSE streams; the CLI now matches the plugin.
+
+### Changed
+
+- **The Penpot plugin floor is `0.3.1`.** That release sends the JSON accept
+  header, parses the SSE export/import responses and sends the required
+  `team-id` when searching. `plugins.json` pins it.
+
 ## 0.2.1-rc.5-0.13.3
 
 ### Fixed

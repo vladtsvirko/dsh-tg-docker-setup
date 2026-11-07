@@ -9,9 +9,9 @@
       "repository": "vladtsvirko/dsh-telegram-connector"
     },
     "dsh-penpot-plugin": {
-      "spec": "dsh-penpot-plugin@0.3.0",
-      "fallback": "github:vladtsvirko/dsh-penpot-plugin#v0.3.0",
-      "minimum": "0.3.0",
+      "spec": "dsh-penpot-plugin@0.3.1",
+      "fallback": "github:vladtsvirko/dsh-penpot-plugin#v0.3.1",
+      "minimum": "0.3.1",
       "repository": "vladtsvirko/dsh-penpot-plugin"
     }
   }

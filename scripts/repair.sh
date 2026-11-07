@@ -395,6 +395,53 @@ check_web() {
   fi
 }
 
+# Penpot's containers run as uid 1001 and write assets — including the export
+# tempfile bucket — under design/data/assets. Podman creates a missing bind
+# mount as root, and then every export fails with io-exception.
+check_design_assets() {
+  [ "$(env_get DSH_DESIGN_ENABLED)" = 1 ] || return 0
+  local dir="$DIR/design/data/assets" owner want="1001:1001"
+  [ -d "$dir" ] || return 0
+  owner="$(stat -c '%u:%g' "$dir" 2>/dev/null || true)"
+  [ -n "$owner" ] || return 0
+  if [ "$owner" = "$want" ]; then
+    ok design-assets "$dir is owned by $want (the Penpot containers run as 1001)"
+  elif [ "$FIX" = 1 ] && [ "$(id -u)" = 0 ]; then
+    chown -R "$want" "$dir" 2>/dev/null || true
+    chmod 0775 "$dir" 2>/dev/null || true
+    fixed design-assets "$dir chowned to $want"
+  else
+    fails design-assets "$dir is owned by $owner, not $want — Penpot export and media writes fail; rerun with --fix as root"
+  fi
+}
+
+# A token pasted from the Penpot field can be complete and still be refused (a
+# stale token, a re-created stack). Probe the API instead of trusting the file.
+check_penpot_token() {
+  [ "$(env_get DSH_DESIGN_ENABLED)" = 1 ] || return 0
+  local token url code body
+  token="$(env_last PENPOT_ACCESS_TOKEN)"
+  url="$(env_last PENPOT_API_URL)"
+  if [ -z "$token" ]; then
+    warns penpot-token "no Penpot access token is stored — the design tools stay off until one is set"
+    return 0
+  fi
+  [ -n "$url" ] || return 0
+  code="$(curl -s -o /dev/null -m 3 -w '%{http_code}' "$url/" 2>/dev/null || true)"
+  case "$code" in 200|302|303|304) ;; *) return 0 ;; esac
+  body="$(curl -s -m 5 -X POST "$url/api/rpc/command/get-profile" \
+    -H "Authorization: Token $token" -H 'Accept: application/json' \
+    -H 'Content-Type: application/json' -d '{}' 2>/dev/null || true)"
+  case "$body" in
+    *'"id":"00000000-0000-0000-0000-000000000000"'*)
+      fails penpot-token "the Penpot access token is not accepted — the Copy button fails on http:// origins; select the token in the field and paste it again" ;;
+    *'"id"'*)
+      ok penpot-token "the Penpot access token is accepted" ;;
+    *)
+      warns penpot-token "could not verify the Penpot access token (Penpot answered unexpectedly)" ;;
+  esac
+}
+
 check_data_owner() {
   [ -d "$DATA_DIR" ] || return 0
   local owner want
@@ -428,6 +475,8 @@ main() {
   check_version
   check_service
   check_web
+  check_design_assets
+  check_penpot_token
   check_data_owner
   echo
   if [ "$PROBLEMS" -gt 0 ]; then

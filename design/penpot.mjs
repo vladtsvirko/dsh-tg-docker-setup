@@ -54,6 +54,50 @@ class ApiError extends Error {
 
 class UsageError extends Error {}
 
+/** Penpot's export/import answer as SSE with transit-encoded event data. */
+const decodeTransit = (value) => {
+  if (typeof value === 'string') {
+    if (value.startsWith('~u')) return value.slice(2)
+    if (value.startsWith('~:')) return value.slice(2)
+    return value
+  }
+  if (Array.isArray(value)) return value.map(decodeTransit)
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key.startsWith('~:') ? key.slice(2) : key, decodeTransit(item)]),
+    )
+  }
+  return value
+}
+
+const readSse = async (response) => {
+  const text = await response.text()
+  const events = []
+  for (const block of text.split(/\r?\n\r?\n/)) {
+    let event = 'message'
+    const data = []
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith('event:')) event = line.slice(6).trim()
+      else if (line.startsWith('data:')) data.push(line.slice(5).trim())
+    }
+    if (data.length === 0) continue
+    const raw = data.join('\n')
+    let parsed = raw
+    try {
+      parsed = decodeTransit(JSON.parse(raw))
+    } catch {}
+    events.push({ event, data: parsed })
+  }
+  return events
+}
+
+const lastEnd = (events) => {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (events[index].event === 'end') return events[index].data
+  }
+  return undefined
+}
+
 /** Strip a trailing /api/rpc or slash so callers may paste any form of the URL. */
 export function normalizeBase(url) {
   return url.replace(/\/+$/, '').replace(/\/api\/rpc$/, '')
@@ -63,7 +107,7 @@ export function createClient({ url, token, fetchImpl = globalThis.fetch }) {
   if (typeof url !== 'string' || url.length === 0) throw new UsageError('PENPOT_API_URL is not set')
   if (typeof token !== 'string' || token.length === 0) throw new UsageError('PENPOT_ACCESS_TOKEN is not set')
   const base = normalizeBase(url)
-  const headers = { authorization: `Token ${token}` }
+  const headers = { authorization: `Token ${token}`, accept: 'application/json' }
 
   const rpc = async (command, body = {}) => {
     const response = await fetchImpl(`${base}/api/rpc/command/${command}`, {
@@ -92,15 +136,28 @@ export function createClient({ url, token, fetchImpl = globalThis.fetch }) {
     async files(projectId) {
       return (await rpc('get-project-files', { 'project-id': projectId })).json()
     },
-    async search(query) {
-      return (await rpc('search-files', { 'search-term': query })).json()
+    async search(query, teamId) {
+      if (teamId === undefined) throw new UsageError('search needs a team id (--team) or a visible team')
+      return (await rpc('search-files', { 'team-id': teamId, 'search-term': query })).json()
     },
     async summary(fileId) {
       return (await rpc('get-file-summary', { id: fileId })).json()
     },
     async exportBinfile(fileId) {
-      const response = await rpc('export-binfile', { fileId, includeLibraries: false, embedAssets: true })
-      return new Uint8Array(await response.arrayBuffer())
+      // The endpoint streams SSE and ends with the URL of the exported zip.
+      const response = await rpc('export-binfile', {
+        'file-id': fileId,
+        'include-libraries': false,
+        'embed-assets': true,
+      })
+      const events = await readSse(response)
+      const failure = events.find((event) => event.event === 'error')
+      if (failure !== undefined) throw new ApiError(200, JSON.stringify(failure.data).slice(0, 300))
+      const url = lastEnd(events)
+      if (typeof url !== 'string' || url.length === 0) throw new ApiError(200, 'the export finished without a download URL')
+      const download = await fetchImpl(url)
+      if (!download.ok) throw new ApiError(download.status, `the export download failed (${String(download.status)})`)
+      return new Uint8Array(await download.arrayBuffer())
     },
     async importBinfile({ name, projectId, fileId, path }) {
       const bytes = await readFile(path)
@@ -114,7 +171,12 @@ export function createClient({ url, token, fetchImpl = globalThis.fetch }) {
         const text = await response.text().catch(() => '')
         throw new ApiError(response.status, text.slice(0, 300).trim())
       }
-      return response.json()
+      const events = await readSse(response)
+      const failure = events.find((event) => event.event === 'error')
+      if (failure !== undefined) throw new ApiError(200, JSON.stringify(failure.data).slice(0, 300))
+      const result = lastEnd(events)
+      const first = Array.isArray(result) ? result[0] : result
+      return { id: typeof first === 'string' ? first : undefined }
     },
   }
 }
@@ -180,7 +242,9 @@ export async function main(argv, io = { out: process.stdout.write.bind(process.s
     }
     case 'search': {
       if (positional[0] === undefined) throw new UsageError('search needs a term')
-      printList(await client.search(positional[0]), json, 'files')
+      const teamId = valueOf(rest, '--team') ?? (await client.teams())[0]?.id
+      if (teamId === undefined) throw new UsageError('search needs a team: no team is visible to this account')
+      printList(await client.search(positional[0], teamId), json, 'files')
       return 0
     }
     case 'summary': {

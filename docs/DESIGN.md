@@ -56,11 +56,17 @@ stack.
 
 1. Open `http://<DSH_BIND_IP>:<DSH_DESIGN_PORT>/` and create the first account
    (registration is on; email verification is off, a LAN instance has no SMTP).
-2. Settings → **Access tokens** → create one.
+2. Settings → **Access tokens** → create one. On an `http://` address the
+   browser clipboard API is unavailable, so Penpot's **Copy** button shows an
+   error and copies nothing; select the token text in the field and copy that.
+   (Opening Penpot through an SSH tunnel at `http://localhost:8090` makes the
+   button work, because localhost is a secure origin.)
 3. The host tools ask for it: `./install.sh`, `./update.sh --apply` and
    `./update.sh --component design enable` write the token to
    `/srv/dsh/design/.env` and mirror it into `/srv/dsh/.env`. Enter keeps the
-   stored token, so a re-run never requires entering it again.
+   stored token, so a re-run never requires entering it again. The installer
+   warns when the value is not a 5-part Penpot token, and `--doctor` probes the
+   stored one against the API.
 4. On a first install the stack is not up yet when the prompt appears, so leave
    it blank; once the account exists, re-run `./update.sh --component design
    enable` (or `./install.sh`) and paste it. From Telegram, `/system components`

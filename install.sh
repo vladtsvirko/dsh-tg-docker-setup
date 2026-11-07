@@ -408,7 +408,16 @@ ask_penpot_token() {
   answer="${answer#"${answer%%[![:space:]]*}"}"
   answer="${answer%"${answer##*[![:space:]]}"}"
   answer="${answer#PENPOT_ACCESS_TOKEN=}"
-  if [ -n "$answer" ]; then PENPOT_ACCESS_TOKEN="$answer"; fi
+  if [ -n "$answer" ]; then
+    # A Penpot token is a 5-part JWE. A 4-part value is what the Copy button
+    # leaves in the clipboard on an http:// origin: the browser refuses the
+    # clipboard write (not a secure context) and the previous value stays.
+    case "$answer" in
+      *.*.*.*.*) ;;
+      *) warn "that is not a complete Penpot token (expected 5 dot-separated parts) — on http:// the Copy button cannot use the clipboard; select the token in the field instead" ;;
+    esac
+    PENPOT_ACCESS_TOKEN="$answer"
+  fi
 }
 
 ask_secret() {
@@ -1581,6 +1590,19 @@ wait_health() {
   return 1
 }
 
+# Penpot's images run as uid 1001 and write assets — including the export
+# tempfile bucket — under design/data/assets. Podman creates a missing bind
+# mount as root, and a root-owned directory makes every export fail with
+# io-exception. Create it and hand it to the container user before `up -d`.
+prepare_penpot_data() {
+  local dir="$1"
+  mkdir -p "$dir/data/assets" 2>/dev/null || true
+  if [ "$(id -u)" = 0 ]; then
+    chown -R 1001:1001 "$dir/data/assets" 2>/dev/null || true
+    chmod 0775 "$dir/data/assets" 2>/dev/null || true
+  fi
+}
+
 # Optional Penpot stack. It runs on rootful Podman (the updater's user), while
 # the agent's own containers are rootless. Data lives in design/data and is kept
 # across down/up.
@@ -1632,6 +1654,7 @@ design_apply() {
   fi
 
   log "starting Penpot on Podman (the first start pulls the images)"
+  prepare_penpot_data "$dir"
   ( cd "$dir" && run podman-compose -f compose.yaml up -d ) || die "podman-compose failed for the design stack"
   design_ufw_apply
 

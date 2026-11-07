@@ -28,7 +28,7 @@ const startFake = async (handler) => {
     let body = ''
     request.on('data', (chunk) => { body += chunk.toString('latin1') })
     request.on('end', () => {
-      const call = { url: request.url, auth: request.headers.authorization, type: request.headers['content-type'] ?? '', body }
+      const call = { url: request.url, auth: request.headers.authorization, accept: request.headers.accept ?? '', type: request.headers['content-type'] ?? '', body }
       calls.push(call)
       handler(call, response)
     })
@@ -48,7 +48,7 @@ test('normalizeBase accepts a pasted URL with or without /api/rpc', () => {
   assert.equal(normalizeBase('http://host:8090/api/rpc/'), 'http://host:8090')
 })
 
-test('whoami posts to the RPC endpoint with a token header', async () => {
+test('whoami posts to the RPC endpoint with a token and a JSON accept header', async () => {
   const { server, base, calls } = await startFake((call, response) => {
     json(response, 200, { id: 'u1', email: 'a@b.c' })
   })
@@ -57,7 +57,20 @@ test('whoami posts to the RPC endpoint with a token header', async () => {
     assert.deepEqual(await client.profile(), { id: 'u1', email: 'a@b.c' })
     assert.equal(calls[0].url, '/api/rpc/command/get-profile')
     assert.equal(calls[0].auth, 'Token tok')
+    assert.equal(calls[0].accept, 'application/json')
     assert.equal(calls[0].body, '{}')
+  } finally {
+    server.close()
+  }
+})
+
+test('search scopes the request to a team', async () => {
+  const { server, base, calls } = await startFake((call, response) => json(response, 200, []))
+  try {
+    const client = createClient({ url: base, token: 'tok' })
+    await client.search('chat', 'team-1')
+    assert.equal(calls[0].url, '/api/rpc/command/search-files')
+    assert.deepEqual(JSON.parse(calls[0].body), { 'team-id': 'team-1', 'search-term': 'chat' })
   } finally {
     server.close()
   }
@@ -75,12 +88,18 @@ test('projects sends the team id in kebab-case', async () => {
   }
 })
 
-test('export writes the returned bytes to disk', async () => {
+test('export reads the SSE download URL and fetches the zip', async () => {
+  let downloadUrl = ''
   const { server, base } = await startFake((call, response) => {
-    const payload = Buffer.from('PENPOT-BINFILE')
-    response.writeHead(200, { 'content-type': 'application/octet-stream' })
-    response.end(payload)
+    if (call.url === '/download') {
+      response.writeHead(200, { 'content-type': 'application/zip' })
+      response.end(Buffer.from('PENPOT-BINFILE'))
+      return
+    }
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    response.end(['event: end', `data: ${JSON.stringify(downloadUrl)}`, ''].join('\n'))
   })
+  downloadUrl = `${base}/download`
   const dir = await mkdtemp(join(tmpdir(), 'penpot-export-'))
   try {
     const out = join(dir, 'file.penpot')
@@ -94,15 +113,18 @@ test('export writes the returned bytes to disk', async () => {
   }
 })
 
-test('import posts a multipart body with the file and the ids', async () => {
-  const { server, base, calls } = await startFake((call, response) => json(response, 200, { id: 'file-2' }))
+test('import posts a multipart body and reads the SSE file id', async () => {
+  const { server, base, calls } = await startFake((call, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    response.end('event: end\ndata: ["~u00000000-0000-0000-0000-000000000002"]\n\n')
+  })
   const dir = await mkdtemp(join(tmpdir(), 'penpot-import-'))
   try {
     const path = join(dir, 'x.penpot')
     await writeFile(path, 'zipbytes')
     const client = createClient({ url: base, token: 'tok' })
     const result = await client.importBinfile({ path, name: 'Design', projectId: 'proj-1', fileId: 'file-3' })
-    assert.equal(result.id, 'file-2')
+    assert.equal(result.id, '00000000-0000-0000-0000-000000000002')
     assert.match(calls[0].type, /^multipart\/form-data; boundary=/)
     assert.match(calls[0].body, /name="project-id"/)
     assert.match(calls[0].body, /proj-1/)
