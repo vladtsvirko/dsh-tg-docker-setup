@@ -44,6 +44,9 @@ jobs:
       - name: Penpot CLI tests
         run: node --test penpot.test.mjs
 
+      - name: Design TLS tests
+        run: node --test tls.test.mjs
+
       - name: Plugin catalog and version-policy tests
         run: node --test plugins.test.mjs
 
@@ -51,7 +54,7 @@ jobs:
         run: node --test entrypoint.test.mjs
 
       - name: Shell syntax
-        run: bash -n entrypoint.sh healthcheck.sh update.sh install.sh scripts/repair.sh
+        run: bash -n entrypoint.sh healthcheck.sh update.sh install.sh scripts/repair.sh scripts/design-tls.sh
 
       - name: Scripts and design stack
         run: |
