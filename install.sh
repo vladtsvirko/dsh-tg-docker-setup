@@ -218,6 +218,7 @@ CONTAINERS="${CONTAINERS:-}"
 DSH_UPDATER_TOKEN="${DSH_UPDATER_TOKEN:-}"
 DESIGN="${DESIGN:-}"
 DSH_DESIGN_PORT="${DSH_DESIGN_PORT:-}"
+DSH_DESIGN_TLS_PORT="${DSH_DESIGN_TLS_PORT:-}"
 PENPOT_ACCESS_TOKEN="${PENPOT_ACCESS_TOKEN:-}"
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -268,7 +269,7 @@ EOF
 # --- answers from a file ---------------------------------------------------
 # Strict KEY=VALUE parsing: no sourcing, so a config file cannot execute code.
 CONFIG_KEYS="CONTAINERS DIR SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PROVIDER DSH_MODEL DSH_RESOURCE_PERCENT
-DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT PROVIDER_KEY
+DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT DSH_DESIGN_TLS_PORT PROVIDER_KEY
 PENPOT_ACCESS_TOKEN DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN GIT_HOST
 GIT_AUTH GIT_KEY GIT_KNOWN_HOSTS GIT_PROFILES_FILE"
 load_config() {
@@ -672,7 +673,10 @@ design_ufw_apply() {
   fi
   ufw allow from "$cidr" to any port "$DSH_DESIGN_PORT" proto tcp >/dev/null 2>&1 \
     || warn "ufw: could not allow $DSH_DESIGN_PORT from $cidr"
-  log "ufw: allowed the Podman bridge $iface, $lan_if → $iface and port $DSH_DESIGN_PORT from $cidr"
+  local tls_port="${DSH_DESIGN_TLS_PORT:-8443}"
+  ufw allow from "$cidr" to any port "$tls_port" proto tcp >/dev/null 2>&1 \
+    || warn "ufw: could not allow $tls_port from $cidr"
+  log "ufw: allowed the Podman bridge $iface, $lan_if → $iface and ports $DSH_DESIGN_PORT/$tls_port from $cidr"
 }
 
 # --- firewall advisory ------------------------------------------------------
@@ -1009,7 +1013,7 @@ fi
 # Defaults apply after the existing .env, so a repair keeps the deployed values.
 [ -n "$DSH_PORT" ] || DSH_PORT=4310
 [ -n "$DESIGN" ] || DESIGN=none
-[ "$DESIGN" = penpot ] && { [ -n "$DSH_DESIGN_PORT" ] || DSH_DESIGN_PORT=8090; }
+[ "$DESIGN" = penpot ] && { [ -n "$DSH_DESIGN_PORT" ] || DSH_DESIGN_PORT=8090; [ -n "$DSH_DESIGN_TLS_PORT" ] || DSH_DESIGN_TLS_PORT=8443; }
 [ -n "$DSH_PROVIDER" ] || DSH_PROVIDER=opencode-go
 
 model_default() {
@@ -1548,6 +1552,7 @@ write_env() {
   set_env CONTAINERS "$CONTAINERS" "$file"
   if [ "$DESIGN" = penpot ]; then
     set_env DSH_DESIGN_PORT "$DSH_DESIGN_PORT" "$file"
+    set_env DSH_DESIGN_TLS_PORT "${DSH_DESIGN_TLS_PORT:-8443}" "$file"
     set_env DSH_DESIGN_ENABLED 1 "$file"
     set_env PENPOT_ENABLED 1 "$file"
     local catalog="$DIR/plugins.json"
@@ -1603,6 +1608,32 @@ prepare_penpot_data() {
   fi
 }
 
+# A self-signed CA plus a server certificate for the bind address. The CA is
+# what the operator trusts once; the HTTPS sidecar is what makes Penpot's token
+# Copy button work, because the clipboard API needs a secure origin.
+prepare_penpot_tls() {
+  local dir="$1" bind="$2"
+  local script="$SRC_DIR/scripts/design-tls.sh"
+  [ -f "$script" ] || { warn "scripts/design-tls.sh is missing — the HTTPS front is skipped"; return 1; }
+  bash "$script" "$dir" "$bind" >/dev/null
+}
+
+# Printed once after the stack is up. The browser warning is only gone after the
+# CA is trusted on the machine that runs the browser, so the instructions are
+# per-OS and include how to get the file off the host.
+penpot_tls_hint() {
+  local dir="$1" bind="$2" port="$3" ca
+  ca="$dir/certs/ca.crt"
+  [ -f "$ca" ] || return 0
+  log "Penpot UI over HTTPS: https://$bind:$port/ (the agent keeps using http://$bind:$DSH_DESIGN_PORT/)"
+  log "Trust the local CA once — it removes the browser warning and enables the token Copy button:"
+  log "  macOS:   sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain $ca"
+  log "  Windows: certutil -addstore -f \"ROOT\" $ca"
+  log "  Linux:   sudo cp $ca /usr/local/share/ca-certificates/dsh-penpot-ca.crt && sudo update-ca-certificates"
+  log "  Firefox keeps its own store: Settings -> Privacy & Security -> Certificates -> Authorities -> Import"
+  log "  copy the CA off the host: scp <you>@$bind:$ca ~/Downloads/dsh-penpot-ca.crt"
+}
+
 # Optional Penpot stack. It runs on rootful Podman (the updater's user), while
 # the agent's own containers are rootless. Data lives in design/data and is kept
 # across down/up.
@@ -1628,6 +1659,7 @@ design_apply() {
   fi
   set_env DSH_BIND_IP "$DSH_BIND_IP" "$env_file"
   set_env DSH_DESIGN_PORT "$DSH_DESIGN_PORT" "$env_file"
+  set_env DSH_DESIGN_TLS_PORT "${DSH_DESIGN_TLS_PORT:-8443}" "$env_file"
   set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$DIR/.env"
   # The token comes from the interactive prompt (or --config/environment) when
   # one was given; otherwise the stored one is kept. Mirror it into both files
@@ -1655,6 +1687,7 @@ design_apply() {
 
   log "starting Penpot on Podman (the first start pulls the images)"
   prepare_penpot_data "$dir"
+  prepare_penpot_tls "$dir" "$DSH_BIND_IP" || warn "Penpot will be reachable over HTTP only"
   ( cd "$dir" && run podman-compose -f compose.yaml up -d ) || die "podman-compose failed for the design stack"
   design_ufw_apply
 
@@ -1671,12 +1704,23 @@ design_apply() {
     return 1
   fi
 
+  local tls_port="${DSH_DESIGN_TLS_PORT:-8443}"
+  if [ -f "$dir/certs/server.crt" ]; then
+    if curl -sk -o /dev/null -m 5 -w '%{http_code}' "https://$DSH_BIND_IP:$tls_port/" 2>/dev/null | grep -qE '200|302|303|304'; then
+      log "Penpot HTTPS front answers on https://$DSH_BIND_IP:$tls_port/"
+    else
+      warn "the HTTPS front did not answer — check: (cd $dir && podman-compose ps)"
+    fi
+  fi
+
   if [ -n "$token" ]; then
     log "Penpot access token stored — the design tools are enabled"
   else
-    warn "create the first account at http://$DSH_BIND_IP:$DSH_DESIGN_PORT/ then Settings -> Access tokens,"
+    warn "create the first account at https://$DSH_BIND_IP:$tls_port/ (after trusting the CA below)"
+    warn "or at http://$DSH_BIND_IP:$DSH_DESIGN_PORT/ then Settings -> Access tokens,"
     warn "and re-run ./install.sh (or ./update.sh --component design enable) to paste it"
   fi
+  penpot_tls_hint "$dir" "$DSH_BIND_IP" "$tls_port"
 }
 
 # A running deployment is stopped before the units are rewritten: two runtimes

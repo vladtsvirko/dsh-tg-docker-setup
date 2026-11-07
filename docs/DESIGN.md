@@ -42,6 +42,7 @@ ufw allow in on <podman-bridge>
 ufw route allow in on <podman-bridge> out on <podman-bridge>
 ufw route allow in on <LAN-interface> out on <podman-bridge>
 ufw allow from <LAN> to any port <DSH_DESIGN_PORT> proto tcp
+ufw allow from <LAN> to any port <DSH_DESIGN_TLS_PORT> proto tcp
 ```
 
 The LAN-interface route is what lets a remote browser reach the DNAT'd
@@ -54,13 +55,14 @@ stack.
 
 ## First run
 
-1. Open `http://<DSH_BIND_IP>:<DSH_DESIGN_PORT>/` and create the first account
-   (registration is on; email verification is off, a LAN instance has no SMTP).
-2. Settings → **Access tokens** → create one. On an `http://` address the
-   browser clipboard API is unavailable, so Penpot's **Copy** button shows an
-   error and copies nothing; select the token text in the field and copy that.
-   (Opening Penpot through an SSH tunnel at `http://localhost:8090` makes the
-   button work, because localhost is a secure origin.)
+1. Open `https://<DSH_BIND_IP>:<DSH_DESIGN_TLS_PORT>/` after trusting the local
+   CA (next section), or `http://<DSH_BIND_IP>:<DSH_DESIGN_PORT>/`, and create
+   the first account (registration is on; email verification is off, a LAN
+   instance has no SMTP).
+2. Settings → **Access tokens** → create one. On the HTTPS origin the **Copy**
+   button works. On `http://` the browser clipboard API is unavailable: the
+   button errors and the clipboard keeps the previous value, so select the
+   token text in the field instead.
 3. The host tools ask for it: `./install.sh`, `./update.sh --apply` and
    `./update.sh --component design enable` write the token to
    `/srv/dsh/design/.env` and mirror it into `/srv/dsh/.env`. Enter keeps the
@@ -71,6 +73,31 @@ stack.
    it blank; once the account exists, re-run `./update.sh --component design
    enable` (or `./install.sh`) and paste it. From Telegram, `/system components`
    → Enable reuses the stored token — the bot never asks for secrets.
+
+## HTTPS and the token Copy button
+
+Browsers only expose `navigator.clipboard` on a secure origin, so on
+`http://<DSH_BIND_IP>:<DSH_DESIGN_PORT>/` Penpot's **Copy** button cannot write
+to the clipboard. The stack therefore publishes the same frontend over HTTPS on
+`DSH_DESIGN_TLS_PORT` (default `8443`), signed by a local CA generated on first
+use under `design/certs/`. The agent keeps using the HTTP port; only the
+browser needs the HTTPS one.
+
+Trust the CA once on the machine that runs the browser:
+
+- **macOS**: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain /srv/dsh/design/certs/ca.crt`
+- **Windows** (admin): `certutil -addstore -f "ROOT" ca.crt`
+- **Debian/Ubuntu**: `sudo cp ca.crt /usr/local/share/ca-certificates/dsh-penpot-ca.crt && sudo update-ca-certificates`
+- **Firefox** has its own store: Settings → Privacy & Security → Certificates →
+  Authorities → Import.
+
+Copy the CA off the host with `scp` (the installer prints the exact line), then
+open `https://<DSH_BIND_IP>:8443/`: no warning, and the Copy button works.
+
+The CA is kept across updates, so trusting it once is enough. The server
+certificate is re-issued when the bind address changes or before it expires;
+the CA private key stays on the host. `--doctor` reports a missing or stale
+certificate as `design-tls`.
 
 ## Managing it from the control chat
 

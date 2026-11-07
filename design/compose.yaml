@@ -90,5 +90,19 @@ services:
       - "${DSH_BIND_IP:-127.0.0.1}:${DSH_DESIGN_PORT:-8090}:8080"
     networks: [design]
 
+  # HTTPS front for the browser. The clipboard API is only available on a
+  # secure origin, so this is what makes Penpot's token "Copy" button work.
+  # The agent keeps using the plain-HTTP port above.
+  penpot-tls:
+    image: docker.io/library/nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on: [penpot-frontend]
+    volumes:
+      - ./nginx-tls.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/certs:ro
+    ports:
+      - "${DSH_BIND_IP:-127.0.0.1}:${DSH_DESIGN_TLS_PORT:-8443}:8443"
+    networks: [design]
+
 networks:
   design:

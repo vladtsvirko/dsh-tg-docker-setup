@@ -59,6 +59,9 @@ jobs:
           # runs it by path, and a mode bit lost in a release breaks --doctor.
           test -x scripts/repair.sh
           test -x scripts/credentials.mjs
+          # The HTTPS front runs it by path, and the compose mounts both files.
+          test -x scripts/design-tls.sh
+          test -f design/nginx-tls.conf
           # The Penpot stack is the only compose file left.
           cp design/.env.example design/.env
           python3 -c 'import yaml; yaml.safe_load(open("design/compose.yaml"))'

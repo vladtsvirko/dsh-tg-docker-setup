@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.1-rc.5-0.13.6
+
+### Added
+
+- **HTTPS front for Penpot.** The design stack now publishes the frontend over
+  TLS on `DSH_DESIGN_TLS_PORT` (default `8443`), signed by a local CA generated
+  under `design/certs/`. The browser gets a secure origin, so Penpot's token
+  **Copy** button works; trust the CA once and the warning is gone. The agent
+  keeps using the plain-HTTP port. The installer prints the per-OS trust
+  commands, the CA survives updates, and `--doctor` reports a missing or stale
+  certificate as `design-tls`.
+- **Updates reconcile a running design stack.** `update.sh --to` now re-issues
+  the certificate, chowns the assets directory and runs `podman-compose up -d`
+  when the design stack is enabled and running, so a new compose service (this
+  HTTPS front) or a pinned image reaches the deployment without a manual
+  component action.
+
 ## 0.2.1-rc.5-0.13.5
 
 ### Fixed

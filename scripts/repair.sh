@@ -442,10 +442,30 @@ check_penpot_token() {
   esac
 }
 
+# The HTTPS front is what makes Penpot's token Copy button work (the clipboard
+# API needs a secure origin). A missing or stale certificate is advisory: HTTP
+# still serves the app, the button just stays broken.
+check_design_tls() {
+  [ "$(env_get DSH_DESIGN_ENABLED)" = 1 ] || return 0
+  command -v openssl >/dev/null 2>&1 || return 0
+  local ca="$DIR/design/certs/ca.crt" crt="$DIR/design/certs/server.crt" bind
+  bind="$(env_last DSH_BIND_IP)"; bind="${bind:-127.0.0.1}"
+  if [ ! -s "$crt" ] || [ ! -s "$ca" ]; then
+    warns design-tls "no HTTPS certificate in $DIR/design/certs — the browser stays on http:// and the token Copy button stays broken; rerun the design enable"
+    return 0
+  fi
+  if ! openssl x509 -in "$crt" -noout -checkend 604800 >/dev/null 2>&1; then
+    warns design-tls "the HTTPS certificate expires within a week — rerun the design enable to re-issue it"
+  elif ! openssl x509 -in "$crt" -noout -text 2>/dev/null | grep -qF "IP Address:$bind"; then
+    warns design-tls "the HTTPS certificate does not cover $bind — rerun the design enable"
+  else
+    ok design-tls "HTTPS certificate covers $bind (trust $ca once)"
+  fi
+}
+
 check_data_owner() {
   [ -d "$DATA_DIR" ] || return 0
-  local owner want
-  owner="$(stat -c '%u:%g' "$DATA_DIR" 2>/dev/null || true)"
+  local owner want  owner="$(stat -c '%u:%g' "$DATA_DIR" 2>/dev/null || true)"
   [ -n "$owner" ] || return 0
   want="$RUNTIME_UID:$RUNTIME_GID"
   if [ "$owner" = "$want" ]; then
@@ -476,6 +496,7 @@ main() {
   check_service
   check_web
   check_design_assets
+  check_design_tls
   check_penpot_token
   check_data_owner
   echo

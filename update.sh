@@ -391,6 +391,7 @@ native_apply() {
   fi
 
   verify || warn "healthy, but verification complained — inspect: journalctl -u dsh.service"
+  design_reconcile || warn "the design stack was not reconciled — run ./update.sh --component design enable"
   repair_deployment || warn "the update is applied, but the health check found something — ./update.sh --doctor"
   log "done — $target is running (detached HEAD)"
 }
@@ -704,7 +705,11 @@ component_ufw() {
   fi
   ufw allow from "$cidr" to any port "$port" proto tcp >/dev/null 2>&1 \
     || warn "ufw: could not allow $port from $cidr"
-  log "ufw: allowed the Podman bridge $iface, $lan_if → $iface and port $port from $cidr"
+  local tls_port
+  tls_port="$(env_get DSH_DESIGN_TLS_PORT)"; [ -n "$tls_port" ] || tls_port=8443
+  ufw allow from "$cidr" to any port "$tls_port" proto tcp >/dev/null 2>&1 \
+    || warn "ufw: could not allow $tls_port from $cidr"
+  log "ufw: allowed the Podman bridge $iface, $lan_if → $iface and ports $port/$tls_port from $cidr"
 }
 
 # Penpot's images run as uid 1001 and write assets — including the export
@@ -718,6 +723,53 @@ prepare_penpot_data() {
     chown -R 1001:1001 "$dir/data/assets" 2>/dev/null || true
     chmod 0775 "$dir/data/assets" 2>/dev/null || true
   fi
+}
+
+# A self-signed CA plus a server certificate for the bind address. The CA is
+# what the operator trusts once; the HTTPS sidecar is what makes Penpot's token
+# Copy button work, because the clipboard API needs a secure origin.
+prepare_penpot_tls() {
+  local dir="$1" bind="$2"
+  local script="$DEPLOY_DIR/scripts/design-tls.sh"
+  [ -f "$script" ] || { warn "scripts/design-tls.sh is missing — the HTTPS front is skipped"; return 1; }
+  bash "$script" "$dir" "$bind" >/dev/null
+}
+
+penpot_tls_hint() {
+  local dir="$1" bind="$2" port="$3" http_port ca
+  ca="$dir/certs/ca.crt"
+  [ -f "$ca" ] || return 0
+  http_port="$(env_get DSH_DESIGN_PORT)"; [ -n "$http_port" ] || http_port=8090
+  log "Penpot UI over HTTPS: https://$bind:$port/ (the agent keeps using http://$bind:$http_port/)"
+  log "Trust the local CA once — it removes the browser warning and enables the token Copy button:"
+  log "  macOS:   sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain $ca"
+  log "  Windows: certutil -addstore -f \"ROOT\" $ca"
+  log "  Linux:   sudo cp $ca /usr/local/share/ca-certificates/dsh-penpot-ca.crt && sudo update-ca-certificates"
+  log "  Firefox keeps its own store: Settings -> Privacy & Security -> Certificates -> Authorities -> Import"
+  log "  copy the CA off the host: scp <you>@$bind:$ca ~/Downloads/dsh-penpot-ca.crt"
+}
+
+# An update moves the checkout but does not otherwise touch the design stack.
+# Reconcile a running one so a new compose service (the HTTPS front) or a pinned
+# image tag actually reaches the deployment. A stopped stack is left stopped;
+# enabling it is the component action.
+design_reconcile() {
+  [ "$(env_get DESIGN)" = penpot ] || return 0
+  [ "$(env_get PENPOT_ENABLED)" = 1 ] || return 0
+  local dir="$DEPLOY_DIR/design"
+  [ -f "$dir/compose.yaml" ] || return 0
+  component_running "$dir" "$dir/compose.yaml" || return 0
+  local bind tls_port
+  bind="$(env_get DSH_BIND_IP)"; [ -n "$bind" ] || bind=127.0.0.1
+  tls_port="$(sed -n 's/^DSH_DESIGN_TLS_PORT=//p' "$dir/.env" | head -1)"
+  [ -n "$tls_port" ] || tls_port=8443
+  set_env DSH_DESIGN_TLS_PORT "$tls_port" "$dir/.env" 2>/dev/null || true
+  set_env DSH_DESIGN_TLS_PORT "$tls_port" "$ENV_FILE" 2>/dev/null || true
+  prepare_penpot_data "$dir"
+  prepare_penpot_tls "$dir" "$bind" || warn "Penpot HTTPS front skipped (certificate generation failed)"
+  ( cd "$dir" && podman-compose -f compose.yaml up -d ) \
+    || { warn "design stack reconcile failed — run ./update.sh --component design enable"; return 0; }
+  penpot_tls_hint "$dir" "$bind" "$tls_port"
 }
 
 component_apply() {
@@ -778,7 +830,14 @@ component_apply() {
   case "$action" in
     enable|configure)
       log "starting $name on $bind:$port"
+      local tls_port="${DSH_DESIGN_TLS_PORT:-}"
+      [ -n "$tls_port" ] || tls_port="$(sed -n 's/^DSH_DESIGN_TLS_PORT=//p' "$env_file" | head -1)"
+      [ -n "$tls_port" ] || tls_port="$(env_get DSH_DESIGN_TLS_PORT)"
+      [ -n "$tls_port" ] || tls_port=8443
+      set_env DSH_DESIGN_TLS_PORT "$tls_port" "$env_file"
+      set_env DSH_DESIGN_TLS_PORT "$tls_port" "$ENV_FILE"
       prepare_penpot_data "$compose_dir"
+      prepare_penpot_tls "$compose_dir" "$bind" || warn "Penpot will be reachable over HTTP only"
       ( cd "$compose_dir" && podman-compose -f "$compose_file" up -d ) || die "podman-compose failed for $name"
       component_ufw "$port" "$(basename "$compose_dir")"
       set_env "$flag" 1 "$ENV_FILE"
@@ -830,6 +889,16 @@ component_apply() {
       ( cd "$compose_dir" && podman-compose -f "$compose_file" ps ) 2>/dev/null \
         | sed 's/^/    /' >&2 || true
     fi
+    local tls_port_hint
+    tls_port_hint="$(env_get DSH_DESIGN_TLS_PORT)"; [ -n "$tls_port_hint" ] || tls_port_hint=8443
+    if [ -f "$compose_dir/certs/server.crt" ]; then
+      if curl -sk -o /dev/null -m 5 -w '%{http_code}' "https://$bind:$tls_port_hint/" 2>/dev/null | grep -qE '200|302|303|304'; then
+        log "HTTPS front answers on https://$bind:$tls_port_hint/"
+      else
+        warn "the HTTPS front did not answer — check the penpot-tls container"
+      fi
+    fi
+    penpot_tls_hint "$compose_dir" "$bind" "$tls_port_hint"
   fi
 }
 
