@@ -2017,10 +2017,12 @@ cmd_components() {
 }
 
 cmd_update() {
-  local check=0 allow=0 to="" yes=0
+  local check=0 allow=0 to="" yes=0 config=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --check) check=1; shift ;;
+      --config) config="${2:?--config needs a file}"; shift 2 ;;
+      --config=*) config="${1#*=}"; shift ;;
       --to) to="${2:?--to needs a tag}"; shift 2 ;;
       --to=*) to="${1#*=}"; shift ;;
       --allow-incompatible|--i-know-versions-are-incompatible) allow=1; shift ;;
@@ -2031,6 +2033,7 @@ cmd_update() {
       *) die "unknown option for update: $1 (try setup.sh help update)" ;;
     esac
   done
+  [ -n "$config" ] && load_config "$config"
   set_deployment
   [ -f "$ENV_FILE" ] || die "no $ENV_FILE in $DIR — run setup.sh install first"
   cd "$DIR" || die "cannot enter $DIR"
@@ -2043,10 +2046,12 @@ cmd_update() {
 }
 
 cmd_uninstall() {
-  local purge=0 check=0 yes=0
+  local purge=0 check=0 yes=0 config=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --purge) purge=1; shift ;;
+      --config) config="${2:?--config needs a file}"; shift 2 ;;
+      --config=*) config="${1#*=}"; shift ;;
       --check) check=1; shift ;;
       --yes|-y) yes=1; shift ;;
       --dir) DIR="${2:?--dir needs a value}"; shift 2 ;;
@@ -2055,6 +2060,7 @@ cmd_uninstall() {
       *) die "unknown option for uninstall: $1" ;;
     esac
   done
+  [ -n "$config" ] && load_config "$config"
   set_deployment
   PURGE=$purge; CHECK=$check; YES=$yes
   DIR="$(assert_safe_dir "$DIR")"

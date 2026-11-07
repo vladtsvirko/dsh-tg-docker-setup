@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.2
+
+### Fixed
+
+- **`uninstall` and `update` accept `--config`.** The smoke workflow drives
+  both from an answers file; the new commands only parsed `--dir`. The shared
+  `load_config` now runs for them too, so `./setup.sh uninstall --yes --config
+  answers.env` works like the install path.
+
 ## 0.2.1-rc.5-0.14.1
 
 ### Fixed
