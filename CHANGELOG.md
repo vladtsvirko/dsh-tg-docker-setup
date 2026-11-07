@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1-rc.5-0.13.5
+
+### Fixed
+
+- **The doctor's design-assets test no longer assumes a non-1001 runner.**
+  GitHub's runner is uid 1001, the same as the Penpot images, so the new check
+  reported `ok` there and the test expected `fail`. The test now verifies the
+  directory owner and accepts either outcome; the check itself is unchanged.
+
 ## 0.2.1-rc.5-0.13.4
 
 ### Fixed
