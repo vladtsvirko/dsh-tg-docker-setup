@@ -39,11 +39,11 @@ crossing, so an unattended update cannot cross on its own.
 ## Tag convention
 
 Tags match `<dsh>-<major>.<minor>.<patch>`, for example
-`v0.2.1-rc.5-0.13.7`, and the target must be a descendant of the current one:
+`v0.2.1-rc.5-0.13.8`, and the target must be a descendant of the current one:
 
 ```sh
-git tag v0.2.1-rc.5-0.13.7
-git push origin v0.2.1-rc.5-0.13.7
+git tag v0.2.1-rc.5-0.13.8
+git push origin v0.2.1-rc.5-0.13.8
 ```
 
 - Product `0.x` is the compatible line; `1.0.0` marks a break.

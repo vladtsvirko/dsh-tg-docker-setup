@@ -26,7 +26,7 @@ certs="$dir/certs"
 command -v openssl >/dev/null 2>&1 || { printf 'openssl is required for the Penpot TLS certificate\n' >&2; exit 1; }
 
 mkdir -p "$certs"
-chmod 700 "$certs"
+chmod 755 "$certs"
 
 # One CA per deployment. Its key never leaves the host; the certificate is the
 # file the operator installs in the browser's trust store.

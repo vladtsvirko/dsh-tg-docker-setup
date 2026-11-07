@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1-rc.5-0.13.8
+
+### Fixed
+
+- **The CA certificate is readable for `scp`.** `design/certs` is now `0755`
+  (the private keys stay `0600`), so the trust instructions work as the login
+  user instead of requiring sudo just to copy the file off the host.
+
 ## 0.2.1-rc.5-0.13.7
 
 ### Fixed
