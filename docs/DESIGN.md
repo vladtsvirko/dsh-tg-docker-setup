@@ -80,19 +80,30 @@ Browsers only expose `navigator.clipboard` on a secure origin, so on
 `http://<DSH_BIND_IP>:<DSH_DESIGN_PORT>/` Penpot's **Copy** button cannot write
 to the clipboard. The stack therefore publishes the same frontend over HTTPS on
 `DSH_DESIGN_TLS_PORT` (default `8443`), signed by a local CA generated on first
-use under `design/certs/`. The agent keeps using the HTTP port; only the
-browser needs the HTTPS one.
+use under `design/certs/`.
 
-Trust the CA once on the machine that runs the browser:
+The **frontend** is configured with the HTTPS origin (`PENPOT_PUBLIC_URI`), so
+the browser's API calls stay on the origin that served the page. The **backend**
+keeps the HTTP origin: the agent downloads exports from it, and the CLI/plugin
+already speak HTTP.
 
-- **macOS**: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain /srv/dsh/design/certs/ca.crt`
-- **Windows** (admin): `certutil -addstore -f "ROOT" ca.crt`
-- **Debian/Ubuntu**: `sudo cp ca.crt /usr/local/share/ca-certificates/dsh-penpot-ca.crt && sudo update-ca-certificates`
+### Trust the CA once
+
+The CA must be trusted on the machine that runs the browser, not on the host.
+Copy it first, then trust the local file:
+
+```sh
+scp <you>@<DSH_BIND_IP>:/srv/dsh/design/certs/ca.crt ~/Downloads/dsh-penpot-ca.crt
+```
+
+- **macOS**: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/Downloads/dsh-penpot-ca.crt`
+- **Windows** (admin): `certutil -addstore -f "ROOT" %USERPROFILE%\Downloads\dsh-penpot-ca.crt`
+- **Debian/Ubuntu**: `sudo cp ~/Downloads/dsh-penpot-ca.crt /usr/local/share/ca-certificates/dsh-penpot-ca.crt && sudo update-ca-certificates`
 - **Firefox** has its own store: Settings → Privacy & Security → Certificates →
-  Authorities → Import.
+  Authorities → Import — the same downloaded file.
 
-Copy the CA off the host with `scp` (the installer prints the exact line), then
-open `https://<DSH_BIND_IP>:8443/`: no warning, and the Copy button works.
+Then open `https://<DSH_BIND_IP>:8443/`: no warning, and the Copy button works.
+The installer and `setup.sh components enable design` print this same block.
 
 The CA is kept across updates, so trusting it once is enough. The server
 certificate is re-issued when the bind address changes or before it expires;

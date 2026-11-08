@@ -1111,16 +1111,25 @@ prepare_penpot_tls() {
 }
 
 penpot_tls_hint() {
-  local dir="$1" bind="$2" port="$3" ca
+  local dir="$1" bind="$2" port="$3" ca http_port
+  dir="$(cd "$dir" 2>/dev/null && pwd -P || printf '%s' "$dir")"
   ca="$dir/certs/ca.crt"
   [ -f "$ca" ] || return 0
-  log "Penpot UI over HTTPS: https://$bind:$port/ (the agent keeps using http://$bind:$DSH_DESIGN_PORT/)"
-  log "Trust the local CA once — it removes the browser warning and enables the token Copy button:"
-  log "  macOS:   sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain $ca"
-  log "  Windows: certutil -addstore -f \"ROOT\" $ca"
-  log "  Linux:   sudo cp $ca /usr/local/share/ca-certificates/dsh-penpot-ca.crt && sudo update-ca-certificates"
-  log "  Firefox keeps its own store: Settings -> Privacy & Security -> Certificates -> Authorities -> Import"
-  log "  copy the CA off the host: scp <you>@$bind:$ca ~/Downloads/dsh-penpot-ca.crt"
+  http_port="${DSH_DESIGN_PORT:-}"
+  if [ -z "$http_port" ] && [ -n "${ENV_FILE:-}" ]; then
+    http_port="$(env_get DSH_DESIGN_PORT 2>/dev/null || true)"
+  fi
+  [ -n "$http_port" ] || http_port=8090
+  log "Penpot UI over HTTPS: https://$bind:$port/ (the agent keeps using http://$bind:$http_port/)"
+  log "Trust the local CA once — it removes the browser warning and enables the token Copy button."
+  log "Run these on the machine with the browser, not on this host:"
+  log "  1. copy the CA off the host:"
+  log "     scp <you>@$bind:$ca ~/Downloads/dsh-penpot-ca.crt"
+  log "  2. trust the local copy:"
+  log "     macOS:   sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/Downloads/dsh-penpot-ca.crt"
+  log "     Windows: certutil -addstore -f \"ROOT\" %USERPROFILE%\\Downloads\\dsh-penpot-ca.crt"
+  log "     Linux:   sudo cp ~/Downloads/dsh-penpot-ca.crt /usr/local/share/ca-certificates/dsh-penpot-ca.crt && sudo update-ca-certificates"
+  log "     Firefox: Settings -> Privacy & Security -> Certificates -> Authorities -> Import (the same file)"
 }
 
 # --- update path (merged from update.sh) ---
@@ -2732,16 +2741,25 @@ prepare_penpot_tls() {
 # CA is trusted on the machine that runs the browser, so the instructions are
 # per-OS and include how to get the file off the host.
 penpot_tls_hint() {
-  local dir="$1" bind="$2" port="$3" ca
+  local dir="$1" bind="$2" port="$3" ca http_port
+  dir="$(cd "$dir" 2>/dev/null && pwd -P || printf '%s' "$dir")"
   ca="$dir/certs/ca.crt"
   [ -f "$ca" ] || return 0
-  log "Penpot UI over HTTPS: https://$bind:$port/ (the agent keeps using http://$bind:$DSH_DESIGN_PORT/)"
-  log "Trust the local CA once — it removes the browser warning and enables the token Copy button:"
-  log "  macOS:   sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain $ca"
-  log "  Windows: certutil -addstore -f \"ROOT\" $ca"
-  log "  Linux:   sudo cp $ca /usr/local/share/ca-certificates/dsh-penpot-ca.crt && sudo update-ca-certificates"
-  log "  Firefox keeps its own store: Settings -> Privacy & Security -> Certificates -> Authorities -> Import"
-  log "  copy the CA off the host: scp <you>@$bind:$ca ~/Downloads/dsh-penpot-ca.crt"
+  http_port="${DSH_DESIGN_PORT:-}"
+  if [ -z "$http_port" ] && [ -n "${ENV_FILE:-}" ]; then
+    http_port="$(env_get DSH_DESIGN_PORT 2>/dev/null || true)"
+  fi
+  [ -n "$http_port" ] || http_port=8090
+  log "Penpot UI over HTTPS: https://$bind:$port/ (the agent keeps using http://$bind:$http_port/)"
+  log "Trust the local CA once — it removes the browser warning and enables the token Copy button."
+  log "Run these on the machine with the browser, not on this host:"
+  log "  1. copy the CA off the host:"
+  log "     scp <you>@$bind:$ca ~/Downloads/dsh-penpot-ca.crt"
+  log "  2. trust the local copy:"
+  log "     macOS:   sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/Downloads/dsh-penpot-ca.crt"
+  log "     Windows: certutil -addstore -f \"ROOT\" %USERPROFILE%\\Downloads\\dsh-penpot-ca.crt"
+  log "     Linux:   sudo cp ~/Downloads/dsh-penpot-ca.crt /usr/local/share/ca-certificates/dsh-penpot-ca.crt && sudo update-ca-certificates"
+  log "     Firefox: Settings -> Privacy & Security -> Certificates -> Authorities -> Import (the same file)"
 }
 
 # Optional Penpot stack. It runs on rootful Podman (the updater's user), while

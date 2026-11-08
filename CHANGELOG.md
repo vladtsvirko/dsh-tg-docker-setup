@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.6
+
+### Fixed
+
+- **The HTTPS Penpot UI called the HTTP origin.** The frontend's
+  `PENPOT_PUBLIC_URI` was the plain-HTTP address, so the page served on `:8443`
+  fetched `http://…:8090/api/…` and the browser blocked it as mixed content.
+  The frontend now advertises the HTTPS origin; the backend keeps HTTP for the
+  agent's export downloads.
+- **The CA instructions name the right machine and path.** The hint printed a
+  relative `design/certs/ca.crt` and host-side trust commands. It now prints the
+  absolute host path, the `scp` command, and the trust commands to run on the
+  laptop against the downloaded file (Firefox included).
+
 ## 0.2.1-rc.5-0.14.5
 
 ### Fixed

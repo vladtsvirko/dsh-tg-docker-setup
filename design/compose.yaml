@@ -9,6 +9,9 @@
 # Everything is LAN-only: the frontend is published on DSH_BIND_IP, and the
 # runtime reaches it with the `penpot` CLI over that address.
 x-penpot: &penpot
+  # The backend keeps the HTTP origin: the agent downloads exports from it, and
+  # the CLI/plugin already speak HTTP. The frontend overrides this with the
+  # HTTPS origin below, so the browser's API calls stay same-origin on :8443.
   PENPOT_PUBLIC_URI: http://${DSH_BIND_IP:-127.0.0.1}:${DSH_DESIGN_PORT:-8090}
   # Penpot prefixes "jdbc:" to this value, so credentials must NOT be in the
   # URI: PGJDBC would treat "user:password@host" as the hostname. They go in
@@ -85,6 +88,9 @@ services:
     depends_on: [penpot-backend, penpot-exporter]
     environment:
       <<: *penpot
+      # The browser must call the origin it was served from, or the API call is
+      # a cross-origin/mixed-content request from the HTTPS page to HTTP.
+      PENPOT_PUBLIC_URI: https://${DSH_BIND_IP:-127.0.0.1}:${DSH_DESIGN_TLS_PORT:-8443}
     ports:
       # LAN-only. Never 0.0.0.0: the instance has real accounts.
       - "${DSH_BIND_IP:-127.0.0.1}:${DSH_DESIGN_PORT:-8090}:8080"

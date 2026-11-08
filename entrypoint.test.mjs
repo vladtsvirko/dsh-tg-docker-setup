@@ -173,8 +173,12 @@ async function installFake(home, spec) {
 }
 
 function envFor(parts, extra = {}) {
+  // The test process may run inside a live deployment; its plugin overrides
+  // must not leak into the fixture.
+  const clean = { ...process.env }
+  for (const key of ['PENPOT_PLUGIN_REF', 'PENPOT_ENABLED', 'PENPOT_API_URL', 'PENPOT_ACCESS_TOKEN', 'DSH_TELEGRAM_PLUGIN', 'DSH_PLUGIN_TARGET_REF']) delete clean[key]
   return {
-    ...process.env,
+    ...clean,
     HOME: parts.home,
     DSH_HOME: parts.home,
     DSH_WORKSPACE: parts.workspace,
