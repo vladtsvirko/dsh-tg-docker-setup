@@ -337,7 +337,7 @@ test('update.sh --component validates the registry, the action and the port', as
 
 // --- component apply, with Docker stubbed ---------------------------------
 
-test('update.sh --component enable starts the stack, wires the runtime and restarts', async () => {
+test('components enable starts the stack and wires the runtime without restarting it', async () => {
   const outer = await mkdtemp(join(tmpdir(), 'component-apply-'))
   const dir = join(outer, 'repo')
   const bins = join(outer, 'bin')
@@ -359,7 +359,7 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     await mkdir(bins, { recursive: true })
     await stub(bins, 'podman-compose', `echo "podman-compose $*" >> ${calls}; exit 0`)
     await stub(bins, 'curl', 'printf 200')
-    await stub(bins, 'systemctl', 'exit 0')
+    await stub(bins, 'systemctl', `echo "systemctl $*" >> ${calls}; exit 0`)
 
     const run = (args) => exec('bash', [join(dir, 'setup.sh'), ...args], {
       cwd: dir,
@@ -380,6 +380,7 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     assert.match(mainEnv, /PENPOT_PLUGIN_REF=dsh-penpot-plugin@\d+\.\d+\.\d+/)
     assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:8091/)
     assert.match(log, /podman-compose -f compose\.yaml up -d/)
+    assert.doesNotMatch(log, /systemctl restart dsh/)
 
     await run(['components', 'disable', 'design'])
     const after = await readFile(join(dir, '.env'), 'utf8')
@@ -387,6 +388,41 @@ test('update.sh --component enable starts the stack, wires the runtime and resta
     assert.match(after, /DSH_DESIGN_ENABLED=0/)
     assert.match(after, /PENPOT_ENABLED=0/)
     assert.match(log2, /podman-compose -f compose\.yaml down/)
+  } finally {
+    await rm(outer, { recursive: true, force: true })
+  }
+})
+
+test('components enable works standalone, with no DSH deployment', async () => {
+  const outer = await mkdtemp(join(tmpdir(), 'component-standalone-'))
+  const dir = join(outer, 'design-only')
+  const bins = join(outer, 'bin')
+  const calls = join(outer, 'docker.log')
+  await mkdir(dir, { recursive: true })
+  if (!(await canExec(outer))) { await rm(outer, { recursive: true, force: true }); return }
+  try {
+    await cp(join(here, 'setup.sh'), join(dir, 'setup.sh'))
+    await cp(join(here, 'components.json'), join(dir, 'components.json'))
+    await cp(join(here, 'plugins.json'), join(dir, 'plugins.json'))
+    await mkdir(join(dir, 'design'), { recursive: true })
+    await cp(join(here, 'design', '.env.example'), join(dir, 'design', '.env.example'))
+    await writeFile(join(dir, 'VERSION'), '0.2.1-rc.2-0.4.3\n')
+    // No .env at all: this is a design stack without a DSH deployment.
+    await mkdir(bins, { recursive: true })
+    await stub(bins, 'podman-compose', `echo "podman-compose $*" >> ${calls}; exit 0`)
+    await stub(bins, 'curl', 'printf 200')
+    await stub(bins, 'systemctl', `echo "systemctl $*" >> ${calls}; exit 0`)
+
+    const { stdout } = await exec('bash', [join(dir, 'setup.sh'), 'components', '--dir', dir, 'enable', 'design'], {
+      env: { ...process.env, PATH: `${bins}:${process.env.PATH}` },
+      timeout: 30000,
+    })
+    const designEnv = await readFile(join(dir, 'design', '.env'), 'utf8')
+    const log = await readFile(calls, 'utf8')
+    assert.match(designEnv, /DSH_DESIGN_PORT=8090/)
+    assert.match(stdout, /standalone; no DSH deployment/)
+    assert.doesNotMatch(log, /systemctl restart dsh/)
+    await assert.rejects(stat(join(dir, '.env')), 'standalone design must not create a DSH .env')
   } finally {
     await rm(outer, { recursive: true, force: true })
   }

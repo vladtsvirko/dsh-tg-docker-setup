@@ -89,7 +89,9 @@ podman-compose -f compose.yaml down      # data stays in design/data/
 ```
 
 The stack is controlled from the bot with `/components` (Enable /
-Disable / Port); `setup.sh update --component design …` is the host equivalent.
+Disable / Port); `setup.sh components enable|disable|configure design …` is the
+host equivalent. Neither restarts DSH; the Penpot tools load on the next
+runtime start.
 
 ## Why not Docker
 

@@ -1566,14 +1566,18 @@ component_names() {
 }
 
 
-restart_runtime() {
-  systemctl restart dsh.service
-}
-
-
 component_running() {
   local dir=$1 file=$2
   podman-compose --project-directory "$dir" -f "$file" ps -q 2>/dev/null | grep -q .
+}
+
+# The design stack is a separate lifecycle: a directory without a DSH .env is a
+# standalone design install, and the component commands must not write DSH keys
+# or restart a runtime that is not there.
+dsh_deployed() {
+  # The design stack keeps its answers in design/.env; a main .env is the DSH
+  # deployment's own file and is what the runtime reads.
+  [ -f "${ENV_FILE:-}" ]
 }
 
 
@@ -1592,16 +1596,17 @@ component_health() {
 # bypassed ufw, Podman does not. Only called from the root updater path.
 
 component_ufw() {
-  local port=$1 project=$2
+  local port=$1 project=$2 bind=${3:-} tls_port=${4:-}
   command -v ufw >/dev/null 2>&1 || return 0
   ufw_state | head -1 | grep -q 'Status: active' || return 0
   [ "$(id -u)" = 0 ] || return 0
-  local net iface bind cidr
+  local net iface cidr
   net="$(podman network ls --filter "label=io.podman.compose.project=$project" --format '{{.Name}}' 2>/dev/null | head -1)"
   [ -n "$net" ] || return 0
   iface="$(podman network inspect "$net" --format '{{.NetworkInterface}}' 2>/dev/null || true)"
   [ -n "$iface" ] || return 0
-  bind="$(env_get DSH_BIND_IP)"; [ -n "$bind" ] || bind=127.0.0.1
+  [ -n "$bind" ] || bind="$(env_get DSH_BIND_IP 2>/dev/null || true)"
+  [ -n "$bind" ] || bind=127.0.0.1
   cidr="$(lan_network "$bind")"
   local lan_if=""
   lan_if="$(ip -o route get "$bind" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -1)"
@@ -1613,8 +1618,8 @@ component_ufw() {
   fi
   ufw allow from "$cidr" to any port "$port" proto tcp >/dev/null 2>&1 \
     || warn "ufw: could not allow $port from $cidr"
-  local tls_port
-  tls_port="$(env_get DSH_DESIGN_TLS_PORT)"; [ -n "$tls_port" ] || tls_port=8443
+  [ -n "$tls_port" ] || tls_port="$(env_get DSH_DESIGN_TLS_PORT 2>/dev/null || true)"
+  [ -n "$tls_port" ] || tls_port=8443
   ufw allow from "$cidr" to any port "$tls_port" proto tcp >/dev/null 2>&1 \
     || warn "ufw: could not allow $tls_port from $cidr"
   log "ufw: allowed the Podman bridge $iface, $lan_if → $iface and ports $port/$tls_port from $cidr"
@@ -1681,7 +1686,9 @@ component_apply() {
   fi
 
   local bind port_default
-  bind="$(env_get DSH_BIND_IP)"; [ -n "$bind" ] || bind=127.0.0.1
+  bind="$(env_get DSH_BIND_IP 2>/dev/null || true)"
+  [ -n "$bind" ] || bind="$(sed -n 's/^DSH_BIND_IP=//p' "$env_file" | head -1)"
+  [ -n "$bind" ] || bind=127.0.0.1
   port_default="$(component_field "$name" config.port.default)"
   [ -n "$port" ] || port="$(sed -n "s/^$(component_field "$name" config.port.env)=//p" "$env_file" | head -1)"
   [ -n "$port" ] || port="$port_default"
@@ -1708,46 +1715,55 @@ component_apply() {
       log "starting $name on $bind:$port"
       local tls_port="${DSH_DESIGN_TLS_PORT:-}"
       [ -n "$tls_port" ] || tls_port="$(sed -n 's/^DSH_DESIGN_TLS_PORT=//p' "$env_file" | head -1)"
-      [ -n "$tls_port" ] || tls_port="$(env_get DSH_DESIGN_TLS_PORT)"
+      [ -n "$tls_port" ] || tls_port="$(env_get DSH_DESIGN_TLS_PORT 2>/dev/null || true)"
       [ -n "$tls_port" ] || tls_port=8443
       set_env DSH_DESIGN_TLS_PORT "$tls_port" "$env_file"
-      set_env DSH_DESIGN_TLS_PORT "$tls_port" "$ENV_FILE"
       prepare_penpot_data "$compose_dir"
       prepare_penpot_tls "$compose_dir" "$bind" || warn "Penpot will be reachable over HTTP only"
       ( cd "$compose_dir" && podman-compose -f "$compose_file" up -d --force-recreate penpot-frontend penpot-tls ) || die "podman-compose failed for $name"
-      component_ufw "$port" "$(basename "$compose_dir")"
-      set_env "$flag" 1 "$ENV_FILE"
-      # The agent calls design/penpot.mjs from inside the runtime, so the
-      # runtime environment needs the API root and the token.
-      set_env PENPOT_ENABLED 1 "$ENV_FILE"
-      local plugin_ref
-      plugin_ref="$(node -e 'const p = require("./plugins.json").plugins["dsh-penpot-plugin"]; process.stdout.write(p.spec ?? p.ref ?? "")' 2>/dev/null || true)"
-      if [ -n "$plugin_ref" ]; then set_env PENPOT_PLUGIN_REF "$plugin_ref" "$ENV_FILE"; fi
-      set_env PENPOT_API_URL "http://$bind:$port" "$ENV_FILE"
+      component_ufw "$port" "$(basename "$compose_dir")" "$bind" "$tls_port"
+      # The DSH side is a separate lifecycle. A deployment gets the env keys so
+      # the next runtime start loads the plugin; a standalone design install
+      # gets none, and neither path restarts dsh.service here.
+      if dsh_deployed; then
+        set_env DSH_DESIGN_TLS_PORT "$tls_port" "$ENV_FILE"
+        set_env "$flag" 1 "$ENV_FILE"
+        set_env PENPOT_ENABLED 1 "$ENV_FILE"
+        local plugin_ref
+        plugin_ref="$(node -e 'const p = require("./plugins.json").plugins["dsh-penpot-plugin"]; process.stdout.write(p.spec ?? p.ref ?? "")' 2>/dev/null || true)"
+        if [ -n "$plugin_ref" ]; then set_env PENPOT_PLUGIN_REF "$plugin_ref" "$ENV_FILE"; fi
+        set_env PENPOT_API_URL "http://$bind:$port" "$ENV_FILE"
+      fi
       # The token is a stored value, like the other answers: read it from the
       # env/config or keep what the deployment has, never prompt.
       local token
       token="${PENPOT_ACCESS_TOKEN:-}"
       [ -n "$token" ] || token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
-      [ -n "$token" ] || token="$(env_get PENPOT_ACCESS_TOKEN)"
+      [ -n "$token" ] || token="$(env_get PENPOT_ACCESS_TOKEN 2>/dev/null || true)"
       PENPOT_ACCESS_TOKEN="$token"
       if [ -n "$token" ]; then
         set_env PENPOT_ACCESS_TOKEN "$token" "$env_file"
-        set_env PENPOT_ACCESS_TOKEN "$token" "$ENV_FILE"
+        if dsh_deployed; then set_env PENPOT_ACCESS_TOKEN "$token" "$ENV_FILE"; fi
       else
-        warn "no Penpot access token — create one in Penpot (Settings → Access tokens) and set PENPOT_ACCESS_TOKEN in $ENV_FILE"
+        warn "no Penpot access token — create one in Penpot (Settings → Access tokens) and set PENPOT_ACCESS_TOKEN in $env_file"
       fi
-      log "restarting the runtime so the tools appear"
-      restart_runtime || warn "could not restart the runtime"
+      if dsh_deployed; then
+        log "design stack is up — the DSH Penpot tools load on the next dsh.service start (setup.sh install restarts it)"
+      else
+        log "design stack is up (standalone; no DSH deployment in $DIR)"
+      fi
       ;;
     disable)
       log "stopping $name (data stays in $compose_dir/data)"
       ( cd "$compose_dir" && podman-compose -f "$compose_file" down ) || warn "podman-compose down failed"
-      set_env "$flag" 0 "$ENV_FILE"
-      set_env PENPOT_ENABLED 0 "$ENV_FILE"
-      set_env PENPOT_ACCESS_TOKEN "" "$ENV_FILE"
-      log "restarting the runtime so the tools disappear"
-      restart_runtime || warn "could not restart the runtime"
+      if dsh_deployed; then
+        set_env "$flag" 0 "$ENV_FILE"
+        set_env PENPOT_ENABLED 0 "$ENV_FILE"
+        set_env PENPOT_ACCESS_TOKEN "" "$ENV_FILE"
+        log "design stack stopped — the DSH Penpot tools disappear on the next dsh.service start"
+      else
+        log "design stack stopped"
+      fi
       ;;
   esac
 
@@ -1767,7 +1783,7 @@ component_apply() {
         | sed 's/^/    /' >&2 || true
     fi
     local tls_port_hint
-    tls_port_hint="$(env_get DSH_DESIGN_TLS_PORT)"; [ -n "$tls_port_hint" ] || tls_port_hint=8443
+    tls_port_hint="$(env_get DSH_DESIGN_TLS_PORT 2>/dev/null || true)"; [ -n "$tls_port_hint" ] || tls_port_hint=8443
     if [ -f "$compose_dir/certs/server.crt" ]; then
       if curl -sk -o /dev/null -m 5 -w '%{http_code}' "https://$bind:$tls_port_hint/" 2>/dev/null | grep -qE '200|302|303|304'; then
         log "HTTPS front answers on https://$bind:$tls_port_hint/"
@@ -1964,7 +1980,19 @@ cmd_doctor() {
 }
 
 cmd_components() {
-  local action="${1:-list}" name="" port=""
+  local action name="" port=""
+  # The design stack is standalone, so it accepts its own --dir even when the
+  # directory has no DSH .env.
+  local args=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir) DIR="${2:?--dir needs a directory}"; shift 2 ;;
+      --dir=*) DIR="${1#*=}"; shift ;;
+      *) args+=("$1"); shift ;;
+    esac
+  done
+  set -- "${args[@]}"
+  action="${1:-list}"
   shift || true
   local verb="$action"
   case "$action" in

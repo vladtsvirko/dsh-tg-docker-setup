@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.10
+
+### Changed
+
+- **DSH and the design stack have separate lifecycles.** `setup.sh components
+  enable|disable|configure design` manages only the stack: it writes the design
+  env, starts/stops the containers, the TLS sidecar and ufw, and does **not**
+  restart `dsh.service`. The Penpot tools load (or disappear) on the next
+  runtime start; `setup.sh install` still restarts the runtime as part of a
+  repair.
+- **The design stack installs standalone.** `setup.sh components --dir <dir>
+  enable design` works without a DSH `.env`; DSH keys are written only when a
+  deployment is present, and no runtime restart is attempted.
+- **DSH installs without the design stack.** `setup.sh install --design none`
+  (the default) leaves the stack out; `--design penpot` adds it.
+- Connector `0.14.1` matches the behavior in the `/components` card and its help.
+
 ## 0.2.1-rc.5-0.14.9
 
 ### Fixed

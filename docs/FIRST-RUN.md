@@ -138,7 +138,7 @@ a mistake is expensive have buttons:
 | Flow | What you get |
 |---|---|
 | `/dashboard` in the group | **New session** · **Sync** · **Status** · **Sessions** |
-| `/dashboard` in the bot chat | **Status** · **Web link** · **Update setup** · **Restart** · **Plugins** · **Components** |
+| `/menu` in the bot chat | **Status** · **Workspaces** · **Web link** · **Help** · **Update setup** · **Restart** · **Plugins** · **Components** |
 | Trial after a restart / connector update / plugin change | **Commit** and **Roll back**, plus a deadline |
 | `/system update setup` while draining | **Cancel update** (after acceptance, `/system cancel` still stops the job) |
 | `/components` (design stack) | one row per component: Enable/Disable and Port |

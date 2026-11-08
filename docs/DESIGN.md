@@ -122,7 +122,9 @@ certificate as `design-tls`.
 ## Managing it from the control chat
 
 `/components` posts a card with one row per component: Enable / Disable / Port.
-The updater applies the change on the host, restarts the runtime and reports.
+The updater applies the change on the host and reports. Enabling or disabling
+the stack does **not** restart DSH: the Penpot tools load or disappear on the
+next `dsh.service` start (`setup.sh install` restarts it as part of a repair).
 `/components design port 8091` does the same without a tap.
 
 The runtime reaches Penpot at `PENPOT_API_URL=http://<DSH_BIND_IP>:<DSH_DESIGN_PORT>`,
