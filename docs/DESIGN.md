@@ -63,13 +63,23 @@ stack.
    button works. On `http://` the browser clipboard API is unavailable: the
    button errors and the clipboard keeps the previous value, so select the
    token text in the field instead.
-3. Put it where the setup reads it: `PENPOT_ACCESS_TOKEN` in the environment,
-   in the answers file passed with `--config`, or directly in
+3. Put it where the setup reads it: `PENPOT_ACCESS_TOKEN` in the **exported**
+   environment, in the answers file passed with `--config`, or directly in
    `/srv/dsh/design/.env` (and `/srv/dsh/.env`). The setup never prompts — a
    re-run keeps the stored token, and `./setup.sh components enable design`
-   mirrors it into both files. `--doctor` probes the stored token against the
-   API and warns if it is missing, in which case the design tools stay
-   unauthenticated until one is set.
+   mirrors it into both files. A shell variable set with `read` is not visible
+   to `setup.sh` until it is exported:
+
+   ```sh
+   read -rsp 'Penpot access token: ' PENPOT_ACCESS_TOKEN; echo
+   export PENPOT_ACCESS_TOKEN
+   ./setup.sh components enable design
+   unset PENPOT_ACCESS_TOKEN
+   ```
+
+   `--doctor` probes the stored token against the API and warns if it is
+   missing, in which case the design tools stay unauthenticated until one is
+   set.
 4. From Telegram, `/components` → Enable reuses the stored token; the bot never
    asks for secrets.
 

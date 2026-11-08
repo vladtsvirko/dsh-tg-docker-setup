@@ -434,7 +434,7 @@ check_penpot_token() {
     -H 'Content-Type: application/json' -d '{}' 2>/dev/null || true)"
   case "$body" in
     *'"id":"00000000-0000-0000-0000-000000000000"'*)
-      fails penpot-token "the Penpot access token is not accepted — the Copy button fails on http:// origins; select the token in the field and paste it again" ;;
+      fails penpot-token "the stored Penpot access token is not accepted — create one in Penpot (Settings → Access tokens) and set PENPOT_ACCESS_TOKEN (exported) in $DIR/.env" ;;
     *'"id"'*)
       ok penpot-token "the Penpot access token is accepted" ;;
     *)

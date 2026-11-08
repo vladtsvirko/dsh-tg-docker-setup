@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.9
+
+### Fixed
+
+- **The token docs say "exported".** `read -rsp … PENPOT_ACCESS_TOKEN` creates a
+  shell variable; `./setup.sh` runs as a child and never sees it, so the setup
+  kept the stored (possibly revoked) token while the user's own curl worked.
+  The docs now show `export PENPOT_ACCESS_TOKEN` (or the one-line
+  `PENPOT_ACCESS_TOKEN="$…" ./setup.sh …`).
+- The `penpot-token` doctor message no longer blames the HTTP Copy button when
+  the stored value is simply not accepted; it names the settings page and the
+  env file to update.
+
 ## 0.2.1-rc.5-0.14.8
 
 ### Fixed
