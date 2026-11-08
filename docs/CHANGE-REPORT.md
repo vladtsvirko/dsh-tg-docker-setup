@@ -1,4 +1,4 @@
-# Change report — setup `0.14.2` (and the 0.13.x UAT fixes)
+# Change report — setup `0.14.3` (and the 0.13.x UAT fixes)
 
 Reviewer's summary of the autonomous work: the two host scripts are now one
 `setup.sh` with an explicit command surface, the Penpot stack fixes from the
@@ -6,7 +6,7 @@ UAT are folded in, and the Telegram connector rework is specified but
 deliberately **not** implemented yet (reasoning at the end).
 
 Live deployment at the time of writing: **`0.2.1-rc.5-0.13.3`**. The last
-section is the one action needed to move it to `0.14.2`.
+section is the one action needed to move it to `0.14.3`.
 
 ---
 
@@ -116,6 +116,7 @@ These were found while testing Penpot and are part of the same line:
 | `0.14.0` | one `setup.sh` command surface (this work) |
 | `0.14.1` | CI-only: the lone-download test clones a tag, not `main` |
 | `0.14.2` | `uninstall` and `update` accept `--config` (the smoke workflow drives them from an answers file) |
+| `0.14.3` | connector floor `0.14.0` (one command surface); setup pin/minimum raised |
 
 The HTTPS front makes Penpot's token **Copy** button work (the clipboard API
 needs a secure origin). The CA is generated once under `design/certs/`, the
@@ -133,11 +134,10 @@ update applies it without a component action.
 - `GITHUB_REF_NAME=v$(cat VERSION) node scripts/check-version.mjs` — ok.
 - `node scripts/plugin-preflight.mjs --remote` — connector 0.13.1 and Penpot
   plugin 0.3.1 exist on npm with their tags.
-- CI for `v0.2.1-rc.5-0.14.2` — **success**; the Native smoke workflow —
-  **success**. The `0.14.0` tag's CI failed only on the lone-download test
+- CI for `v0.2.1-rc.5-0.14.3` — **success**; Native smoke — **success**. The `0.14.0` tag's CI failed only on the lone-download test
   (fixed in `0.14.1`), and `0.14.1`'s smoke failed on `uninstall --config`
   (fixed in `0.14.2`).
-- Detached-HEAD simulation (`git clone --branch v0.2.1-rc.5-0.14.2`) runs the
+- Detached-HEAD simulation (`git clone --branch v0.2.1-rc.5-0.14.3`) runs the
   installer tests green, which is the CI shape.
 - The TLS sidecar was exercised locally: nginx started with a generated
   certificate and completed a TLS handshake (502 from the absent upstream, as
@@ -155,9 +155,9 @@ The host is still on `0.13.3`. Run:
 /system update setup
 ```
 
-It targets `0.14.2`. The transition is safe:
+It targets `0.14.3`. The transition is safe:
 
-1. the old updater runs the old `update.sh`; it checks out `0.14.2` and restarts
+1. the old updater runs the old `update.sh`; it checks out `0.14.3` and restarts
    `dsh.service`;
 2. the boot installs Penpot plugin `0.3.1` (floor raised) and repairs the
    profile;
@@ -180,58 +180,48 @@ is the normal no-SSH route.
 
 ---
 
-## 5. Telegram connector: proposal, not implemented
+## 5. Telegram connector `0.14.0` (implemented)
 
-The connector (`0.13.1`, ~11.6k lines) works and is heavily tested. A command
-surface rewrite during the setup merge would have mixed two large risks, so I
-reviewed it and left the implementation for a dedicated change. The proposal:
+The proposal was approved and is now implemented in the connector repository:
+**239/239 connector tests pass**, the connector CI is green, and
+`dsh-telegram-connector@0.14.0` is published to npm with the `v0.14.0` tag. The
+setup pins it in `plugins.json` (spec/fallback) and raises the floor to `0.14.0`
+in setup `0.14.3`, so the next boot installs it.
 
-### Current surface
+### The new surface
 
-Three surfaces (control chat, workspace dashboard, session topic), ~40 command
-paths, plus an alias table (`/start`, `/?`, `/help`, `/plugin list|install|rm|del`,
-`/list`, `/list archived`, `/workspace rm`). `/status` and `/system status`
-overlap; `/plugins` and `/plugin` overlap; `/dashboard` is already a button
-card but `/start` still dumps the manual.
+- **`/menu` is the front door.** `/menu` — and `/start` in the bot chat — posts
+  the control card: **Status · Workspaces · Web link · Help · Update setup ·
+  Restart · Plugins · Components**. Buttons run the same handlers as the typed
+  commands; deployment buttons stay admin-only.
+- **`/plugins` is one group**: `list | info | add | remove | enable | disable |
+  confirm | cancel | approve`. `/plugin` replies with the new spelling.
+- **`/components`** replaces `/system components`, matching `setup.sh
+  components`.
+- **`/status` in the bot chat is `/system status`.** The dashboard keeps
+  `/status` for its workspace/session state.
+- **The alias table is gone**: `/start`, `/?`, `/man`, `/plugin
+  list|install|rm|del`, `/list`, `/workspace rm`. `/man` is removed; `/help`
+  and `<command> --help` remain.
+- **`/dashboard` keeps its topic role** (claim an empty topic); the control card
+  is `/menu`.
+- The help registry, README, `docs/COMMANDS.md` and the tests follow the new
+  surface.
 
-### Proposed `0.14.0` connector
+### Migration
 
-1. **`/menu` is the front door** (and `/start` posts it in the control chat): a
-   single card with buttons — **Status**, **Workspaces**, **New workspace**,
-   **Plugins**, **System**, **Web link**, **Help**. Each button calls the same
-   handler as its command; admin-only buttons are omitted for non-admins.
-   This is the HIG "buttons over commands" translation.
-2. **Remove the alias table.** `/help` and `<command> --help` stay; `/help`,
-   `/start`-as-alias and the `/plugin`/`/workspace` short forms go. `/start`
-   remains only as the welcome card and the `startgroup` deep link.
-3. **One status.** Keep `/system status` as the detailed card; `/status` becomes
-   an alias or is removed. The dashboard card shows the same fields.
-4. **`/plugins` becomes the group** (`/plugins list|add|remove|enable|disable|info`)
-   and `/plugin` goes away.
-5. **`/components`** replaces `/components`, matching `setup.sh
-   components`.
-6. **Cards over prose** for the remaining actions: every confirmation is a card
-   with a verb button and **Cancel**; errors name the command that fixes them.
-
-### Why deferred
-
-- The connector has its own release track and test suite; a command rewrite
-  needs its own UAT window.
-- The current surface works; the setup merge already changes the updater's
-  script contract, and changing both at once would make a rollback ambiguous.
-- The proposal is breaking, so it is a connector `0.14.0` (and a setup `minimum`
-  bump), not a patch.
-
-Next step: implement it as a dedicated connector branch, with the existing
-`help.ts` registry as the single source of truth and the `/menu` callbacks
-routed through the same handlers, then bump the setup's `plugins.json` floor.
-
----
+- Old spellings are not aliases. `/plugin` and `/system components` reply with
+  the new command instead of failing silently.
+- `/system update connector` still moves the connector independently; the setup
+  release only raises the floor, so a newer compatible connector installed from
+  the bot survives a reboot.
+- No data or bindings change: the command surface moved, the stored sessions,
+  topics and settings are untouched.
 
 ## 6. Open items / notes
 
-- `0.14.0`'s tag CI and `0.14.1`'s smoke are red for the two test/workflow
-  reasons above; `0.14.2` is the tag to deploy (CI and smoke green).
+- `0.14.0`'s tag CI and `0.14.1`'s smoke were red for test/workflow reasons;
+  `0.14.2` was green, and `0.14.3` adds the connector floor.
 - The Penpot images are pinned to `2.18.6`; the running stack is already that
   version, and the reconcile applies the pin on the next `up -d`.
 - `--i-know-versions-are-incompatible` is retained only for the updater's
