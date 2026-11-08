@@ -4,7 +4,7 @@ Three artifacts, two release tracks:
 
 | Artifact | Repository | Version | Released with |
 |---|---|---|---|
-| setup | `dsh-tg-docker-setup` | `0.2.1-rc.5-0.14.10` | DSH, as one tag |
+| setup | `dsh-tg-docker-setup` | `0.2.1-rc.5-0.14.11` | DSH, as one tag |
 | connector | `dsh-telegram-connector` | `0.14.1` | its own tag |
 | Penpot plugin | `dsh-penpot-plugin` | `0.3.1` | its own tag |
 
@@ -16,12 +16,12 @@ and do not have to.
 
 ```
 <dsh-version>-<major>.<minor>.<patch>          tag: v<same>
-v0.2.1-rc.5-0.14.10
+v0.2.1-rc.5-0.14.11
 ```
 
 - **DSH part** (`0.2.1-rc.5`) is the exact DSH release the setup was built and
   tested against. Prerelease suffixes are part of the version.
-- **Product part** (`0.14.10`) is ours.
+- **Product part** (`0.14.11`) is ours.
   - It resets to `0.0.0` when the setup aligns to a new DSH line.
   - `0.x` is the compatible line. A patch is a fix, a minor is a compatible
     feature, and `1.0.0` (or any new major) marks an incompatible change.

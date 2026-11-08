@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.11
+
+### Added
+
+- **`components --bind <address>` and `--dir <directory>`.** A host can run
+  only the design stack on its LAN address, with no DSH deployment:
+  `sudo ./setup.sh components --dir /srv/penpot --bind 192.168.2.98 enable design`.
+  `DSH_BIND_IP` from the environment is honoured too. This is the server half of
+  the remote-desktop scenario in `docs/REMOTE-PENPOT.md`.
+- The remote scenario is documented end to end: the server stack, the CA trust
+  on the laptop, and the `dsh-penpot-plugin` `apiUrl`/`token` configuration
+  (including a desktop app launched from Finder, where shell exports do not
+  reach the runtime).
+
 ## 0.2.1-rc.5-0.14.10
 
 ### Changed

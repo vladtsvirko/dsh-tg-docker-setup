@@ -413,13 +413,14 @@ test('components enable works standalone, with no DSH deployment', async () => {
     await stub(bins, 'curl', 'printf 200')
     await stub(bins, 'systemctl', `echo "systemctl $*" >> ${calls}; exit 0`)
 
-    const { stdout } = await exec('bash', [join(dir, 'setup.sh'), 'components', '--dir', dir, 'enable', 'design'], {
+    const { stdout } = await exec('bash', [join(dir, 'setup.sh'), 'components', '--dir', dir, '--bind', '192.168.2.98', 'enable', 'design'], {
       env: { ...process.env, PATH: `${bins}:${process.env.PATH}` },
       timeout: 30000,
     })
     const designEnv = await readFile(join(dir, 'design', '.env'), 'utf8')
     const log = await readFile(calls, 'utf8')
     assert.match(designEnv, /DSH_DESIGN_PORT=8090/)
+    assert.match(designEnv, /DSH_BIND_IP=192\.168\.2\.98/)
     assert.match(stdout, /standalone; no DSH deployment/)
     assert.doesNotMatch(log, /systemctl restart dsh/)
     await assert.rejects(stat(join(dir, '.env')), 'standalone design must not create a DSH .env')

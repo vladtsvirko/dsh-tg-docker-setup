@@ -1686,7 +1686,8 @@ component_apply() {
   fi
 
   local bind port_default
-  bind="$(env_get DSH_BIND_IP 2>/dev/null || true)"
+  bind="${DSH_BIND_IP:-}"
+  [ -n "$bind" ] || bind="$(env_get DSH_BIND_IP 2>/dev/null || true)"
   [ -n "$bind" ] || bind="$(sed -n 's/^DSH_BIND_IP=//p' "$env_file" | head -1)"
   [ -n "$bind" ] || bind=127.0.0.1
   port_default="$(component_field "$name" config.port.default)"
@@ -1881,12 +1882,15 @@ EOF
 setup.sh components — manage the optional design stack.
 
   ./setup.sh components list
+  sudo ./setup.sh components --dir /srv/penpot --bind 192.168.2.98 enable design
   sudo ./setup.sh components enable design
   sudo ./setup.sh components disable design
   sudo ./setup.sh components port design 8091
 
-The design stack is Penpot on Podman: the runtime, the penpot CLI and the DSH
-plugin. Disable stops the containers and keeps design/data.
+The design stack is Penpot on Podman and is independent of DSH. --dir is the
+checkout with components.json; --bind is the LAN address to publish on (default
+127.0.0.1). Enabling it never restarts dsh.service: the Penpot tools load on the
+next runtime start. Disable stops the containers and keeps design/data.
 EOF
       ;;
     uninstall)
@@ -1988,6 +1992,8 @@ cmd_components() {
     case "$1" in
       --dir) DIR="${2:?--dir needs a directory}"; shift 2 ;;
       --dir=*) DIR="${1#*=}"; shift ;;
+      --bind) DSH_BIND_IP="${2:?--bind needs an address}"; shift 2 ;;
+      --bind=*) DSH_BIND_IP="${1#*=}"; shift ;;
       *) args+=("$1"); shift ;;
     esac
   done

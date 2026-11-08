@@ -46,6 +46,7 @@ session between the two.
 | `docs/UPDATER.md` | The privileged updater service |
 | `docs/GIT.md` | Repository access: HTTPS tokens and SSH keys, per host and workspace |
 | `docs/CONTAINERS.md` | Rootless Podman for the agent; rootful Podman for Penpot |
+| `docs/REMOTE-PENPOT.md` | A design stack on one host, a desktop DSH on another |
 | `docs/UAT.md` | The acceptance run for a release |
 | `docs/LIMITS.md` | What still needs a host shell, and why |
 | `docs/UPSTREAM-WATCH.md` | The daily check for a new DSH release candidate |
@@ -107,7 +108,7 @@ curl -fsSL …/setup.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.14.10`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.14.11`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -236,7 +237,7 @@ different name is never touched. The setup currently ships:
 Three artifacts, two release tracks:
 
 ```
-setup          0.2.1-rc.5-0.14.10      tag v0.2.1-rc.5-0.14.10
+setup          0.2.1-rc.5-0.14.11      tag v0.2.1-rc.5-0.14.11
 connector      0.14.1                 tag v0.14.1
 penpot plugin  0.3.1                  tag v0.3.1
 ```

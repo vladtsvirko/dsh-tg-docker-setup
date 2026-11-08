@@ -119,6 +119,15 @@ certificate is re-issued when the bind address changes or before it expires;
 the CA private key stays on the host. `--doctor` reports a missing or stale
 certificate as `design-tls`.
 
+## A stack without DSH
+
+A host can run only the design stack; a laptop runs DSH and points the plugin
+at it. The steps are in [`REMOTE-PENPOT.md`](REMOTE-PENPOT.md). The short form:
+
+```sh
+sudo ./setup.sh components --dir /srv/penpot --bind 192.168.2.98 enable design
+```
+
 ## Managing it from the control chat
 
 `/components` posts a card with one row per component: Enable / Disable / Port.
