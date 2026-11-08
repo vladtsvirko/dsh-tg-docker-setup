@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.12
+
+### Changed
+
+- **Penpot plugin `0.4.0`: configure it from the Plugins page.** On DSH
+  `0.2.1-rc.5` or newer, the `dsh-penpot` row gains a **Configure** page with
+  the API URL and access token; **Save** writes the row's config, so a desktop
+  install needs no environment export or profile edit. The setup pins `0.4.0`
+  and raises the floor; the managed `.env` values remain the fallback and are
+  overridden by the page.
+
 ## 0.2.1-rc.5-0.14.11
 
 ### Added

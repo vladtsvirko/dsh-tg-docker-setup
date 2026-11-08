@@ -4,9 +4,9 @@ Three artifacts, two release tracks. The setup is released as one unit with
 DSH; each plugin is released on its own and pinned by the setup's `plugins.json`.
 
 ```
-setup VERSION:  0.2.1-rc.5-0.14.11        tag v0.2.1-rc.5-0.14.11
+setup VERSION:  0.2.1-rc.5-0.14.12        tag v0.2.1-rc.5-0.14.12
 connector:      0.14.1                    tag v0.14.1
-penpot plugin:  0.3.1                     tag v0.3.1
+penpot plugin:  0.4.0                     tag v0.4.0
 ```
 
 - The DSH part is the runtime the setup release installs. It is the prefix of

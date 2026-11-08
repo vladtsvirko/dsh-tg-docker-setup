@@ -54,15 +54,20 @@ curl -s -o /dev/null -w '%{http_code}\n' http://192.168.2.98:8090/
 ## 2. Laptop: the plugin, pointed at the server
 
 Install `dsh-penpot-plugin` into the desktop's DSH profile — the app's plugin
-manager (add `dsh-penpot-plugin@0.3.1`, or the GitHub fallback
-`github:vladtsvirko/dsh-penpot-plugin#v0.3.1`), or the CLI:
+manager (add `dsh-penpot-plugin@0.4.0`, or the GitHub fallback
+`github:vladtsvirko/dsh-penpot-plugin#v0.4.0`), or the CLI:
 
 ```sh
-dsh plugin --profile <profile> add dsh-penpot-plugin@0.3.1
+dsh plugin --profile <profile> add dsh-penpot-plugin@0.4.0
 ```
 
-The plugin reads `apiUrl` and `token` from its row's config; the managed row
-takes them from the **runtime process environment**:
+On DSH `0.2.1-rc.5` or newer, configure it in the UI: **Plugins** →
+**dsh-penpot-plugin** → **Configure** on the `dsh-penpot` row. Set the API URL
+(`http://192.168.2.98:8090`) and the token, then **Save**. The page writes the
+row's config; no environment or restart is needed.
+
+For an older DSH or a headless profile, the row falls back to the **runtime
+process environment**:
 
 ```sh
 export PENPOT_API_URL='http://192.168.2.98:8090'   # no /api/rpc suffix
