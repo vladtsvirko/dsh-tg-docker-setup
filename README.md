@@ -107,7 +107,7 @@ curl -fsSL …/setup.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.14.2`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.14.3`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -236,8 +236,8 @@ different name is never touched. The setup currently ships:
 Three artifacts, two release tracks:
 
 ```
-setup          0.2.1-rc.5-0.14.2      tag v0.2.1-rc.5-0.14.2
-connector      0.13.1                 tag v0.13.1
+setup          0.2.1-rc.5-0.14.3      tag v0.2.1-rc.5-0.14.3
+connector      0.14.0                 tag v0.14.0
 penpot plugin  0.3.1                  tag v0.3.1
 ```
 
@@ -390,13 +390,13 @@ From the bot chat:
 | `/system confirm` | commit the trial: this state becomes the new rollback point |
 | `/system rollback` | restore the last committed **profile** state and restart (does not move the checkout) |
 | `/system cancel` | abandon a pending update and unblock the bot; after acceptance it stops the updater job |
-| `/system components` | optional components (the design stack): a card with Enable/Disable/Port buttons |
+| `/components` | optional components (the design stack): a card with Enable/Disable/Port buttons |
 | `/web` | a signed link into the web UI for the same sessions (bot chat only) |
 | `/firewall` | whether ufw lets the web UI through, and the `/firewall allow <port>` fix |
 
 This table is the short version; the connector's
 [`docs/COMMANDS.md`](https://github.com/vladtsvirko/dsh-telegram-connector/blob/main/docs/COMMANDS.md)
-is the full command reference, and `/man` in the bot prints the same text.
+is the full command reference, and `/help` in the bot prints the same text.
 
 The trial announcement carries **Commit** and **Roll back** buttons; the
 commands do the same thing. Every confirmed plugin change opens a trial *before*
@@ -557,7 +557,7 @@ one-step rollback. `ASSUME_YES=1` makes it unattended:
 | Telegram connector | its own npm version; `/system update connector` installs the newest compatible one inside a trial | `plugins.json` pins a fresh-install floor, not a ceiling; GitHub tag is the fallback |
 | Penpot plugin | its own npm version; `/system update penpot` through the plugin manager | Same trial/rollback path as any bundle |
 | updater | checkout, restarted by systemd | Its code is the mounted checkout |
-| Other plugins | add via `/plugin add` or `dsh plugin`, pinned in the profile's `pnpm-lock.yaml` | Lives in `data/home`, survives updates |
+| Other plugins | add via `/plugins add` or `dsh plugin`, pinned in the profile's `pnpm-lock.yaml` | Lives in `data/home`, survives updates |
 | Model names | `DSH_MODEL` in `.env` | Provider models change without any install change |
 
 Nothing here auto-updates on its own: no floating tags, no watchtower. A Monday

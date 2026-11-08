@@ -88,7 +88,7 @@ podman-compose -f compose.yaml ps
 podman-compose -f compose.yaml down      # data stays in design/data/
 ```
 
-The stack is controlled from the bot with `/system components` (Enable /
+The stack is controlled from the bot with `/components` (Enable /
 Disable / Port); `setup.sh update --component design …` is the host equivalent.
 
 ## Why not Docker

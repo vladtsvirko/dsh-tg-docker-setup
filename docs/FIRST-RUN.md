@@ -141,11 +141,11 @@ a mistake is expensive have buttons:
 | `/dashboard` in the bot chat | **Status** · **Web link** · **Update setup** · **Restart** · **Plugins** · **Components** |
 | Trial after a restart / connector update / plugin change | **Commit** and **Roll back**, plus a deadline |
 | `/system update setup` while draining | **Cancel update** (after acceptance, `/system cancel` still stops the job) |
-| `/system components` (design stack) | one row per component: Enable/Disable and Port |
+| `/components` (design stack) | one row per component: Enable/Disable and Port |
 | A session held by a browser tab | **Take over** |
 
 Everything else is a command, and the bot is self-documenting: `/help` lists
-what the current chat accepts, `/man` prints the full manual, and
+what the current chat accepts, `/help <command>` prints the detail, and
 `<command> --help` explains one command. The same text is in the connector's
 [COMMANDS.md](https://github.com/vladtsvirko/dsh-telegram-connector/blob/main/docs/COMMANDS.md).
 The bot also registers its command menu with Telegram, so the `/` list in the
@@ -185,7 +185,7 @@ The same works from the agent's bash tool inside the runtime. Private
 repositories need a token or SSH key in `secrets/git/profiles.json`; [GIT.md](GIT.md)
 has the manifest and the SSH recipe.
 
-**Add a plugin.** Prefer `/plugin add <spec>` in the bot chat: it inspects the
+**Add a plugin.** Prefer `/plugins add <spec>` in the bot chat: it inspects the
 package, asks for confirmation, and opens a rollback window. On the host, run
 the same command as the service user, then restart:
 
@@ -196,7 +196,7 @@ sudo -u dsh env HOME=/srv/dsh/data/home DSH_HOME=/srv/dsh/data/home \
 ```
 
 `/system restart` (or `sudo systemctl restart dsh.service`) applies it — and pnpm
-may block a git package's build script, which `/plugin approve` handles in the
+may block a git package's build script, which `/plugins approve` handles in the
 chat.
 
 ## If something is wrong

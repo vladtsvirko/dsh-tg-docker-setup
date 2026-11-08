@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.3
+
+### Changed
+
+- **Connector `0.14.0` is the new floor.** It has one command surface:
+  `/menu` (and `/start` in the bot chat) posts the control card with Status,
+  Workspaces, Web link, Help, Update, Restart, Plugins and Components buttons;
+  `/plugin` became `/plugins` with subcommands; `/system components` became
+  `/components`; `/status` in the bot chat became `/system status`; the alias
+  table and `/man` are gone. `plugins.json` pins it and raises the minimum.
+
 ## 0.2.1-rc.5-0.14.2
 
 ### Fixed

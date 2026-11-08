@@ -71,7 +71,7 @@ stack.
    stored one against the API.
 4. On a first install the stack is not up yet when the prompt appears, so leave
    it blank; once the account exists, re-run `./setup.sh components design
-   enable` (or `./setup.sh`) and paste it. From Telegram, `/system components`
+   enable` (or `./setup.sh`) and paste it. From Telegram, `/components`
    → Enable reuses the stored token — the bot never asks for secrets.
 
 ## HTTPS and the token Copy button
@@ -101,9 +101,9 @@ certificate as `design-tls`.
 
 ## Managing it from the control chat
 
-`/system components` posts a card with one row per component: Enable / Disable / Port.
+`/components` posts a card with one row per component: Enable / Disable / Port.
 The updater applies the change on the host, restarts the runtime and reports.
-`/system components design port 8091` does the same without a tap.
+`/components design port 8091` does the same without a tap.
 
 The runtime reaches Penpot at `PENPOT_API_URL=http://<DSH_BIND_IP>:<DSH_DESIGN_PORT>`,
 the published frontend port — the same address your browser opens. There is no

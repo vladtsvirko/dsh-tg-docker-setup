@@ -189,7 +189,7 @@ reviewed it and left the implementation for a dedicated change. The proposal:
 ### Current surface
 
 Three surfaces (control chat, workspace dashboard, session topic), ~40 command
-paths, plus an alias table (`/start`, `/?`, `/man`, `/plugin list|install|rm|del`,
+paths, plus an alias table (`/start`, `/?`, `/help`, `/plugin list|install|rm|del`,
 `/list`, `/list archived`, `/workspace rm`). `/status` and `/system status`
 overlap; `/plugins` and `/plugin` overlap; `/dashboard` is already a button
 card but `/start` still dumps the manual.
@@ -201,14 +201,14 @@ card but `/start` still dumps the manual.
    **Plugins**, **System**, **Web link**, **Help**. Each button calls the same
    handler as its command; admin-only buttons are omitted for non-admins.
    This is the HIG "buttons over commands" translation.
-2. **Remove the alias table.** `/help` and `<command> --help` stay; `/man`,
+2. **Remove the alias table.** `/help` and `<command> --help` stay; `/help`,
    `/start`-as-alias and the `/plugin`/`/workspace` short forms go. `/start`
    remains only as the welcome card and the `startgroup` deep link.
 3. **One status.** Keep `/system status` as the detailed card; `/status` becomes
    an alias or is removed. The dashboard card shows the same fields.
 4. **`/plugins` becomes the group** (`/plugins list|add|remove|enable|disable|info`)
    and `/plugin` goes away.
-5. **`/components`** replaces `/system components`, matching `setup.sh
+5. **`/components`** replaces `/components`, matching `setup.sh
    components`.
 6. **Cards over prose** for the remaining actions: every confirmation is a card
    with a verb button and **Cancel**; errors name the command that fixes them.
