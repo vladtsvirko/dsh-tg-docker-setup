@@ -433,32 +433,6 @@ read_secret() {
 # so a first install has none yet and can add it after the stack is up. On every
 # later run the stored token is the default: Enter keeps it, which is why a
 # repair or an update never needs the file edited by hand.
-ask_penpot_token() {
-  local answer
-  can_ask || return 0
-  if [ -n "${PENPOT_ACCESS_TOKEN:-}" ]; then
-    printf 'Penpot access token (blank = keep the stored one): ' >&2
-  else
-    printf 'Penpot access token (blank = set it up after the first start): ' >&2
-  fi
-  answer="$(read_secret)"
-  printf '\n' >&2
-  # A paste can carry surrounding whitespace or the whole KEY=value line.
-  answer="${answer#"${answer%%[![:space:]]*}"}"
-  answer="${answer%"${answer##*[![:space:]]}"}"
-  answer="${answer#PENPOT_ACCESS_TOKEN=}"
-  if [ -n "$answer" ]; then
-    # A Penpot token is a 5-part JWE. A 4-part value is what the Copy button
-    # leaves in the clipboard on an http:// origin: the browser refuses the
-    # clipboard write (not a secure context) and the previous value stays.
-    case "$answer" in
-      *.*.*.*.*) ;;
-      *) warn "that is not a complete Penpot token (expected 5 dot-separated parts) — on http:// the Copy button cannot use the clipboard; select the token in the field instead" ;;
-    esac
-    PENPOT_ACCESS_TOKEN="$answer"
-  fi
-}
-
 ask_secret() {
   local var="$1" prompt="$2" blank="${3-disabled}" current answer
   current="${!var:-}"
@@ -1495,8 +1469,8 @@ self_update() {
     esac
   fi
 
-  # The Penpot token survives the update; ask anyway so rotating it does not
-  # need a separate install. Blank keeps the stored value and is never echoed.
+  # The Penpot token survives the update. It is a stored value like every other
+  # answer: read it from design/.env or .env and mirror it, never prompt.
   if [ "$(env_get DESIGN)" = penpot ]; then
     local token=""
     if [ -f design/.env ]; then
@@ -1504,8 +1478,6 @@ self_update() {
     fi
     [ -n "$token" ] || token="$(env_get PENPOT_ACCESS_TOKEN)"
     PENPOT_ACCESS_TOKEN="$token"
-    ask_penpot_token
-    token="${PENPOT_ACCESS_TOKEN:-}"
     if [ -n "$token" ]; then
       set_env PENPOT_ACCESS_TOKEN "$token" "$ENV_FILE"
       if [ -f design/.env ]; then set_env PENPOT_ACCESS_TOKEN "$token" design/.env; fi
@@ -1667,7 +1639,7 @@ design_reconcile() {
   set_env DSH_DESIGN_TLS_PORT "$tls_port" "$ENV_FILE" 2>/dev/null || true
   prepare_penpot_data "$dir"
   prepare_penpot_tls "$dir" "$bind" || warn "Penpot HTTPS front skipped (certificate generation failed)"
-  ( cd "$dir" && podman-compose -f compose.yaml up -d --force-recreate penpot-frontend ) \
+  ( cd "$dir" && podman-compose -f compose.yaml up -d --force-recreate penpot-frontend penpot-tls ) \
     || { warn "design stack reconcile failed — run ./setup.sh components enable design"; return 0; }
   local http_port
   http_port="$(env_get DSH_DESIGN_PORT)"; [ -n "$http_port" ] || http_port=8090
@@ -1742,7 +1714,7 @@ component_apply() {
       set_env DSH_DESIGN_TLS_PORT "$tls_port" "$ENV_FILE"
       prepare_penpot_data "$compose_dir"
       prepare_penpot_tls "$compose_dir" "$bind" || warn "Penpot will be reachable over HTTP only"
-      ( cd "$compose_dir" && podman-compose -f "$compose_file" up -d --force-recreate penpot-frontend ) || die "podman-compose failed for $name"
+      ( cd "$compose_dir" && podman-compose -f "$compose_file" up -d --force-recreate penpot-frontend penpot-tls ) || die "podman-compose failed for $name"
       component_ufw "$port" "$(basename "$compose_dir")"
       set_env "$flag" 1 "$ENV_FILE"
       # The agent calls design/penpot.mjs from inside the runtime, so the
@@ -1752,17 +1724,18 @@ component_apply() {
       plugin_ref="$(node -e 'const p = require("./plugins.json").plugins["dsh-penpot-plugin"]; process.stdout.write(p.spec ?? p.ref ?? "")' 2>/dev/null || true)"
       if [ -n "$plugin_ref" ]; then set_env PENPOT_PLUGIN_REF "$plugin_ref" "$ENV_FILE"; fi
       set_env PENPOT_API_URL "http://$bind:$port" "$ENV_FILE"
-      # The token is asked on every interactive enable/configure: a stored one
-      # is the default, so Enter keeps it; a first start has none yet.
+      # The token is a stored value, like the other answers: read it from the
+      # env/config or keep what the deployment has, never prompt.
       local token
-      token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
+      token="${PENPOT_ACCESS_TOKEN:-}"
+      [ -n "$token" ] || token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
       [ -n "$token" ] || token="$(env_get PENPOT_ACCESS_TOKEN)"
       PENPOT_ACCESS_TOKEN="$token"
-      ask_penpot_token
-      token="${PENPOT_ACCESS_TOKEN:-}"
       if [ -n "$token" ]; then
         set_env PENPOT_ACCESS_TOKEN "$token" "$env_file"
         set_env PENPOT_ACCESS_TOKEN "$token" "$ENV_FILE"
+      else
+        warn "no Penpot access token — create one in Penpot (Settings → Access tokens) and set PENPOT_ACCESS_TOKEN in $ENV_FILE"
       fi
       log "restarting the runtime so the tools appear"
       restart_runtime || warn "could not restart the runtime"
@@ -2433,13 +2406,6 @@ warn_exposure
 # Native mode only: a published Docker port never reaches ufw's INPUT chain.
 ufw_hints "$DSH_PORT" "$DSH_BIND_IP"
 
-# The Penpot token is the one answer a repair may want to change, so it is asked
-# on every interactive run. Blank keeps the stored token (and is a no-op on a
-# first install, where there is nothing to keep yet).
-if [ "$DESIGN" = penpot ]; then
-  ask_penpot_token
-fi
-
 # One confirmation for everything the plan above describes, so apt and the unit
 # work do not start while someone is still reading it.
 if can_ask; then
@@ -2789,15 +2755,17 @@ design_apply() {
   set_env DSH_DESIGN_PORT "$DSH_DESIGN_PORT" "$env_file"
   set_env DSH_DESIGN_TLS_PORT "${DSH_DESIGN_TLS_PORT:-8443}" "$env_file"
   set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$DIR/.env"
-  # The token comes from the interactive prompt (or --config/environment) when
-  # one was given; otherwise the stored one is kept. Mirror it into both files
-  # so a re-created design/.env or a later update cannot lose it.
+  # The token comes from the environment or --config; otherwise the stored one
+  # is kept. Mirror it into both files so a re-created design/.env or a later
+  # update cannot lose it.
   local token="${PENPOT_ACCESS_TOKEN:-}"
   [ -n "$token" ] || token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$env_file" | head -1)"
   [ -n "$token" ] || token="$(sed -n 's/^PENPOT_ACCESS_TOKEN=//p' "$DIR/.env" | head -1)"
   if [ -n "$token" ]; then
     set_env PENPOT_ACCESS_TOKEN "$token" "$env_file"
     set_env PENPOT_ACCESS_TOKEN "$token" "$DIR/.env"
+  else
+    warn "no Penpot access token — the design tools stay unauthenticated; create one in Penpot (Settings → Access tokens) and set PENPOT_ACCESS_TOKEN in $DIR/.env"
   fi
   # set_env preserves the mode, but a first run may have created .env here.
   chown root:"$SERVICE_USER" "$DIR/.env" 2>/dev/null || true
@@ -2816,7 +2784,7 @@ design_apply() {
   log "starting Penpot on Podman (the first start pulls the images)"
   prepare_penpot_data "$dir"
   prepare_penpot_tls "$dir" "$DSH_BIND_IP" || warn "Penpot will be reachable over HTTP only"
-  ( cd "$dir" && run podman-compose -f compose.yaml up -d --force-recreate penpot-frontend ) || die "podman-compose failed for the design stack"
+  ( cd "$dir" && run podman-compose -f compose.yaml up -d --force-recreate penpot-frontend penpot-tls ) || die "podman-compose failed for the design stack"
   design_ufw_apply
 
   log "waiting for Penpot on http://$DSH_BIND_IP:$DSH_DESIGN_PORT/"

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.8
+
+### Fixed
+
+- **The HTTPS sidecar is recreated with the frontend.** nginx resolves
+  `penpot-frontend` once at start; recreating only the frontend left the sidecar
+  pointing at the old address, so `:8443` returned 502 while `:8090` worked.
+  The update, component and install paths now force-recreate
+  `penpot-frontend penpot-tls` together.
+- **The Penpot token is a stored answer, not a prompt.** `setup.sh install`,
+  `update` and `components enable design` no longer ask for it on every run.
+  They read `PENPOT_ACCESS_TOKEN` from the environment/`--config`, keep the
+  stored value, mirror it into both env files and warn when none is set — the
+  same behaviour as the other answers. `docs/DESIGN.md` says how to set it.
+
 ## 0.2.1-rc.5-0.14.7
 
 ### Fixed

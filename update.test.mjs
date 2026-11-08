@@ -324,57 +324,10 @@ needsExec('--check resolves the target without applying it', async () => {
   }
 })
 
-test('the Penpot token prompt keeps the stored token on an empty answer', async () => {
-  const dir = await deployment()
-  try {
-    const out = await source(dir, `
-      can_ask() { return 0; }
-      read_secret() { printf '%s' "$FAKE"; }
-      PENPOT_ACCESS_TOKEN=stored
-      FAKE='' ask_penpot_token
-      printf 'keep=[%s]\\n' "$PENPOT_ACCESS_TOKEN"
-      FAKE='  new-token  ' ask_penpot_token
-      printf 'trim=[%s]\\n' "$PENPOT_ACCESS_TOKEN"
-      FAKE='PENPOT_ACCESS_TOKEN=full-line' ask_penpot_token
-      printf 'line=[%s]\\n' "$PENPOT_ACCESS_TOKEN"
-      PENPOT_ACCESS_TOKEN=''
-      FAKE='' ask_penpot_token
-      printf 'none=[%s]\\n' "$PENPOT_ACCESS_TOKEN"
-    `)
-    assert.equal(out, 'keep=[stored]\ntrim=[new-token]\nline=[full-line]\nnone=[]')
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-test('the Penpot token prompt is a no-op without a terminal', async () => {
-  const dir = await deployment()
-  try {
-    const out = await source(dir, 'PENPOT_ACCESS_TOKEN=stored; ask_penpot_token; printf "%s" "$PENPOT_ACCESS_TOKEN"')
-    assert.equal(out, 'stored')
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-test('the Penpot token prompt warns when the paste is not a 5-part token', async () => {
-  const dir = await deployment()
-  try {
-    const file = join(dir, 'probe.sh')
-    await writeFile(file, `set -eu
-. "${join(here, 'setup.sh')}"
-can_ask() { return 0; }
-read_secret() { printf '%s' "$FAKE"; }
-PENPOT_ACCESS_TOKEN=stored
-FAKE='a.b.c.d' ask_penpot_token
-printf 'val=[%s]\\n' "$PENPOT_ACCESS_TOKEN"
-`)
-    const { stdout, stderr } = await exec('bash', [file], { cwd: dir, env: { ...process.env } })
-    assert.match(stderr, /5 dot-separated parts/)
-    assert.match(stdout, /val=\[a\.b\.c\.d\]/)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
+test('the Penpot token is a stored answer, never a prompt', async () => {
+  const source = await readFile(join(here, 'setup.sh'), 'utf8')
+  assert.doesNotMatch(source, /ask_penpot_token/)
+  assert.match(source, /PENPOT_ACCESS_TOKEN/)
 })
 
 test('--help works without a deployment and exits 0', async () => {
