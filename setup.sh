@@ -1667,7 +1667,7 @@ design_reconcile() {
   set_env DSH_DESIGN_TLS_PORT "$tls_port" "$ENV_FILE" 2>/dev/null || true
   prepare_penpot_data "$dir"
   prepare_penpot_tls "$dir" "$bind" || warn "Penpot HTTPS front skipped (certificate generation failed)"
-  ( cd "$dir" && podman-compose -f compose.yaml up -d ) \
+  ( cd "$dir" && podman-compose -f compose.yaml up -d --force-recreate penpot-frontend ) \
     || { warn "design stack reconcile failed — run ./setup.sh components enable design"; return 0; }
   local http_port
   http_port="$(env_get DSH_DESIGN_PORT)"; [ -n "$http_port" ] || http_port=8090
@@ -1742,7 +1742,7 @@ component_apply() {
       set_env DSH_DESIGN_TLS_PORT "$tls_port" "$ENV_FILE"
       prepare_penpot_data "$compose_dir"
       prepare_penpot_tls "$compose_dir" "$bind" || warn "Penpot will be reachable over HTTP only"
-      ( cd "$compose_dir" && podman-compose -f "$compose_file" up -d ) || die "podman-compose failed for $name"
+      ( cd "$compose_dir" && podman-compose -f "$compose_file" up -d --force-recreate penpot-frontend ) || die "podman-compose failed for $name"
       component_ufw "$port" "$(basename "$compose_dir")"
       set_env "$flag" 1 "$ENV_FILE"
       # The agent calls design/penpot.mjs from inside the runtime, so the
@@ -2816,7 +2816,7 @@ design_apply() {
   log "starting Penpot on Podman (the first start pulls the images)"
   prepare_penpot_data "$dir"
   prepare_penpot_tls "$dir" "$DSH_BIND_IP" || warn "Penpot will be reachable over HTTP only"
-  ( cd "$dir" && run podman-compose -f compose.yaml up -d ) || die "podman-compose failed for the design stack"
+  ( cd "$dir" && run podman-compose -f compose.yaml up -d --force-recreate penpot-frontend ) || die "podman-compose failed for the design stack"
   design_ufw_apply
 
   log "waiting for Penpot on http://$DSH_BIND_IP:$DSH_DESIGN_PORT/"

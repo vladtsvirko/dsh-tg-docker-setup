@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.7
+
+### Fixed
+
+- **The Penpot frontend is recreated when the stack is reconciled.** A
+  `podman-compose up -d` that only restarts the frontend leaves the old
+  `PENPOT_PUBLIC_URI` in `js/config.js`; the update, the component action and
+  the install path now pass `--force-recreate penpot-frontend`. That is what
+  applies the HTTPS public URI (and any future frontend env change).
+
 ## 0.2.1-rc.5-0.14.6
 
 ### Fixed
