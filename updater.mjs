@@ -369,7 +369,10 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
     job.reporting = false
     job.reported = delivered
     await persist()
-    if (reachedStop) reload()
+    // A successful update replaced the checkout, so the next request must run
+    // the new updater code. `reachedStop` only fires when the child printed the
+    // old marker; success is the reliable signal (the runtime was restarted).
+    if (reachedStop || job.state === 'done') reload()
   }
 
   const readComponents = async () => {

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.4
+
+### Fixed
+
+- **The updater reloads after a successful update.** The sidecar only exited to
+  reload the checkout when the child printed `stopping dsh`; the real update
+  script never did, so the process kept running the code it started with. After
+  `0.13.3` that meant it still called the removed `update.sh` and the next
+  `/system update setup` failed with exit 127. A successful update now always
+  reloads; a failure before the stop still keeps the process for `/status`.
+
 ## 0.2.1-rc.5-0.14.3
 
 ### Changed
