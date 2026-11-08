@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.5
+
+### Fixed
+
+- **Generated `design/certs/` no longer blocks updates.** The HTTPS certificate
+  lives inside the checkout but is generated state; it is ignored now, and the
+  update's dirty check ignores untracked files (a modified tracked file still
+  stops the checkout). A host that had already generated certificates hit
+  `working tree is dirty` on the next update.
+
 ## 0.2.1-rc.5-0.14.4
 
 ### Fixed

@@ -1445,7 +1445,9 @@ self_check() {
 
 self_update() {
   local allow=${1:-0} override=${2:-} override_allow=${3:-0} cur target all
-  [ -z "$(git status --porcelain)" ] || die "working tree is dirty — commit or stash first"
+  # Untracked files are generated state (design/certs, a scratch note); only a
+  # modification to a tracked file can be lost by the checkout.
+  [ -z "$(git status --porcelain --untracked-files=no)" ] || die "working tree is dirty — commit or stash first"
   git fetch --tags --quiet origin || die "git fetch failed"
   cur="$(current_tag)" || die "cannot determine the deployed tag — check out the tag that is running"
   all="$(newer_tags)" || die "cannot list newer tags"
