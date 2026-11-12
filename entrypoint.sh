@@ -702,6 +702,11 @@ prepare() {
     warn "$KEY_ENV is empty — the runtime will boot, but model calls will fail"
   fi
 
+  if [ "${DSH_PLUGINS:-setup}" = ui ]; then
+    log "plugins: UI-managed — install and configure them from the Plugins page"
+    return 0
+  fi
+
   local mode installed=0
   mode="$(telegram_mode)"
   [ -f "$PROFILE_DIR/node_modules/$PLUGIN_PKG/package.json" ] && installed=1

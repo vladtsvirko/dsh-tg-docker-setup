@@ -251,6 +251,19 @@ test('a legacy name@version dependency is repaired before installing', async () 
   }
 })
 
+test('DSH_PLUGINS=ui leaves plugin installation to the Plugins page', async () => {
+  const parts = await deployment()
+  try {
+    const { stdout } = await run(parts, ['init'], { DSH_PLUGINS: 'ui' })
+    assert.match(stdout, /UI-managed/)
+    const deps = await recorded(parts.home)
+    assert.equal(deps['dsh-telegram-connector'], undefined)
+    assert.equal(deps['dsh-penpot-plugin'], undefined)
+  } finally {
+    await rm(parts.root, { recursive: true, force: true })
+  }
+})
+
 test('a connector at or above the minimum is left alone', async () => {
   const parts = await deployment()
   try {

@@ -620,6 +620,17 @@ test('an .env from an older release is repaired, not rejected', async () => {
   }
 })
 
+test('--plugins ui plans UI-managed plugins', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'install-ui-plugins-'))
+  try {
+    const { code, out } = await install(['--check', '--yes', '--dir', join(root, 'deploy'), '--plugins', 'ui'])
+    assert.equal(code, 0)
+    assert.match(out, /plugins:\s+UI-managed/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a lone setup.sh fetches a release and shows the full plan', async (t) => {
   // The wget case: one file, no checkout. It clones into a throwaway directory,
   // runs the real installer's --check against the requested target, and leaves

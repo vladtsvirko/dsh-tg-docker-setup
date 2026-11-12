@@ -4,8 +4,8 @@ Three artifacts, two release tracks. The setup is released as one unit with
 DSH; each plugin is released on its own and pinned by the setup's `plugins.json`.
 
 ```
-setup VERSION:  0.2.1-rc.5-0.14.12        tag v0.2.1-rc.5-0.14.12
-connector:      0.14.1                    tag v0.14.1
+setup VERSION:  0.2.1-rc.5-0.14.13        tag v0.2.1-rc.5-0.14.13
+connector:      0.15.1                    tag v0.15.1
 penpot plugin:  0.4.0                     tag v0.4.0
 ```
 
@@ -35,6 +35,10 @@ penpot plugin:  0.4.0                     tag v0.4.0
   setup release.
 - The setup never derives a plugin spec from `VERSION`. A setup release that
   needs a newer plugin raises `minimum`; that is the only coupling left.
+- **`DSH_PLUGINS=ui` is the exception to all of the above.** A deployment that
+  sets it installs neither plugin and does not pin or patch them: both are
+  installed and configured from the Plugins page, where each bundle carries its
+  own configuration form. `plugins.json` is the setup-managed mode's pin only.
 
 ## Release checklist
 

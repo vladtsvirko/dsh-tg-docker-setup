@@ -253,6 +253,7 @@ GIT_PROFILES_FILE="${GIT_PROFILES_FILE:-}"
 CONTAINERS="${CONTAINERS:-}"
 DSH_UPDATER_TOKEN="${DSH_UPDATER_TOKEN:-}"
 DESIGN="${DESIGN:-}"
+PLUGINS="${PLUGINS:-}"
 DSH_DESIGN_PORT="${DSH_DESIGN_PORT:-}"
 DSH_DESIGN_TLS_PORT="${DSH_DESIGN_TLS_PORT:-}"
 PENPOT_ACCESS_TOKEN="${PENPOT_ACCESS_TOKEN:-}"
@@ -307,7 +308,7 @@ EOF
 # --- answers from a file ---------------------------------------------------
 # Strict KEY=VALUE parsing: no sourcing, so a config file cannot execute code.
 CONFIG_KEYS="CONTAINERS DIR SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PROVIDER DSH_MODEL DSH_RESOURCE_PERCENT
-DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT DSH_DESIGN_TLS_PORT PROVIDER_KEY
+DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_PLUGINS DSH_DESIGN_PORT DSH_DESIGN_TLS_PORT PROVIDER_KEY
 PENPOT_ACCESS_TOKEN DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN GIT_HOST
 GIT_AUTH GIT_KEY GIT_KNOWN_HOSTS GIT_PROFILES_FILE"
 load_config() {
@@ -347,6 +348,8 @@ while [ $# -gt 0 ]; do
     --containers) CONTAINERS="${2:?--containers needs a value}"; CONTAINERS_SET=1; shift 2 ;;
     --containers=*) CONTAINERS="${1#*=}"; CONTAINERS_SET=1; shift ;;
     --design) DESIGN="${2:?--design needs a value}"; DESIGN_SET=1; shift 2 ;;
+    --plugins) PLUGINS="${2:?--plugins needs a value}"; PLUGINS_SET=1; shift 2 ;;
+    --plugins=*) PLUGINS="${1#*=}"; PLUGINS_SET=1; shift ;;
     --design=*) DESIGN="${1#*=}"; DESIGN_SET=1; shift ;;
     --ref)    REF="${2:?--ref needs a value}"; shift 2 ;;
     --ref=*)  REF="${1#*=}"; shift ;;
@@ -829,7 +832,7 @@ read_existing_env() {
   [ -r "$DIR/.env" ] || return 0
   for key in DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PROVIDER DSH_MODEL DSH_RESOURCE_PERCENT DSH_TELEGRAM_BOT_TOKEN \
              ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT CONTAINERS \
-             DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN \
+             DSH_TELEGRAM_PUBLISHER_TOKENS DSH_PLUGINS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN \
              DSH_PROVIDER_API_KEY_ENV; do
     # The last assignment is what the runtime reads (systemd's EnvironmentFile
     # and Node's .env loader agree), so the installer agrees too.
@@ -839,7 +842,8 @@ read_existing_env() {
       # agent's shell carries the service env) must not disable a deployed
       # Penpot stack. Only an explicit flag or config file may change them.
       if { [ "$key" = DESIGN ] && [ "$DESIGN_SET" != 1 ]; } \
-         || { [ "$key" = CONTAINERS ] && [ "$CONTAINERS_SET" != 1 ]; }; then
+         || { [ "$key" = CONTAINERS ] && [ "$CONTAINERS_SET" != 1 ]; } \
+         || { [ "$key" = DSH_PLUGINS ] && [ "$PLUGINS_SET" != 1 ]; }; then
         if [ -n "$value" ]; then printf -v "$key" '%s' "$value"; fi
         continue
       fi
@@ -956,6 +960,11 @@ if [ "$COMMAND" = install ] && [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$D
   die "this installs a systemd service — run with sudo"
 fi
 
+case "${PLUGINS:-}" in
+  ""|setup|ui) ;;
+  *) die "--plugins must be setup or ui" ;;
+esac
+[ -n "$PLUGINS" ] || PLUGINS=setup
 case "${DESIGN:-}" in
   ""|none|penpot) ;;
   # Migration: the old value meant the Docker stack, which no longer exists.
@@ -1818,6 +1827,7 @@ setup.sh install — install or repair the deployment.
 
 Options:
   --design penpot|none   optional Penpot stack (default: ask, else none)
+  --plugins setup|ui     install the pinned plugins (setup) or manage them from the UI
   --containers podman    rootless Podman for the agent's containers
   --ref REF              release tag to fetch (default: v<VERSION>)
   --dir PATH             deployment directory (default: /srv/dsh)
@@ -2321,6 +2331,7 @@ print_plan() {
     printf '    design:    none (re-run with --design penpot to add it later)\n'
   fi
   printf '    containers: %s\n' "$(if [ "$CONTAINERS" = podman ]; then printf 'podman (rootless)'; else printf 'none'; fi)"
+  printf '    plugins:   %s\n' "$(if [ "$PLUGINS" = ui ]; then printf 'UI-managed (install and configure from the Plugins page)'; else printf 'setup-managed (pinned in plugins.json)'; fi)"
   printf '    user:      %s\n' "$SERVICE_USER"
   printf '    data:      %s\n' "$DATA_HOME"
   printf '    updater:   %s (127.0.0.1 only, root)\n' "$UPDATER_URL"
@@ -2667,6 +2678,7 @@ write_env() {
   set_env DSH_TELEGRAM_PUBLISHER_TOKENS "$DSH_TELEGRAM_PUBLISHER_TOKENS" "$file"
   set_env DSH_UPDATER_TOKEN "$DSH_UPDATER_TOKEN" "$file"
   set_env DSH_SETUP_VERSION "$SETUP_VERSION" "$file"
+  set_env DSH_PLUGINS "$PLUGINS" "$file"
   set_env DESIGN "$DESIGN" "$file"
   set_env CONTAINERS "$CONTAINERS" "$file"
   if [ "$DESIGN" = penpot ]; then

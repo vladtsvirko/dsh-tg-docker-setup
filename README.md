@@ -108,7 +108,7 @@ curl -fsSL …/setup.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.14.12`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.14.13`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -123,6 +123,7 @@ git clone https://github.com/vladtsvirko/dsh-tg-docker-setup
 cd dsh-tg-docker-setup
 ./setup.sh --check        # the full plan, nothing changed
 ./setup.sh                # interactive: port, key, bot token, admin, git
+./setup.sh --plugins ui   # install only DSH; add and configure plugins in the UI
 ```
 
 ### Containers
@@ -237,8 +238,8 @@ different name is never touched. The setup currently ships:
 Three artifacts, two release tracks:
 
 ```
-setup          0.2.1-rc.5-0.14.12      tag v0.2.1-rc.5-0.14.12
-connector      0.14.1                 tag v0.14.1
+setup          0.2.1-rc.5-0.14.13      tag v0.2.1-rc.5-0.14.13
+connector      0.15.1                 tag v0.15.1
 penpot plugin  0.3.1                  tag v0.3.1
 ```
 

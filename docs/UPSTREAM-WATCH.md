@@ -12,7 +12,7 @@ upgrade plan and a short list of decisions for a human — never with an upgrade
 | Report | the chat message with the upgrade plan; no files are written |
 | No-op | pinned == newest RC → say so in one line, write nothing |
 
-`VERSION` is `<dsh>-<product>`: for `0.2.1-rc.5-0.14.12` the DSH part is
+`VERSION` is `<dsh>-<product>`: for `0.2.1-rc.5-0.14.13` the DSH part is
 `0.2.1-rc.5`. `setup.sh` installs exactly that version; there is no separate
 pin.
 

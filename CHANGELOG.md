@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.13
+
+### Added
+
+- **`setup.sh install --plugins ui`.** The setup installs only the DSH runtime
+  (and the design stack when asked); both plugins are installed and configured
+  from the **Plugins** page. The connector `0.15.0` has a Configure page for the
+  bot token, allowed ids and admin id; the Penpot plugin `0.4.0` has one for the
+  API URL and token. `.env` remains a fallback, not a requirement.
+- The boot honors `DSH_PLUGINS=ui`: it does not install, pin or patch the
+  plugins, and the setup-managed path stays the default (`--plugins setup`).
+- Connector `0.15.1` is pinned for the setup-managed mode.
+
 ## 0.2.1-rc.5-0.14.12
 
 ### Changed
