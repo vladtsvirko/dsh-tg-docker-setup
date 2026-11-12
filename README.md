@@ -108,7 +108,7 @@ curl -fsSL …/setup.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.14.13`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.14.14`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -238,7 +238,7 @@ different name is never touched. The setup currently ships:
 Three artifacts, two release tracks:
 
 ```
-setup          0.2.1-rc.5-0.14.13      tag v0.2.1-rc.5-0.14.13
+setup          0.2.1-rc.5-0.14.14      tag v0.2.1-rc.5-0.14.14
 connector      0.15.1                 tag v0.15.1
 penpot plugin  0.3.1                  tag v0.3.1
 ```

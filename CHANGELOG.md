@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.14
+
+### Changed
+
+- **Penpot plugin `0.4.1`.** Docs only: the README, design notes and install
+  guide describe the plugin on its own, with no references to this setup. The
+  code is the same as `0.4.0`; the setup pin is raised so a managed deployment
+  serves the same text the standalone package does.
+
 ## 0.2.1-rc.5-0.14.13
 
 ### Added
