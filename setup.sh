@@ -231,7 +231,7 @@ cd "$SRC_DIR"
 SETUP_VERSION="$(tr -d '\n' < "$SRC_DIR/VERSION")"
 DSH_VERSION="$(printf '%s' "$SETUP_VERSION" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+$//')"
 
-CONTAINERS="" CONTAINERS_SET=0 DESIGN_SET=0 DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0 DEPS=1 CLEAN_SOURCE=0
+CONTAINERS="" CONTAINERS_SET=0 DESIGN_SET=0 PLUGINS_SET=0 DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0 DEPS=1 CLEAN_SOURCE=0
 DOCTOR=0 FIX=0 ROTATE_KEY=0
 SERVICE_USER="${SERVICE_USER:-}"
 DSH_PORT="${DSH_PORT:-}"
@@ -256,7 +256,9 @@ GIT_PROFILES_FILE="${GIT_PROFILES_FILE:-}"
 CONTAINERS="${CONTAINERS:-}"
 DSH_UPDATER_TOKEN="${DSH_UPDATER_TOKEN:-}"
 DESIGN="${DESIGN:-}"
+if [ -z "${PLUGINS:-}" ] && [ -n "${DSH_PLUGINS:-}" ]; then PLUGINS="$DSH_PLUGINS"; fi
 PLUGINS="${PLUGINS:-}"
+[ -n "$PLUGINS" ] && PLUGINS_SET=1
 DSH_DESIGN_PORT="${DSH_DESIGN_PORT:-}"
 DSH_DESIGN_TLS_PORT="${DSH_DESIGN_TLS_PORT:-}"
 PENPOT_ACCESS_TOKEN="${PENPOT_ACCESS_TOKEN:-}"
@@ -331,6 +333,7 @@ load_config() {
     case "$key" in
       DESIGN) DESIGN_SET=1 ;;
       CONTAINERS) CONTAINERS_SET=1 ;;
+      DSH_PLUGINS) PLUGINS="$value"; PLUGINS_SET=1 ;;
     esac
   done < "$file"
 }
@@ -849,6 +852,10 @@ read_existing_env() {
       [ -n "${SERVICE_USER:-}" ] || [ -z "$value" ] || SERVICE_USER="$value"
       continue
     fi
+    if [ "$key" = DSH_PLUGINS ]; then
+      [ "$PLUGINS_SET" = 1 ] || [ -z "$value" ] || PLUGINS="$value"
+      continue
+    fi
     if [ -n "${!key:-}" ]; then
       # DESIGN/CONTAINERS are structural: an inherited environment value (the
       # agent's shell carries the service env) must not disable a deployed
@@ -998,8 +1005,9 @@ if [ "$COMMAND" = install ] && [ "$CHECK" = 0 ] && [ "$UNINSTALL" = 0 ] && [ "$D
 fi
 
 case "${PLUGINS:-}" in
-  ""|setup|ui) ;;
-  *) die "--plugins must be setup or ui" ;;
+  ""|setup|suggested) PLUGINS=setup ;;
+  ui|none) PLUGINS=ui ;;
+  *) die "--plugins must be suggested or none" ;;
 esac
 [ -n "$PLUGINS" ] || PLUGINS=setup
 case "${DESIGN:-}" in
@@ -1890,8 +1898,11 @@ setup.sh install — install or repair the deployment.
 
 Options:
   --design penpot|none   optional Penpot stack on Podman; DSH runs without it
-  --plugins setup|ui     setup-managed pins, or no plugins: install the latest
-                         from the Plugins page with DSH's own plugin manager
+  --plugins suggested|none
+                         suggested: install the latest npm release of the
+                         Telegram connector (with a bot token) and, when the
+                         Penpot stack is enabled, the Penpot plugin; none:
+                         install them yourself from the Plugins page
   --containers podman    rootless Podman for the agent's containers
   --ref REF              release tag to fetch (default: v<VERSION>)
   --dir PATH             deployment directory (default: /srv/dsh)
@@ -2437,7 +2448,7 @@ print_plan() {
     printf '    penpot:    none (optional stack; DSH runs without it)\n'
   fi
   printf '    containers: %s\n' "$(if [ "$CONTAINERS" = podman ]; then printf 'podman (rootless)'; else printf 'none'; fi)"
-  printf '    plugins:   %s\n' "$(if [ "$PLUGINS" = ui ]; then printf 'UI-managed (install and configure from the Plugins page)'; else printf 'setup-managed (pinned in plugins.json)'; fi)"
+  printf '    plugins:   %s\n' "$(if [ "$PLUGINS" = ui ]; then printf 'UI-managed (install and configure from the Plugins page)'; else printf 'suggested, latest at install (Telegram when a token is set; Penpot when enabled)'; fi)"
   printf '    user:      %s\n' "$SERVICE_USER"
   printf '    data:      %s\n' "$DATA_HOME"
   printf '    updater:   %s (127.0.0.1 only, root)\n' "$UPDATER_URL"
@@ -2472,6 +2483,20 @@ if [ -f "$DIR/.env" ] && [ -x "$SRC_DIR/scripts/repair.sh" ]; then
   echo
   log "existing deployment"
   SERVICE_USER="$SERVICE_USER" bash "$SRC_DIR/scripts/repair.sh" --dir "$DIR" || true
+fi
+
+if [ "$PLUGINS_SET" = 0 ] && can_ask; then
+  if [ "$PLUGINS" = ui ]; then
+    printf 'Install the suggested plugins? Telegram connector (when a bot token is set); Penpot plugin (when the stack is enabled) [y/N] ' >&2
+  else
+    printf 'Install the suggested plugins? Telegram connector (when a bot token is set); Penpot plugin (when the stack is enabled) [Y/n] ' >&2
+  fi
+  plugins_answer="$(read_from_terminal)"
+  case "$plugins_answer" in
+    n|N|no|No|NO) PLUGINS=ui ;;
+    y|Y|yes|Yes|YES) PLUGINS=setup ;;
+    "") : ;;
+  esac
 fi
 
 compute_deps_plan
@@ -2780,6 +2805,13 @@ write_env() {
   set_env DSH_UPDATER_TOKEN "$DSH_UPDATER_TOKEN" "$file"
   set_env DSH_SETUP_VERSION "$SETUP_VERSION" "$file"
   set_env DSH_PLUGINS "$PLUGINS" "$file"
+  if [ "$PLUGINS" = setup ]; then
+    # Suggested installs resolve the newest published plugin at install time;
+    # plugins.json stays the floor and the registry-unreachable fallback.
+    set_env DSH_PLUGIN_LATEST 1 "$file"
+  else
+    del_env DSH_PLUGIN_LATEST "$file"
+  fi
   set_env DESIGN "$DESIGN" "$file"
   set_env CONTAINERS "$CONTAINERS" "$file"
   set_env SERVICE_USER "$SERVICE_USER" "$file"
@@ -2788,11 +2820,9 @@ write_env() {
     set_env DSH_DESIGN_TLS_PORT "${DSH_DESIGN_TLS_PORT:-8443}" "$file"
     set_env DSH_DESIGN_ENABLED 1 "$file"
     set_env PENPOT_ENABLED 1 "$file"
-    local catalog="$DIR/plugins.json"
-    [ -f "$catalog" ] || catalog="$SRC_DIR/plugins.json"
-    local plugin_ref=""
-    [ -f "$catalog" ] && plugin_ref="$(node -e 'const p = require(process.argv[1]).plugins["dsh-penpot-plugin"]; process.stdout.write(p.spec ?? p.ref ?? "")' "$catalog" 2>/dev/null || true)"
-    if [ -n "$plugin_ref" ]; then set_env PENPOT_PLUGIN_REF "$plugin_ref" "$file"; fi
+    # No pinned PENPOT_PLUGIN_REF: the entrypoint resolves latest when
+    # DSH_PLUGIN_LATEST=1, and plugins.json supplies the fallback floor.
+    del_env PENPOT_PLUGIN_REF "$file"
     set_env PENPOT_API_URL "http://$DSH_BIND_IP:$DSH_DESIGN_PORT" "$file"
   else
     set_env DSH_DESIGN_ENABLED 0 "$file"

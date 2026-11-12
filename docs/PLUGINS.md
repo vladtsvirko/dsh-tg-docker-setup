@@ -8,13 +8,17 @@ where the boundary is.
 | | Connector | Penpot plugin |
 |---|---|---|
 | Repository | `dsh-telegram-connector` | `dsh-penpot-plugin` |
-| Current version | `0.15.1` | `0.4.1` |
+| Current version | `0.15.1` | `0.4.6` |
 | Standalone guide | [docs/STANDALONE.md](https://github.com/vladtsvirko/dsh-telegram-connector/blob/main/docs/STANDALONE.md) | [docs/STANDALONE.md](https://github.com/vladtsvirko/dsh-penpot-plugin/blob/main/docs/STANDALONE.md) |
-| Install | `dsh plugin --profile <p> add dsh-telegram-connector@0.15.1` | `dsh plugin --profile <p> add dsh-penpot-plugin@0.4.1` |
+| Install | `dsh plugin --profile <p> add dsh-telegram-connector@0.15.1` | `dsh plugin --profile <p> add dsh-penpot-plugin@0.4.6` |
 | Bundle patch | mounts the connector row, token from env | mounts `dsh-penpot`, URL/token from env |
 | UI configuration | Plugins → **Configure**: bot token, allowed ids, admin id | Plugins → **Configure**: API URL, token |
 | Setup extras | supervisor, updater, components, firewall, managed row | Penpot/Podman stack, `penpot` CLI, managed row |
-| UI-managed setup | `setup.sh install --plugins ui` skips both installs; install them from the Plugins page | same |
+| UI-managed setup | `setup.sh install --plugins none` (legacy `ui`) skips both installs; install them from the Plugins page | same |
+
+The installer asks whether to add the suggested plugins: the Telegram connector
+by default, plus the Penpot plugin when the Penpot stack is enabled. Answering
+no is UI-managed mode; `--plugins suggested|none` sets it unattended.
 
 In UI-managed mode the setup installs nothing: the Plugins page uses DSH's own
 plugin manager, which installs the latest published npm release and updates it
@@ -66,13 +70,16 @@ real handlers with a fake plugin manager).
 
 ## Update model
 
-The setup pins each plugin's exact npm version and a minimum in `plugins.json`:
+`plugins.json` carries a fallback spec, a GitHub fallback and a minimum:
 
-- **Fresh install / repair:** install `spec` from npm. If the registry cannot be
-  reached, install the same release from `fallback` on GitHub.
+- **Fresh install / repair (suggested):** resolve npm `latest` at install time
+  and pin the installed version. If the registry cannot be reached, install
+  `spec` from npm or the same release from `fallback` on GitHub.
 - **Boot:** if the installed version is below `minimum`, reinstall; otherwise
   leave it. A newer version installed from the bot is never downgraded. A
-  legacy `.env` pin below `minimum` is overridden by the catalog spec.
+  legacy `.env` pin below `minimum` is overridden by the catalog spec. An
+  explicit `DSH_TELEGRAM_PLUGIN`/`PENPOT_PLUGIN_REF` pin opts out of latest for
+  that package.
 - **Update from Telegram:**
   - `/system update connector [to <version>] [now]` resolves the newest npm
     version (or the repository tag for a GitHub-installed connector), checks

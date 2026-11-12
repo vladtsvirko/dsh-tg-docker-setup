@@ -1,12 +1,12 @@
 # Release and version rules
 
 Three artifacts, two release tracks. The setup is released as one unit with
-DSH; each plugin is released on its own and pinned by the setup's `plugins.json`.
+DSH; each plugin is released on its own and tracked by the setup's `plugins.json`.
 
 ```
-setup VERSION:  0.2.1-rc.5-0.14.16        tag v0.2.1-rc.5-0.14.16
+setup VERSION:  0.2.1-rc.5-0.15.0        tag v0.2.1-rc.5-0.15.0
 connector:      0.15.1                    tag v0.15.1
-penpot plugin:  0.4.1                     tag v0.4.1
+penpot plugin:  0.4.6                     tag v0.4.6
 ```
 
 - The DSH part is the runtime the setup release installs. It is the prefix of
@@ -25,20 +25,21 @@ penpot plugin:  0.4.1                     tag v0.4.1
   `setup.sh update` accept it; neither crosses without it.
 - Tags are immutable. `VERSION`, the tag and the `AGENTS.md` example move
   together.
-- **Plugins are independent.** `plugins.json` pins an exact npm `spec`, a
-  GitHub `fallback` of the same release, and a `minimum` for the connector and
-  the Penpot plugin. A fresh install and a repair use the spec (falling back to
-  GitHub when the registry is unreachable); a boot only forces a reinstall when
-  the installed version is below the minimum. A newer compatible version
-  installed from the bot stays installed. A setup release does **not** need a
-  matching connector or plugin tag, and a plugin release does **not** need a
-  setup release.
+- **Plugins are independent.** `plugins.json` carries an exact npm `spec` (the
+  registry-unreachable fallback), a GitHub `fallback` of the same release, and a
+  `minimum` for the connector and the Penpot plugin. A suggested install
+  resolves npm `latest` at install time and pins the installed version; a boot
+  only forces a reinstall when the installed version is below the minimum. A
+  newer compatible version installed from the bot stays installed. A setup
+  release does **not** need a matching connector or plugin tag, and a plugin
+  release does **not** need a setup release.
 - The setup never derives a plugin spec from `VERSION`. A setup release that
   needs a newer plugin raises `minimum`; that is the only coupling left.
 - **`DSH_PLUGINS=ui` is the exception to all of the above.** A deployment that
   sets it installs neither plugin and does not pin or patch them: both are
   installed and configured from the Plugins page, where each bundle carries its
-  own configuration form. `plugins.json` is the setup-managed mode's pin only.
+  own configuration form. `plugins.json` is the setup-managed mode's fallback
+  and floor only.
 
 ## Release checklist
 
@@ -47,9 +48,9 @@ penpot plugin:  0.4.1                     tag v0.4.1
 2. Update `VERSION`, the `AGENTS.md` example, README compatibility notes,
    `docs/VERSIONS.md` and any doc that names the current tag
    (`docs/UAT.md`, `docs/SELF-UPDATE.md`).
-3. If the release depends on newer plugin behaviour, bump the plugin's `minimum`
-   in `plugins.json` (and its `spec`/`fallback`). The plugin version must already
-   be published to npm. Do not add a matching plugin tag requirement to CI.
+3. If the release depends on newer plugin behaviour, bump the plugin's
+   `minimum` in `plugins.json`; `spec`/`fallback` should name a published release
+   (they are the registry fallback, not the install target). Do not add a matching plugin tag requirement to CI.
 4. Run `node --test *.test.mjs`, `bash -n setup.sh entrypoint.sh
    healthcheck.sh scripts/repair.sh`, and
    `node scripts/check-version.mjs` with `GITHUB_REF_NAME=v<VERSION>`.

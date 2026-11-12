@@ -1,6 +1,20 @@
 # Changelog
 
-## 0.2.1-rc.5-0.14.16
+## 0.2.1-rc.5-0.15.0
+
+### Added
+
+- **Choose the plugins at install time.** The installer asks whether to add the
+  suggested plugins — the Telegram connector (recommended) and the Penpot
+  plugin when the Penpot stack is enabled. `--plugins suggested|none` (legacy
+  `setup`/`ui`) or `DSH_PLUGINS` answers it unattended. `none` is the
+  UI-managed path: install and configure them from the Plugins page with DSH's
+  own plugin manager.
+- **Suggested plugins are latest at install time.** A suggested install
+  resolves the newest published npm version for each selected plugin and pins
+  the installed version; `plugins.json` becomes the registry-unreachable
+  fallback and the `minimum` floor. The Penpot fallback is raised to `0.4.6`.
+  An explicit `DSH_TELEGRAM_PLUGIN`/`PENPOT_PLUGIN_REF` still opts out.
 
 ### Changed
 

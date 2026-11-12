@@ -108,7 +108,7 @@ curl -fsSL …/setup.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.14.16`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.15.0`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -123,7 +123,7 @@ git clone https://github.com/vladtsvirko/dsh-tg-docker-setup
 cd dsh-tg-docker-setup
 ./setup.sh --check        # the full plan, nothing changed
 ./setup.sh                # interactive: port, key, bot token, admin, git
-./setup.sh --plugins ui   # install only DSH; add and configure plugins in the UI
+./setup.sh --plugins none # install only DSH; add plugins in the UI
 ```
 
 ### Containers
@@ -238,9 +238,9 @@ different name is never touched. The setup currently ships:
 Three artifacts, two release tracks:
 
 ```
-setup          0.2.1-rc.5-0.14.16      tag v0.2.1-rc.5-0.14.16
+setup          0.2.1-rc.5-0.15.0      tag v0.2.1-rc.5-0.15.0
 connector      0.15.1                 tag v0.15.1
-penpot plugin  0.3.1                  tag v0.3.1
+penpot plugin  0.4.6                  tag v0.4.6
 ```
 
 **Setup.** The DSH part is the exact tested runtime. It is derived from
@@ -251,20 +251,27 @@ line. Crossing a DSH line or product major requires the explicit
 `--i-know-versions-are-incompatible`; neither `/system` nor a scheduled update
 crosses on its own.
 
+**Plugins are a choice.** The installer suggests the Telegram connector and,
+when the Penpot stack is enabled, the Penpot plugin. `--plugins none` (or
+`DSH_PLUGINS=ui`/`none`) installs neither; add them from the Plugins page with
+DSH's own plugin manager, which takes the latest npm release.
+
 **Plugins.** The connector and the Penpot plugin are versioned on their own,
 with plain semver and their own release checklists. Both are published to npm;
-`plugins.json` pins an exact `spec` and a `minimum` for each, plus the same
-release's GitHub tag as a registry-unreachable `fallback`. There is no
+`plugins.json` records an exact `spec` (the registry-unreachable fallback), a
+`minimum` for each, and the same release's GitHub tag as a second fallback. There is no
 matching-tag rule: a setup release does not need a connector or plugin tag, and
 a plugin release does not need a setup release.
 
-The entrypoint follows one rule: **install the spec when absent, enforce the
-minimum, never downgrade.**
+The entrypoint follows one rule: **a suggested install takes npm latest at
+install time, enforces the minimum, and never downgrades.**
 
-- A fresh install or a repair adds the `plugins.json` spec from npm; if the
-  registry is unreachable, it installs the same release from the GitHub fallback.
+- A fresh suggested install or a repair resolves the newest published version
+  from npm and pins it; if the registry is unreachable, it installs the
+  `plugins.json` spec from the GitHub fallback.
 - A boot compares the installed version with `minimum`; only a version below it
-  is reinstalled.
+  is reinstalled. An explicit `DSH_TELEGRAM_PLUGIN`/`PENPOT_PLUGIN_REF` pin
+  opts out of the latest lookup for that package.
 - A newer compatible version installed from the bot (`/system update connector`,
   `/system update penpot`) stays installed across reboots and setup updates.
 - If a release genuinely needs a newer plugin, it raises `minimum`; that is the

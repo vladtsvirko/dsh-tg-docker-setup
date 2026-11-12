@@ -481,6 +481,20 @@ normalize_profile_specs() {
   ' "$PROFILE_DIR/package.json" 2>/dev/null || true
 }
 
+# Resolve the newest published version for an install-time argument. The
+# setup sets DSH_PLUGIN_LATEST=1 for a suggested install; a boot with the
+# package already present never reaches this. An explicit .env pin or a
+# targeted update never calls it.
+latest_spec() {
+  local pkg="$1" version
+  command -v npm >/dev/null 2>&1 || return 1
+  version="$(npm view "$pkg" version 2>/dev/null | tail -n 1 | tr -d '[:space:]')"
+  case "$version" in
+    ''|*[!0-9A-Za-z.+-]*) return 1 ;;
+  esac
+  printf '%s@%s' "$pkg" "$version"
+}
+
 install_plugin() {
   # Check the installed copy, not the manifest entry: `reset-plugin` keeps the
   # dependency but wipes node_modules, and that must re-trigger the install.
@@ -488,7 +502,7 @@ install_plugin() {
   # A newer compatible connector installed from the bot must survive a reboot,
   # so the checkout pin is a floor, not a ceiling. Only a missing package, a
   # package below `minimum`, or an explicit target triggers a reinstall.
-  local stamp="$PROFILE_DIR/.telegram-plugin-ref" target desired installed_version min override_version fallback candidates candidate
+  local stamp="$PROFILE_DIR/.telegram-plugin-ref" target desired installed_version min override_version fallback candidates candidate latest
   target="$PLUGIN_TARGET_REF"
   desired="${target:-$PLUGIN_REF}"
   min="$PLUGIN_MIN"
@@ -518,6 +532,14 @@ install_plugin() {
   fi
   command -v pnpm >/dev/null 2>&1 ||
     warn "pnpm is not on PATH — the adapter install will fail; install pnpm"
+
+  if [ -z "$target" ] && [ "$PLUGIN_REF_FROM_ENV" = 0 ] && [ "${DSH_PLUGIN_LATEST:-0}" = 1 ]; then
+    latest="$(latest_spec "$PLUGIN_PKG" || true)"
+    if [ -n "$latest" ]; then
+      desired="$latest"
+      log "installing latest $PLUGIN_PKG ($latest)"
+    fi
+  fi
 
   candidates=("$desired")
   if [ -z "$target" ] && [ -n "$fallback" ] && [ "$fallback" != "$desired" ]; then
@@ -597,7 +619,7 @@ install_penpot() {
   # Same shape as the Telegram adapter: the checkout pin installs a missing
   # plugin and enforces a minimum, but never downgrades a newer version the bot
   # installed through the plugin manager.
-  local stamp="$PROFILE_DIR/.penpot-plugin-ref" installed_version desired override_version fallback candidates candidate
+  local stamp="$PROFILE_DIR/.penpot-plugin-ref" installed_version desired override_version fallback candidates candidate latest
   [ -n "$PENPOT_REF" ] || { warn "PENPOT_PLUGIN_REF is empty — design tools stay off"; return 1; }
   desired="$PENPOT_REF"
   fallback="$PENPOT_FALLBACK"
@@ -618,6 +640,13 @@ install_penpot() {
     log "Penpot plugin $installed_version is older than the required $PENPOT_MIN; reinstalling"
     dsh plugin --profile web remove "$PENPOT_PKG" >/dev/null 2>&1 || true
     rm -rf "$PROFILE_DIR/node_modules/$PENPOT_PKG"
+  fi
+  if [ "$PENPOT_REF_FROM_ENV" = 0 ] && [ "${DSH_PLUGIN_LATEST:-0}" = 1 ]; then
+    latest="$(latest_spec "$PENPOT_PKG" || true)"
+    if [ -n "$latest" ]; then
+      desired="$latest"
+      log "installing latest $PENPOT_PKG ($latest)"
+    fi
   fi
   command -v pnpm >/dev/null 2>&1 ||
     warn "pnpm is not on PATH — the plugin install will fail; install pnpm"

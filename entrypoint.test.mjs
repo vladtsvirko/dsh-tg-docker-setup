@@ -131,6 +131,15 @@ const fakeDshPath = async (root) => {
   const file = join(bin, 'dsh')
   await writeFile(file, fakeDsh)
   await chmod(file, 0o755)
+  // latest_spec asks `npm view <pkg> version`; keep it offline and deterministic.
+  const npm = join(bin, 'npm')
+  await writeFile(npm, [
+    '#!/bin/sh',
+    'if [ "$1" = view ]; then echo "${FAKE_NPM_VERSION:-0.99.0}"; exit 0; fi',
+    'exit 1',
+    '',
+  ].join('\n'))
+  await chmod(npm, 0o755)
   return bin
 }
 
@@ -176,7 +185,7 @@ function envFor(parts, extra = {}) {
   // The test process may run inside a live deployment; its plugin overrides
   // must not leak into the fixture.
   const clean = { ...process.env }
-  for (const key of ['PENPOT_PLUGIN_REF', 'PENPOT_ENABLED', 'PENPOT_API_URL', 'PENPOT_ACCESS_TOKEN', 'DSH_TELEGRAM_PLUGIN', 'DSH_PLUGIN_TARGET_REF']) delete clean[key]
+  for (const key of ['PENPOT_PLUGIN_REF', 'PENPOT_ENABLED', 'PENPOT_API_URL', 'PENPOT_ACCESS_TOKEN', 'DSH_TELEGRAM_PLUGIN', 'DSH_PLUGIN_TARGET_REF', 'DSH_PLUGIN_LATEST']) delete clean[key]
   return {
     ...clean,
     HOME: parts.home,
@@ -272,6 +281,31 @@ test('a connector at or above the minimum is left alone', async () => {
     assert.equal(await installed(parts.home), '0.13.1')
     assert.equal((await recorded(parts.home))['dsh-telegram-connector'], '0.13.1')
     assert.doesNotMatch(stderr, /installing the Telegram adapter/)
+  } finally {
+    await rm(parts.root, { recursive: true, force: true })
+  }
+})
+
+test('DSH_PLUGIN_LATEST installs npm latest for a missing connector', async () => {
+  const parts = await deployment()
+  try {
+    await run(parts, ['init'], { DSH_PLUGIN_LATEST: '1', FAKE_NPM_VERSION: '0.14.9' })
+    assert.equal(await installed(parts.home), '0.14.9')
+    assert.equal((await recorded(parts.home))['dsh-telegram-connector'], '0.14.9')
+  } finally {
+    await rm(parts.root, { recursive: true, force: true })
+  }
+})
+
+test('an explicit connector pin wins over DSH_PLUGIN_LATEST', async () => {
+  const parts = await deployment()
+  try {
+    await run(parts, ['init'], {
+      DSH_PLUGIN_LATEST: '1',
+      FAKE_NPM_VERSION: '0.14.9',
+      DSH_TELEGRAM_PLUGIN: 'dsh-telegram-connector@0.13.2',
+    })
+    assert.equal(await installed(parts.home), '0.13.2')
   } finally {
     await rm(parts.root, { recursive: true, force: true })
   }
