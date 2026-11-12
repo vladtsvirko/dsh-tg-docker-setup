@@ -34,7 +34,7 @@ a warning when Podman is absent, and the runtime keeps working without it.
 ## Firewall
 
 Podman does **not** bypass ufw the way Docker does. When ufw is active, the
-installer (and `setup.sh components enable design`) adds the three rules the
+installer (and `setup.sh penpot enable`) adds the three rules the
 stack needs:
 
 ```sh
@@ -66,14 +66,14 @@ stack.
 3. Put it where the setup reads it: `PENPOT_ACCESS_TOKEN` in the **exported**
    environment, in the answers file passed with `--config`, or directly in
    `/srv/dsh/design/.env` (and `/srv/dsh/.env`). The setup never prompts — a
-   re-run keeps the stored token, and `./setup.sh components enable design`
+   re-run keeps the stored token, and `./setup.sh penpot enable`
    mirrors it into both files. A shell variable set with `read` is not visible
    to `setup.sh` until it is exported:
 
    ```sh
    read -rsp 'Penpot access token: ' PENPOT_ACCESS_TOKEN; echo
    export PENPOT_ACCESS_TOKEN
-   ./setup.sh components enable design
+   ./setup.sh penpot enable
    unset PENPOT_ACCESS_TOKEN
    ```
 
@@ -112,7 +112,7 @@ scp <you>@<DSH_BIND_IP>:/srv/dsh/design/certs/ca.crt ~/Downloads/dsh-penpot-ca.c
   Authorities → Import — the same downloaded file.
 
 Then open `https://<DSH_BIND_IP>:8443/`: no warning, and the Copy button works.
-The installer and `setup.sh components enable design` print this same block.
+The installer and `setup.sh penpot enable` print this same block.
 
 The CA is kept across updates, so trusting it once is enough. The server
 certificate is re-issued when the bind address changes or before it expires;

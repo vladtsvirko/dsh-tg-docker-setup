@@ -78,7 +78,7 @@ but is the firewall.
 
 ## Penpot
 
-`--design penpot` runs the design stack through **rootful** `podman-compose`
+`--design penpot` (or `setup.sh penpot enable` later) runs the Penpot stack through **rootful** `podman-compose`
 under the updater. The Penpot images need normal container networking and
 bind-mounted data; the agent's own containers remain rootless.
 

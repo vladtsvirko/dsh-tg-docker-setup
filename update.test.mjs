@@ -375,6 +375,6 @@ test('--help works without a deployment and exits 0', async () => {
 
 test('the apply prompt defaults to yes', async () => {
   const source = await readFile(join(here, 'setup.sh'), 'utf8')
-  assert.match(source, /apply\? \[Y\/n\]/)
-  assert.doesNotMatch(source, /apply\? \[y\/N\]/)
+  assert.match(source, /Apply update\? \[Y\/n\]/)
+  assert.doesNotMatch(source, /Apply update\? \[y\/N\]/)
 })

@@ -107,7 +107,7 @@ variable by name. `penpot_teams` proves the token.
   update, so for a design-only host use `git pull` and
   `sudo ./setup.sh components --dir /srv/penpot --bind 192.168.2.98 enable design`
   again (it reconciles the stack and keeps `design/.env` and the data).
-- **Stop / start:** `sudo ./setup.sh components disable design` stops the
+- **Stop / start:** `sudo ./setup.sh penpot disable` stops the
   containers and keeps data; `enable` starts them again. Neither touches DSH.
 - **Token rotation:** create a new token on the server, update
   `PENPOT_ACCESS_TOKEN` on the laptop and restart the desktop app.

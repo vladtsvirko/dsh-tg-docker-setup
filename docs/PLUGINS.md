@@ -16,6 +16,11 @@ where the boundary is.
 | Setup extras | supervisor, updater, components, firewall, managed row | Penpot/Podman stack, `penpot` CLI, managed row |
 | UI-managed setup | `setup.sh install --plugins ui` skips both installs; install them from the Plugins page | same |
 
+In UI-managed mode the setup installs nothing: the Plugins page uses DSH's own
+plugin manager, which installs the latest published npm release and updates it
+independently of the setup tag. Setup-managed mode is the pinned path
+(`plugins.json`); pick it only when a deployment must be reproducible.
+
 ## The test
 
 A plugin passes the standalone test when **all** of its model-facing capability

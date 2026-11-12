@@ -41,10 +41,10 @@
 # Covered by repair.test.mjs.
 set -uo pipefail
 
-log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+log()  { if [ -n "${NO_COLOR:-}" ]; then printf '==> %s\n' "$*"; else printf '\033[1;36m==>\033[0m %s\n' "$*"; fi; }
 say()  { printf '%-5s %-16s %s\n' "$1" "$2" "$3"; }
-warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
-die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
+warn() { if [ -n "${NO_COLOR:-}" ]; then printf 'warning: %s\n' "$*" >&2; else printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; fi; }
+die()  { if [ -n "${NO_COLOR:-}" ]; then printf 'error: %s\n' "$*" >&2; else printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; fi; exit 1; }
 
 MODE=""
 DIR=""

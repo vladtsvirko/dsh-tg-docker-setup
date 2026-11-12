@@ -2,7 +2,7 @@
   "version": 1,
   "components": {
     "design": {
-      "label": "Design (Penpot)",
+      "label": "Penpot",
       "description": "Penpot and the penpot CLI",
       "compose": "design/compose.yaml",
       "projectDir": "design",

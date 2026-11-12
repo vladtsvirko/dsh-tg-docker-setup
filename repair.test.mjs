@@ -375,6 +375,16 @@ test('a data directory owned by another user is a failure, not a warning', async
   }
 })
 
+test('NO_COLOR strips ANSI escapes from the doctor output', async () => {
+  const dir = await fixture()
+  try {
+    const { out } = await run(['--dir', dir], { env: { NO_COLOR: '1' } })
+    assert.doesNotMatch(out, /\x1b\[/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('the deployed .env names the service user when the caller does not', async () => {
   // setup.sh passes SERVICE_USER explicitly; a manual doctor run may not. The
   // .env written by the installer is the next source of truth.

@@ -282,14 +282,33 @@ test('update.sh --to applies natively: checkout, env, restart, health gate', asy
   }
 })
 
-test('the design stack is opt-in and named in the plan', async () => {
+test('the Penpot stack is opt-in, named in the plan and independent of DSH', async () => {
   const off = await install(['--check', '--yes'])
-  assert.match(off.out, /design:\s+none \(re-run with --design penpot to add it later\)/)
+  assert.match(off.out, /penpot:\s+none \(optional stack; DSH runs without it\)/)
 
   const on = await install(['--check', '--design', 'penpot', '--yes'])
   assert.equal(on.code, 0)
-  assert.match(on.out, /design:\s+Penpot on http:\/\/\S+:8090\//)
+  assert.match(on.out, /penpot:\s+Penpot on http:\/\/\S+:8090\//)
 
+})
+
+test('penpot is the command name; design stays as a compatibility alias', async () => {
+  const list = await exec('bash', [join(here, 'setup.sh'), 'penpot', '--dir', here, 'list'])
+  assert.match(list.stdout, /^penpot\t/m)
+  const help = await exec('bash', [join(here, 'setup.sh'), 'help', 'penpot'])
+  assert.match(help.stdout, /Penpot runs on Podman and is independent of DSH/)
+})
+
+test('NO_COLOR strips ANSI escapes from the plan', async () => {
+  const plan = await install(['--check', '--yes'], { env: { NO_COLOR: '1', DESIGN: 'none', CONTAINERS: 'none' } })
+  assert.equal(plan.code, 0, plan.out)
+  assert.doesNotMatch(plan.out, /\x1b\[/)
+})
+
+test('the closing hint names setup.sh update, not the removed update.sh', async () => {
+  const source = await readFile(join(here, 'setup.sh'), 'utf8')
+  assert.doesNotMatch(source, /update\.sh --apply/)
+  assert.match(source, /setup\.sh update/)
 })
 
 test('an unknown design value is refused', async () => {
@@ -525,7 +544,7 @@ test('configuring a running stack recreates it on the new port', async () => {
     const log = await readFile(calls, 'utf8')
     const mainEnv = await readFile(join(dir, '.env'), 'utf8')
 
-    assert.match(stdout, /starting design on 127\.0\.0\.1:8094/)
+    assert.match(stdout, /starting Penpot on 127\.0\.0\.1:8094/)
     assert.match(log, / up -d/)
     // the runtime is restarted by systemd so the new PENPOT_API_URL lands
     assert.match(mainEnv, /PENPOT_API_URL=http:\/\/127\.0\.0\.1:8094/)
@@ -613,7 +632,7 @@ test('an .env from an older release is repaired, not rejected', async () => {
     assert.equal(result.code, 0, result.out)
     assert.match(result.out, /web:\s+http:\/\/127\.0\.0\.1:4311\//)
     assert.match(result.out, /telegram:\s+configured/)
-    assert.match(result.out, /design:\s+none/)
+    assert.match(result.out, /penpot:\s+none/)
     assert.equal(await readFile(join(dir, '.env'), 'utf8'), before, '--check must not rewrite .env')
   } finally {
     await rm(dir, { recursive: true, force: true })

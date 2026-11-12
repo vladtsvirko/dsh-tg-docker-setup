@@ -32,10 +32,10 @@ if [ "${BASH_SOURCE[0]}" != "$0" ]; then
   HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
 fi
 
-log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
+log()  { if [ -n "${NO_COLOR:-}" ]; then printf '==> %s\n' "$*"; else printf '\033[1;36m==>\033[0m %s\n' "$*"; fi; }
+warn() { if [ -n "${NO_COLOR:-}" ]; then printf 'warning: %s\n' "$*" >&2; else printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; fi; }
 die()  {
-  printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2
+  if [ -n "${NO_COLOR:-}" ]; then printf 'error: %s\n' "$*" >&2; else printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; fi
   # A sourced caller must survive: the test asserts on the message, not on exit.
   [ "$SETUP_SOURCED" = 1 ] && return 1
   exit 1
@@ -219,7 +219,7 @@ else
 fi
 case "$COMMAND" in
   -*) COMMAND=install ;;
-  install|update|status|doctor|components|uninstall|help) shift || true ;;
+  install|update|status|doctor|components|penpot|uninstall|help) shift || true ;;
 esac
 COMMAND_ARGS=("$@")
 INSTALL_ARGS=("$@")
@@ -261,10 +261,10 @@ DSH_DESIGN_PORT="${DSH_DESIGN_PORT:-}"
 DSH_DESIGN_TLS_PORT="${DSH_DESIGN_TLS_PORT:-}"
 PENPOT_ACCESS_TOKEN="${PENPOT_ACCESS_TOKEN:-}"
 
-log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
+log()  { if [ -n "${NO_COLOR:-}" ]; then printf '==> %s\n' "$*"; else printf '\033[1;36m==>\033[0m %s\n' "$*"; fi; }
+warn() { if [ -n "${NO_COLOR:-}" ]; then printf 'warning: %s\n' "$*" >&2; else printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; fi; }
 die()  {
-  printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2
+  if [ -n "${NO_COLOR:-}" ]; then printf 'error: %s\n' "$*" >&2; else printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; fi
   # A sourced caller must survive: the test asserts on the message, not on exit.
   [ "$SETUP_SOURCED" = 1 ] && return 1
   exit 1
@@ -283,7 +283,7 @@ Commands:
   update       Update to the newest compatible release
   status       Show versions, services and health
   doctor       Check the deployment; --fix repairs the safe subset
-  components   Manage the optional design stack
+  components   Manage the optional Penpot stack (alias: penpot)
   uninstall    Remove the services; --purge deletes data too
   help         Show this help, or help for one command
 
@@ -301,10 +301,12 @@ Examples:
   ./setup.sh update --check             # what an update would do
   ./setup.sh status
   sudo ./setup.sh doctor --fix
-  sudo ./setup.sh components enable design
+  sudo ./setup.sh penpot enable         # Penpot is independent of DSH
   sudo ./setup.sh uninstall --purge
 
 Exit codes: 0 ok, 1 error, 2 update available (--check), 3 cancelled.
+
+Environment: NO_COLOR=1 disables ANSI colour; --yes never prompts.
 EOF
 }
 
@@ -1277,7 +1279,7 @@ update_apply() {
   log "snapshot: $snapshot"
 
   log "checking out $target"
-  if ! git -c advice.detachedHead=false checkout --detach "$target"; then
+  if ! git -c advice.detachedHead=false checkout --detach "$target" >/dev/null 2>&1; then
     warn "checkout failed; still on $cur"
     return 1
   fi
@@ -1296,7 +1298,11 @@ update_apply() {
       || warn "could not install dsh $target_dsh — the health gate will decide"
   fi
 
-  log "preparing the profile and the pinned connector"
+  if [ "$(env_get DSH_PLUGINS)" = ui ]; then
+    log "preparing the profile (plugins are managed from the UI)"
+  else
+    log "preparing the profile and the setup-managed plugins"
+  fi
   local entry
   if ! entry="$(entrypoint_bin)"; then
     warn "no entrypoint launcher in /usr/local/bin or $DEPLOY_DIR — rolling back to $cur"
@@ -1360,6 +1366,17 @@ web_ready() {
     200|302|303|401|403) return 0 ;;
   esac
   return 1
+}
+
+web_label() {
+  local code
+  code="$(web_code)"
+  case "$code" in
+    200|302|303) printf '%s' "$code" ;;
+    401|403) printf '%s (auth required)' "$code" ;;
+    000) printf 'no answer' ;;
+    *) printf '%s' "$code" ;;
+  esac
 }
 
 
@@ -1464,6 +1481,7 @@ self_check() {
   log "target tag:  $target  (latest compatible)"
   log "available:   $(printf '%s\n' "$all" | tr '\n' ' ')"
   git --no-pager log --oneline "$cur..$target" | sed 's/^/    /'
+  log "apply with: ./setup.sh update"
   exit 2
 }
 
@@ -1507,7 +1525,7 @@ self_update() {
   log "setup update: $cur → $target"
   git --no-pager log --oneline "$cur..$target" | sed 's/^/    /'
   if [ "${ASSUME_YES:-0}" != 1 ]; then
-    read -r -p "apply? [Y/n] " answer
+    read -r -p "Apply update? [Y/n] " answer
     case "$answer" in
       n|N|no|No|NO) log "cancelled"; return 0 ;;
     esac
@@ -1581,7 +1599,7 @@ status() {
   printf '%-22s %s
 ' "updater" "$(systemctl is-active dsh-updater.service 2>/dev/null || echo missing)"
   printf '%-22s %s
-' "web" "$(web_code)"
+' "web" "$(web_label)"
   printf '%-22s %s
 ' "telegram adapter" "$(
     node -p "require('$NATIVE_DATA/home/profiles/web/node_modules/dsh-telegram-connector/package.json').version" 2>/dev/null || echo 'not installed'
@@ -1701,6 +1719,9 @@ design_reconcile() {
 
 component_apply() {
   local name=$1 action=$2 port=${3:-}
+  case "$name" in penpot|Penpot) name=design ;; esac
+  local display=$name
+  [ "$name" = design ] && display=Penpot
   local names
   names="$(component_names 2>/dev/null || true)"
   case " $names " in
@@ -1721,8 +1742,12 @@ component_apply() {
     [ "$port" -ge 1024 ] && [ "$port" -le 65535 ] || die "port must be between 1024 and 65535"
   fi
 
+  if [ "$action" = enable ] && ! command -v podman-compose >/dev/null 2>&1; then
+    die "Penpot needs podman-compose — install podman and podman-compose, or run ./setup.sh install --design penpot"
+  fi
+
   if [ ! -f "$env_file" ]; then
-    [ "$action" = disable ] && { log "$name is not installed; nothing to disable"; return 0; }
+    [ "$action" = disable ] && { log "$display is not installed; nothing to disable"; return 0; }
     [ -f "$template" ] || die "no $env_file and no $template to create it from"
     mkdir -p "$compose_dir"
     cp "$template" "$env_file"
@@ -1759,7 +1784,7 @@ component_apply() {
 
   case "$action" in
     enable|configure)
-      log "starting $name on $bind:$port"
+      log "starting $display on $bind:$port"
       local tls_port="${DSH_DESIGN_TLS_PORT:-}"
       [ -n "$tls_port" ] || tls_port="$(sed -n 's/^DSH_DESIGN_TLS_PORT=//p' "$env_file" | head -1)"
       [ -n "$tls_port" ] || tls_port="$(env_get DSH_DESIGN_TLS_PORT 2>/dev/null || true)"
@@ -1767,7 +1792,7 @@ component_apply() {
       set_env DSH_DESIGN_TLS_PORT "$tls_port" "$env_file"
       prepare_penpot_data "$compose_dir"
       prepare_penpot_tls "$compose_dir" "$bind" || warn "Penpot will be reachable over HTTP only"
-      ( cd "$compose_dir" && podman-compose -f "$compose_file" up -d --force-recreate penpot-frontend penpot-tls ) || die "podman-compose failed for $name"
+      ( cd "$compose_dir" && podman-compose -f "$compose_file" up -d --force-recreate penpot-frontend penpot-tls ) || die "podman-compose failed for Penpot"
       component_ufw "$port" "$(basename "$compose_dir")" "$bind" "$tls_port"
       # The DSH side is a separate lifecycle. A deployment gets the env keys so
       # the next runtime start loads the plugin; a standalone design install
@@ -1795,7 +1820,7 @@ component_apply() {
         warn "no Penpot access token — create one in Penpot (Settings → Access tokens) and set PENPOT_ACCESS_TOKEN in $env_file"
       fi
       if dsh_deployed; then
-        log "design stack is up — the DSH Penpot tools load on the next dsh.service start (setup.sh install restarts it)"
+        log "Penpot is up — the DSH Penpot tools load on the next dsh.service start (setup.sh install restarts it)"
       else
         log "design stack is up (standalone; no DSH deployment in $DIR)"
       fi
@@ -1807,9 +1832,9 @@ component_apply() {
         set_env "$flag" 0 "$ENV_FILE"
         set_env PENPOT_ENABLED 0 "$ENV_FILE"
         set_env PENPOT_ACCESS_TOKEN "" "$ENV_FILE"
-        log "design stack stopped — the DSH Penpot tools disappear on the next dsh.service start"
+        log "Penpot stopped — the DSH Penpot tools disappear on the next dsh.service start"
       else
-        log "design stack stopped"
+        log "Penpot stopped"
       fi
       ;;
   esac
@@ -1823,7 +1848,7 @@ component_apply() {
     local probe_url
     probe_url="$(printf '%s' "$(component_field "$name" health.url)" | sed -e "s/{bind}/$bind/" -e "s/{port}/$port/")"
     if component_health "$probe_url" "${codes:-200}"; then
-      log "$name is up"
+      log "$display is up"
     else
       warn "$name containers are up, but $probe_url did not answer — check the port"
       ( cd "$compose_dir" && podman-compose -f "$compose_file" ps ) 2>/dev/null \
@@ -1860,11 +1885,13 @@ setup.sh install — install or repair the deployment.
   sudo ./setup.sh install
   sudo ./setup.sh install --check
   sudo ./setup.sh install --yes --config answers.env
-  sudo ./setup.sh install --design penpot
+  sudo ./setup.sh install                 # DSH only; no Penpot
+  sudo ./setup.sh install --design penpot # add the independent Penpot stack
 
 Options:
-  --design penpot|none   optional Penpot stack (default: ask, else none)
-  --plugins setup|ui     install the pinned plugins (setup) or manage them from the UI
+  --design penpot|none   optional Penpot stack on Podman; DSH runs without it
+  --plugins setup|ui     setup-managed pins, or no plugins: install the latest
+                         from the Plugins page with DSH's own plugin manager
   --containers podman    rootless Podman for the agent's containers
   --ref REF              release tag to fetch (default: v<VERSION>)
   --dir PATH             deployment directory (default: /srv/dsh)
@@ -1874,6 +1901,9 @@ Options:
   --no-deps              do not install Node/Podman; fail with the command to run
   --rotate-key           replace the provider key
   --clean-source         remove the bootstrap download after install
+
+DSH and Penpot are separate: installing DSH never requires Penpot, and the
+Penpot stack keeps running when DSH is stopped or removed.
 
 Running it again is a repair: stored answers are the defaults, secrets are kept,
 and the service is restarted once.
@@ -1924,20 +1954,20 @@ instance lock, version, service, web port, design assets, TLS certificate and
 Penpot token. --fix repairs the safe subset and needs root for ownership.
 EOF
       ;;
-    components)
+    components|penpot)
       cat <<'EOF'
-setup.sh components — manage the optional design stack.
+setup.sh penpot — manage the optional Penpot stack (alias: components).
 
-  ./setup.sh components list
-  sudo ./setup.sh components --dir /srv/penpot --bind 192.168.2.98 enable design
-  sudo ./setup.sh components enable design
-  sudo ./setup.sh components disable design
-  sudo ./setup.sh components port design 8091
+  ./setup.sh penpot list
+  sudo ./setup.sh penpot enable
+  sudo ./setup.sh penpot disable
+  sudo ./setup.sh penpot --dir /srv/penpot --bind 192.168.2.98 enable
+  sudo ./setup.sh penpot port 8091
 
-The design stack is Penpot on Podman and is independent of DSH. --dir is the
-checkout with components.json; --bind is the LAN address to publish on (default
-127.0.0.1). Enabling it never restarts dsh.service: the Penpot tools load on the
-next runtime start. Disable stops the containers and keeps design/data.
+Penpot runs on Podman and is independent of DSH: it needs no DSH .env, and
+disabling it never restarts dsh.service. --dir is the checkout with
+components.json (default: the current directory); --bind is the LAN address to
+publish on (default 127.0.0.1). Disable stops the containers and keeps design/data.
 EOF
       ;;
     uninstall)
@@ -2069,7 +2099,7 @@ cmd_components() {
   case "$action" in
     list) ;;
     enable|disable)
-      name="${1:?usage: setup.sh components $action <name> [port]}"; shift || true
+      name="${1:-design}"; shift || true
       [ "$action" = enable ] && { port="${1:-}"; shift || true; }
       ;;
     configure)
@@ -2079,8 +2109,14 @@ cmd_components() {
       ;;
     port|set-port)
       action=configure
-      name="${1:?usage: setup.sh components port <name> <port>}"; shift || true
-      port="${1:?usage: setup.sh components port <name> <port>}"; shift || true
+      # `penpot port 8091` (one component) and `components port design 8091`
+      # are both accepted; the name defaults to the only component.
+      if [ $# -eq 1 ] && [[ "$1" =~ ^[0-9]+$ ]]; then
+        name=design; port="$1"; shift || true
+      else
+        name="${1:?usage: setup.sh penpot port [name] <port>}"; shift || true
+        port="${1:?usage: setup.sh penpot port [name] <port>}"; shift || true
+      fi
       ;;
     -h|--help) help_for components; return 0 ;;
     *) name="${1:-}"; shift || true ;;
@@ -2091,7 +2127,10 @@ cmd_components() {
   if [ "$action" = list ]; then
     local n
     for n in $(component_names); do
-      printf '%s\t%s\n' "$n" "$(component_field "$n" label)"
+      # The registry keeps the historical `design` key; the command surface
+      # calls the stack Penpot.
+      if [ "$n" = design ]; then printf 'penpot\t%s\n' "$(component_field "$n" label)"
+      else printf '%s\t%s\n' "$n" "$(component_field "$n" label)"; fi
     done
     return 0
   fi
@@ -2183,7 +2222,7 @@ case "$COMMAND" in
   update)    cmd_update "${COMMAND_ARGS[@]}"; exit $? ;;
   status)    cmd_status "${COMMAND_ARGS[@]}"; exit $? ;;
   doctor)    cmd_doctor "${COMMAND_ARGS[@]}"; exit $? ;;
-  components) cmd_components "${COMMAND_ARGS[@]}"; exit $? ;;
+  components|penpot) cmd_components "${COMMAND_ARGS[@]}"; exit $? ;;
   uninstall) cmd_uninstall "${COMMAND_ARGS[@]}"; exit $? ;;
   help)      cmd_help "${COMMAND_ARGS[@]}"; exit $? ;;
   *)         die "unknown command: $COMMAND — run setup.sh help" ;;
@@ -2328,6 +2367,16 @@ DATA_WORKSPACE="$DIR/data/workspace"
 SUPERVISOR_STATE="$DIR/data/supervisor"
 UPDATER_URL="http://127.0.0.1:8787"
 [ -n "$REF" ] || REF="v$SETUP_VERSION"
+if [ "$REF" != "v$SETUP_VERSION" ]; then
+  ref_version="$(git -C "$SRC_DIR" show "$REF:VERSION" 2>/dev/null | tr -d '\n' || true)"
+  if [ -n "$ref_version" ]; then
+    log "installing $REF ($ref_version)"
+    SETUP_VERSION="$ref_version"
+    DSH_VERSION="$(printf '%s' "$SETUP_VERSION" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+$//')"
+  else
+    warn "cannot read VERSION from $REF in this checkout; the plan describes $SETUP_VERSION"
+  fi
+fi
 
 # Reaching here as non-root means --check, or a sudo that was refused: the
 # re-exec above normally handles it.
@@ -2383,9 +2432,9 @@ print_plan() {
     printf '    admin:     %s (may update, restart and roll back)\n' "$DSH_ADMIN_USER_ID"
   fi
   if [ "$DESIGN" = penpot ]; then
-    printf '    design:    Penpot on http://%s:%s/ (Podman)\n' "$DSH_BIND_IP" "$DSH_DESIGN_PORT"
+    printf '    penpot:    Penpot on http://%s:%s/ (Podman; independent of DSH)\n' "$DSH_BIND_IP" "$DSH_DESIGN_PORT"
   else
-    printf '    design:    none (re-run with --design penpot to add it later)\n'
+    printf '    penpot:    none (optional stack; DSH runs without it)\n'
   fi
   printf '    containers: %s\n' "$(if [ "$CONTAINERS" = podman ]; then printf 'podman (rootless)'; else printf 'none'; fi)"
   printf '    plugins:   %s\n' "$(if [ "$PLUGINS" = ui ]; then printf 'UI-managed (install and configure from the Plugins page)'; else printf 'setup-managed (pinned in plugins.json)'; fi)"
@@ -2440,7 +2489,7 @@ fi
 # Offer the advanced answers only after the plan shows what the defaults mean.
 CUSTOMIZE=0
 if can_ask; then
-  printf 'Customize port, address, resources, containers, design or git? [y/N] ' >&2
+  printf 'Change defaults (port, address, resources, containers, Penpot, git)? [y/N] ' >&2
   answer="$(read_from_terminal)"
   case "$answer" in
     y|Y|yes|Yes) CUSTOMIZE=1 ;;
@@ -2913,7 +2962,7 @@ design_apply() {
   else
     warn "create the first account at https://$DSH_BIND_IP:$tls_port/ (after trusting the CA below)"
     warn "or at http://$DSH_BIND_IP:$DSH_DESIGN_PORT/ then Settings -> Access tokens,"
-    warn "and re-run ./setup.sh (or ./update.sh --component design enable) to paste it"
+    warn "and re-run ./setup.sh penpot enable to paste it"
   fi
   penpot_tls_hint "$dir" "$DSH_BIND_IP" "$tls_port"
 }
@@ -3095,7 +3144,7 @@ native_apply() {
       run git -C "$DIR" fetch --quiet --tags origin
     fi
   fi
-  run git -C "$DIR" checkout --quiet --detach "$REF" || \
+  run git -C "$DIR" checkout --quiet --detach "$REF" >/dev/null 2>&1 || \
     warn "could not check out $REF in $DIR; staying on the current HEAD"
 
   link_bins
@@ -3173,11 +3222,14 @@ if [ -n "$DSH_TELEGRAM_BOT_TOKEN" ]; then
 else
   printf '    bot:     not configured (web-only) — add DSH_TELEGRAM_BOT_TOKEN to %s/.env, then restart\n' "$DIR"
 fi
+if [ "$DESIGN" = penpot ]; then
+  printf '    penpot:  http://%s:%s/ (independent of DSH; manage with ./setup.sh penpot)\n' "$DSH_BIND_IP" "$DSH_DESIGN_PORT"
+fi
 printf '    logs:    journalctl -u dsh.service -f\n'
 if [ -z "$(grep -E '^(OPENCODE_GO_API_KEY|DEEPSEEK_API_KEY)=.+' "$DIR/.env" 2>/dev/null || true)" ]; then
   printf '    key:     none yet — add %s to %s/.env, then systemctl restart dsh\n' "$(provider_key_env "$DSH_PROVIDER")" "$DIR"
 fi
-printf '    update:  /system update setup (Telegram) or ./update.sh --apply (host)\n'
+printf '    update:  /system update setup (Telegram) or ./setup.sh update (host)\n'
 
 # Self-check after every install, with the summary already printed: the two
 # failures this catches ("model calls stopped working") are only confusing when

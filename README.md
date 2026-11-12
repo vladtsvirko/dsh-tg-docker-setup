@@ -34,9 +34,9 @@ session between the two.
 | `scripts/repair.sh` | The health check `setup.sh doctor` and `setup.sh doctor` run |
 | `scripts/credentials.mjs` | Reads and reconciles `data/home/.credentials.yaml` without printing a secret |
 | `scripts/git-manifest.mjs` | Builds or merges `secrets/git/profiles.json` from the installer's accounts |
-| `components.json` | Optional components (the Penpot design stack) |
+| `components.json` | Optional components (the Penpot stack, managed separately from DSH) |
 | `plugins.json` | Exact npm plugin specs, GitHub fallbacks and the minimum each boot enforces |
-| `design/` | Penpot compose stack on Podman + the `penpot` CLI (`--design penpot`) |
+| `design/` | Penpot compose stack on Podman + the `penpot` CLI (`--design penpot`, `setup.sh penpot`) |
 | `docs/FIRST-RUN.md` | The guided first run |
 | `docs/HOST.md` | The host deployment: layout, containers, resource limits, security boundary |
 | `docs/VERSIONS.md` | Version scheme and update rules |
@@ -108,7 +108,7 @@ curl -fsSL …/setup.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.14.15`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.14.16`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -238,7 +238,7 @@ different name is never touched. The setup currently ships:
 Three artifacts, two release tracks:
 
 ```
-setup          0.2.1-rc.5-0.14.15      tag v0.2.1-rc.5-0.14.15
+setup          0.2.1-rc.5-0.14.16      tag v0.2.1-rc.5-0.14.16
 connector      0.15.1                 tag v0.15.1
 penpot plugin  0.3.1                  tag v0.3.1
 ```

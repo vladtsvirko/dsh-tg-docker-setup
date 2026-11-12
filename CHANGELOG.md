@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.16
+
+### Changed
+
+- **CLI polish, HIG pass.** `penpot` is the command name (`components` stays as
+  an alias), Penpot is named as such in the plan and summary, and the help says
+  plainly that DSH and Penpot are independent. `NO_COLOR=1` disables ANSI,
+  `status` explains a 401 as authentication rather than failure, `update --check`
+  says how to apply, and the closing hint names `./setup.sh update` instead of
+  the removed `update.sh`. The `Customize` prompt now lists what it changes.
+
+### Fixed
+
+- **`--ref` installs the version it checks out.** The plan and `.env` used the
+  source checkout's `VERSION` even when `--ref` selected another release; the
+  plan now reads that ref's `VERSION`, so `--ref vX` records and reports `vX`.
+
 ## 0.2.1-rc.5-0.14.15
 
 ### Fixed
