@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.1-rc.5-0.15.1
+
+### Fixed
+
+- **Penpot export downloads.** The frontend container now mounts the shared
+  `design/data/assets` directory read-only. Penpot's frontend nginx already
+  proxies `/assets` to the backend; the backend answers asset requests with
+  `X-Accel-Redirect: /internal/assets/...`, which the frontend serves from that
+  directory. With the mount missing, the redirect landed on an empty directory
+  and `export-binfile` downloads were 404s.
+- **The `penpot` CLI through its launcher.** The `/usr/local/bin/penpot` symlink
+  now runs the CLI (real-path check instead of an `endsWith` on the symlink
+  name), `export` decodes the transit `{"~#uri": …}` download event, and the
+  download request carries the access token instead of a bare GET that got 401.
+
 ## 0.2.1-rc.5-0.15.0
 
 ### Added

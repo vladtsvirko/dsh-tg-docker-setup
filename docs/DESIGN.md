@@ -11,6 +11,13 @@ runtime (penpot CLI) ──HTTP──► penpot-frontend ──► penpot-backen
                                      └───────────► penpot-exporter
 ```
 
+Penpot's frontend nginx already proxies `/assets` to the backend. The backend
+answers an asset request (`/assets/by-id/<uuid>` included) with
+`X-Accel-Redirect: /internal/assets/...`; the frontend serves that from
+`/opt/data/assets`. Both containers therefore mount `design/data/assets` — the
+backend read-write, the frontend read-only. Without the shared mount the
+redirect lands on an empty directory and every export download is a 404.
+
 The runtime calls the frontend on its published address
 (`DSH_BIND_IP:DSH_DESIGN_PORT`). It is its own compose project
 (`design/compose.yaml`) with its own data under

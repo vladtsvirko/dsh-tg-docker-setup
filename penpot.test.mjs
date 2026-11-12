@@ -90,7 +90,7 @@ test('projects sends the team id in kebab-case', async () => {
 
 test('export reads the SSE download URL and fetches the zip', async () => {
   let downloadUrl = ''
-  const { server, base } = await startFake((call, response) => {
+  const { server, base, calls } = await startFake((call, response) => {
     if (call.url === '/download') {
       response.writeHead(200, { 'content-type': 'application/zip' })
       response.end(Buffer.from('PENPOT-BINFILE'))
@@ -107,9 +107,30 @@ test('export reads the SSE download URL and fetches the zip', async () => {
     const bytes = await client.exportBinfile('file-1')
     await writeFile(out, bytes)
     assert.equal((await readFile(out, 'utf8')), 'PENPOT-BINFILE')
+    assert.equal(calls.find((call) => call.url === '/download')?.auth, 'Token tok')
   } finally {
     server.close()
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('export reads the transit ~#uri download map', async () => {
+  let downloadUrl = ''
+  const { server, base } = await startFake((call, response) => {
+    if (call.url === '/download') {
+      response.writeHead(200, { 'content-type': 'application/zip' })
+      response.end(Buffer.from('PK-PENPOT'))
+      return
+    }
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    response.end(['event: end', `data: ${JSON.stringify({ '~#uri': downloadUrl })}`, ''].join('\n'))
+  })
+  downloadUrl = `${base}/download`
+  try {
+    const client = createClient({ url: base, token: 'tok' })
+    assert.equal(new TextDecoder().decode(await client.exportBinfile('file-1')), 'PK-PENPOT')
+  } finally {
+    server.close()
   }
 })
 

@@ -91,6 +91,13 @@ services:
       # The browser must call the origin it was served from, or the API call is
       # a cross-origin/mixed-content request from the HTTPS page to HTTP.
       PENPOT_PUBLIC_URI: https://${DSH_BIND_IP:-127.0.0.1}:${DSH_DESIGN_TLS_PORT:-8443}
+    volumes:
+      # The backend answers asset requests with X-Accel-Redirect to
+      # /internal/assets/..., which the frontend's nginx serves from this
+      # directory. The standard Penpot compose mounts the same volume into both
+      # containers; without it every export download is a 404 after the
+      # redirect lands on an empty directory.
+      - ./data/assets:/opt/data/assets:ro
     ports:
       # LAN-only. Never 0.0.0.0: the instance has real accounts.
       - "${DSH_BIND_IP:-127.0.0.1}:${DSH_DESIGN_PORT:-8090}:8080"

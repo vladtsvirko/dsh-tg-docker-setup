@@ -26,8 +26,10 @@
  * MIT-licensed like the rest of this repository. No third-party code.
  */
 
+import { realpathSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { basename } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const USAGE = `penpot <command> [options]
 
@@ -64,7 +66,10 @@ const decodeTransit = (value) => {
   if (Array.isArray(value)) return value.map(decodeTransit)
   if (value !== null && typeof value === 'object') {
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key.startsWith('~:') ? key.slice(2) : key, decodeTransit(item)]),
+      Object.entries(value).map(([key, item]) => [
+        key.startsWith('~:') || key.startsWith('~#') ? key.slice(2) : key,
+        decodeTransit(item),
+      ]),
     )
   }
   return value
@@ -93,7 +98,14 @@ const readSse = async (response) => {
 
 const lastEnd = (events) => {
   for (let index = events.length - 1; index >= 0; index -= 1) {
-    if (events[index].event === 'end') return events[index].data
+    if (events[index].event !== 'end') continue
+    const data = events[index].data
+    if (Array.isArray(data)) return data
+    if (typeof data === 'string') return data
+    // Transit encodes the download as {"~#uri": "..."}; decodeTransit turns the
+    // key into `uri`. Older/plain answers are the bare URL string.
+    if (data !== null && typeof data === 'object' && typeof data.uri === 'string') return data.uri
+    return undefined
   }
   return undefined
 }
@@ -155,7 +167,8 @@ export function createClient({ url, token, fetchImpl = globalThis.fetch }) {
       if (failure !== undefined) throw new ApiError(200, JSON.stringify(failure.data).slice(0, 300))
       const url = lastEnd(events)
       if (typeof url !== 'string' || url.length === 0) throw new ApiError(200, 'the export finished without a download URL')
-      const download = await fetchImpl(url)
+      // The export URL is an authenticated backend route; a bare GET is 401.
+      const download = await fetchImpl(url, { headers: { authorization: headers.authorization } })
       if (!download.ok) throw new ApiError(download.status, `the export download failed (${String(download.status)})`)
       return new Uint8Array(await download.arrayBuffer())
     },
@@ -282,7 +295,16 @@ export async function main(argv, io = { out: process.stdout.write.bind(process.s
   }
 }
 
-const isMain = process.argv[1] !== undefined && process.argv[1].endsWith('penpot.mjs')
+const isMain = (() => {
+  if (process.argv[1] === undefined) return false
+  try {
+    // /usr/local/bin/penpot is a symlink to this file; compare real paths so
+    // the CLI also runs through the launcher.
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+})()
 if (isMain) {
   try {
     process.exitCode = await main(process.argv.slice(2))
