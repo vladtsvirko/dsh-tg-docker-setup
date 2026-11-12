@@ -803,6 +803,15 @@ test('DSH_PUBLIC_URL is an accepted answer and is written to .env', async () => 
   assert.match(source, /set_env DSH_PUBLIC_URL "\$DSH_PUBLIC_URL"/)
 })
 
+test('the service user is written to .env and read back by a repair', async () => {
+  // Without this a --config install under a non-default user re-runs as dsh:
+  // the final doctor then chowns data/ to the wrong uid.
+  const source = await readFile(join(here, 'setup.sh'), 'utf8')
+  assert.match(source, /set_env SERVICE_USER "\$SERVICE_USER"/)
+  assert.match(source, /for key in SERVICE_USER DSH_PORT/)
+  assert.match(source, /ensure_linger/)
+})
+
 test('the installer asks for a resource share and writes it to the unit', async () => {
   const source = await readFile(join(here, 'setup.sh'), 'utf8')
   assert.match(source, /ask DSH_RESOURCE_PERCENT .*percent of this machine \(0 = unlimited\)" 30/)

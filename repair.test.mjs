@@ -375,6 +375,39 @@ test('a data directory owned by another user is a failure, not a warning', async
   }
 })
 
+test('the deployed .env names the service user when the caller does not', async () => {
+  // setup.sh passes SERVICE_USER explicitly; a manual doctor run may not. The
+  // .env written by the installer is the next source of truth.
+  const who = process.env.USER ?? 'runner'
+  const dir = await fixture('docker', { SERVICE_USER: who })
+  try {
+    const { code, out } = await run(['--dir', dir], {
+      env: { SERVICE_USER: '', DSH_UNIT_FILE: join(dir, 'missing.service') },
+    })
+    assert.equal(code, 0, out)
+    assert.match(out, /ok\s+data-owner\s+.*is owned by /)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('the unit User= names the service user when .env does not', async () => {
+  // The unit is the deployment; an older .env has no SERVICE_USER line.
+  const who = process.env.USER ?? 'runner'
+  const dir = await fixture()
+  const unit = join(dir, 'dsh.service')
+  await writeFile(unit, `[Service]\nUser=${who}\n`)
+  try {
+    const { code, out } = await run(['--dir', dir], {
+      env: { SERVICE_USER: '', DSH_UNIT_FILE: unit },
+    })
+    assert.equal(code, 0, out)
+    assert.match(out, /ok\s+data-owner\s+.*is owned by /)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('a Penpot assets directory the containers cannot write is a failure', async () => {
   // The Penpot images run as uid 1001; podman creates the bind mount as root,
   // and every export then fails with io-exception. The doctor must name it.

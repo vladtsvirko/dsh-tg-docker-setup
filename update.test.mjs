@@ -69,13 +69,13 @@ async function deployment({ env = 'DSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n', bins
 }
 
 /** Source update.sh in `dir` and run `script`; returns stdout. */
-async function source(dir, script) {
+async function source(dir, script, extraEnv = {}) {
   const file = join(dir, 'probe.sh')
   await writeFile(file, `set -eu\n. "${join(here, 'setup.sh')}"\n${script}\n`)
   const bin = join(dir, 'bin')
   const { stdout } = await exec('bash', [file], {
     cwd: dir,
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...extraEnv },
   })
   return stdout.trim()
 }
@@ -85,6 +85,41 @@ needsExec('sourcing defines the helpers and runs no command', async () => {
   try {
     // --status would print a report and exit if the CLI ran.
     assert.equal(await source(dir, 'printf "%s" "$SERVICE_USER"'), 'dsh')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+needsExec('the deployed .env supplies SERVICE_USER when the environment does not', async () => {
+  const dir = await deployment({ env: 'SERVICE_USER=dshtest\nDSH_PORT=4310\nDSH_BIND_IP=127.0.0.1\n' })
+  try {
+    assert.equal(await source(dir, 'printf "%s" "$SERVICE_USER"', { SERVICE_USER: '' }), 'dshtest')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+needsExec('ensure_linger enables lingering for the service user', async () => {
+  const dir = await deployment()
+  const bin = join(dir, 'bin')
+  await mkdir(bin, { recursive: true })
+  const log = join(dir, 'linger.log')
+  await writeFile(join(bin, 'loginctl'), [
+    '#!/bin/sh',
+    'case "$1" in',
+    '  show-user) echo "Linger=no" ;;',
+    '  enable-linger) echo "$2" > "$LOG" ;;',
+    'esac',
+    'exit 0',
+    '',
+  ].join('\n'), { mode: 0o755 })
+  try {
+    const who = process.env.USER ?? 'runner'
+    await source(dir, 'SERVICE_USER="$(id -un)" ensure_linger', {
+      PATH: `${bin}:${process.env.PATH}`,
+      LOG: log,
+    })
+    assert.equal((await readFile(log, 'utf8')).trim(), who)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.1-rc.5-0.14.15
+
+### Fixed
+
+- **`--containers none` on a fresh host.** Enabling lingering is now part of
+  `ensure_user`, not of the Podman setup: the unit requires
+  `XDG_RUNTIME_DIR=/run/user/<uid>` and `ReadWritePaths` on that directory, and
+  a service user who never logs in has no `/run/user/<uid>`. Without it
+  `dsh.service` exited with `226/NAMESPACE` and the install timed out at the
+  health gate.
+- **A custom `SERVICE_USER` survives repair and update.** The installer writes
+  `SERVICE_USER` to `.env`, uses it as the default on a re-run, resolves it from
+  the unit (then `.env`) for `doctor`/`update`, and passes it to
+  `scripts/repair.sh`. Previously the final doctor expected `dsh`'s uid and
+  `--fix` chowned `data/` to `dsh`, so the runtime of a `dshtest` deployment
+  could not write its own data directory.
+
 ## 0.2.1-rc.5-0.14.14
 
 ### Changed

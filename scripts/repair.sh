@@ -77,6 +77,16 @@ env_get() { sed -n "s/^$1=//p" "$ENV_FILE" | head -1; }
 env_last() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -1; }
 
 MODE=native
+# The unit is the source of truth for the deployed service user; .env records it
+# for a deployment whose unit was removed. A caller may pass SERVICE_USER
+# explicitly (setup.sh does); an empty value falls through to these two.
+UNIT_FILE="${DSH_UNIT_FILE:-/etc/systemd/system/dsh.service}"
+if [ -z "${SERVICE_USER:-}" ] && [ -r "$UNIT_FILE" ]; then
+  SERVICE_USER="$(sed -n 's/^User=//p' "$UNIT_FILE" | head -1)"
+fi
+if [ -z "${SERVICE_USER:-}" ]; then
+  SERVICE_USER="$(env_last SERVICE_USER 2>/dev/null || true)"
+fi
 SERVICE_USER="${SERVICE_USER:-dsh}"
 PROBLEMS=0
 WARNINGS=0

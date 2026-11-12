@@ -25,6 +25,9 @@ if [ "${BASH_SOURCE[0]}" != "$0" ]; then
   ENV_FILE="$DEPLOY_DIR/.env"
   NATIVE_DATA="$DEPLOY_DIR/data"
   BACKUP_DIR="$DEPLOY_DIR/backups"
+  if [ -z "${SERVICE_USER:-}" ] && [ -f "$ENV_FILE" ]; then
+    SERVICE_USER="$(sed -n 's/^SERVICE_USER=//p' "$ENV_FILE" | tail -1)"
+  fi
   SERVICE_USER="${SERVICE_USER:-dsh}"
   HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
 fi
@@ -230,7 +233,7 @@ DSH_VERSION="$(printf '%s' "$SETUP_VERSION" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+$
 
 CONTAINERS="" CONTAINERS_SET=0 DESIGN_SET=0 DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0 DEPS=1 CLEAN_SOURCE=0
 DOCTOR=0 FIX=0 ROTATE_KEY=0
-SERVICE_USER="${SERVICE_USER:-dsh}"
+SERVICE_USER="${SERVICE_USER:-}"
 DSH_PORT="${DSH_PORT:-}"
 DSH_BIND_IP="${DSH_BIND_IP:-}"
 DSH_PROVIDER="${DSH_PROVIDER:-}"
@@ -830,13 +833,20 @@ read_existing_env() {
     done
   fi
   [ -r "$DIR/.env" ] || return 0
-  for key in DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PROVIDER DSH_MODEL DSH_RESOURCE_PERCENT DSH_TELEGRAM_BOT_TOKEN \
+  for key in SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PROVIDER DSH_MODEL DSH_RESOURCE_PERCENT DSH_TELEGRAM_BOT_TOKEN \
              ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT CONTAINERS \
              DSH_TELEGRAM_PUBLISHER_TOKENS DSH_PLUGINS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN \
              DSH_PROVIDER_API_KEY_ENV; do
     # The last assignment is what the runtime reads (systemd's EnvironmentFile
     # and Node's .env loader agree), so the installer agrees too.
     value="$(sed -n "s/^${key}=//p" "$DIR/.env" | tail -1)"
+    # The service user is structural: an inherited/default value must not
+    # override the deployed one, or a repair re-runs as dsh after a --config
+    # install under another user.
+    if [ "$key" = SERVICE_USER ]; then
+      [ -n "${SERVICE_USER:-}" ] || [ -z "$value" ] || SERVICE_USER="$value"
+      continue
+    fi
     if [ -n "${!key:-}" ]; then
       # DESIGN/CONTAINERS are structural: an inherited environment value (the
       # agent's shell carries the service env) must not disable a deployed
@@ -934,6 +944,31 @@ podman_compose_ready() {
 node_ready() {
   command -v node >/dev/null 2>&1 && [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 22 ]
 }
+
+# The unit runs with XDG_RUNTIME_DIR=/run/user/<uid> and lists that directory in
+# ReadWritePaths. It exists for a logged-in user or for a lingering one; the
+# service user never logs in, so without linger systemd fails with
+# "Failed to set up mount namespacing … 226/NAMESPACE" before the runtime starts.
+# Podman needed this already; every deployment needs it now.
+ensure_linger() {
+  local uid
+  id "$SERVICE_USER" >/dev/null 2>&1 || return 0
+  command -v loginctl >/dev/null 2>&1 || return 0
+  uid="$(id -u "$SERVICE_USER" 2>/dev/null || true)"
+  [ -n "$uid" ] || return 0
+  if ! loginctl show-user "$SERVICE_USER" 2>/dev/null | grep -qx 'Linger=yes'; then
+    if loginctl enable-linger "$SERVICE_USER" 2>/dev/null; then
+      log "enabled lingering for $SERVICE_USER (runtime directory /run/user/$uid)"
+    else
+      warn "could not enable lingering for $SERVICE_USER; /run/user/$uid may be missing"
+    fi
+  fi
+  if [ ! -d "/run/user/$uid" ]; then
+    run install -d -m 700 -o "$SERVICE_USER" -g "$SERVICE_USER" "/run/user/$uid" 2>/dev/null \
+      || warn "could not create /run/user/$uid; dsh.service may fail with 226/NAMESPACE"
+  fi
+}
+
 
 # --- root, before the questions --------------------------------------------
 # Installing the systemd units needs root. Re-running here, before the first
@@ -1528,9 +1563,11 @@ verify() {
 # duplicated key or a credential the web UI stored that outranks it.
 
 repair_deployment() {
-  local script="$DEPLOY_DIR/scripts/repair.sh"
+  local script="$DEPLOY_DIR/scripts/repair.sh" user
   [ -x "$script" ] || return 0
-  bash "$script" --dir "$DEPLOY_DIR" --fix
+  user="$(deployed_service_user)"
+  [ -n "$user" ] || user="${SERVICE_USER:-dsh}"
+  SERVICE_USER="$user" bash "$script" --dir "$DEPLOY_DIR" --fix
 }
 
 
@@ -1924,6 +1961,20 @@ EOF
   esac
 }
 
+# The unit is the source of truth for the deployed service user; .env records it
+# for a deployment whose unit was removed. A caller that already set
+# SERVICE_USER (an explicit flag or --config) wins.
+deployed_service_user() {
+  local user=""
+  if [ -r /etc/systemd/system/dsh.service ]; then
+    user="$(sed -n 's/^User=//p' /etc/systemd/system/dsh.service | head -1)"
+  fi
+  if [ -z "$user" ] && [ -f "$ENV_FILE" ]; then
+    user="$(sed -n 's/^SERVICE_USER=//p' "$ENV_FILE" | tail -1)"
+  fi
+  printf '%s' "$user"
+}
+
 # The commands below share the deployment globals the update path expects.
 set_deployment() {
   if [ -z "${DIR:-}" ]; then
@@ -1935,6 +1986,9 @@ set_deployment() {
   ENV_FILE="$DEPLOY_DIR/.env"
   NATIVE_DATA="$DEPLOY_DIR/data"
   BACKUP_DIR="$DEPLOY_DIR/backups"
+  if [ -z "${SERVICE_USER:-}" ]; then
+    SERVICE_USER="$(deployed_service_user)"
+  fi
   SERVICE_USER="${SERVICE_USER:-dsh}"
   HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
 }
@@ -1990,6 +2044,7 @@ cmd_doctor() {
   [ -x "$SETUP_ROOT/scripts/repair.sh" ] || die "scripts/repair.sh is missing — run this from a release checkout"
   local args=(--dir "$DIR")
   [ "$fix" = 1 ] && args+=(--fix)
+  export SERVICE_USER
   exec bash "$SETUP_ROOT/scripts/repair.sh" "${args[@]}"
 }
 
@@ -2143,10 +2198,12 @@ if [ "$DOCTOR" = 1 ] || [ "$FIX" = 1 ]; then
   [ -x "$SRC_DIR/scripts/repair.sh" ] || die "scripts/repair.sh is missing — run this from a release checkout"
   repair_args=(--dir "$DIR")
   [ "$FIX" = 1 ] && repair_args+=(--fix)
+  export SERVICE_USER
   exec bash "$SRC_DIR/scripts/repair.sh" "${repair_args[@]}"
 fi
 
 # Defaults apply after the existing .env, so a repair keeps the deployed values.
+[ -n "$SERVICE_USER" ] || SERVICE_USER=dsh
 [ -n "$DSH_PORT" ] || DSH_PORT=4310
 [ -n "$DESIGN" ] || DESIGN=none
 [ "$DESIGN" = penpot ] && { [ -n "$DSH_DESIGN_PORT" ] || DSH_DESIGN_PORT=8090; [ -n "$DSH_DESIGN_TLS_PORT" ] || DSH_DESIGN_TLS_PORT=8443; }
@@ -2365,7 +2422,7 @@ print_plan() {
 if [ -f "$DIR/.env" ] && [ -x "$SRC_DIR/scripts/repair.sh" ]; then
   echo
   log "existing deployment"
-  bash "$SRC_DIR/scripts/repair.sh" --dir "$DIR" || true
+  SERVICE_USER="$SERVICE_USER" bash "$SRC_DIR/scripts/repair.sh" --dir "$DIR" || true
 fi
 
 compute_deps_plan
@@ -2513,13 +2570,8 @@ podman_user_setup() {
   runtime="/run/user/$uid"
   run mkdir -p "$DATA_HOME/.config"
   run chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_HOME/.config"
-  # A user manager gives rootless Podman its systemd cgroup and removes the
-  # "no systemd user session" warnings; it survives without a login.
-  if command -v loginctl >/dev/null 2>&1; then
-    loginctl enable-linger "$SERVICE_USER" 2>/dev/null \
-      && log "enabled lingering for $SERVICE_USER (rootless podman cgroup)" \
-      || warn "could not enable lingering for $SERVICE_USER; rootless podman falls back to cgroupfs"
-  fi
+  # ensure_user enables lingering for every deployment, not only Podman: the
+  # unit's ReadWritePaths and XDG_RUNTIME_DIR need /run/user/<uid> to exist.
   if run runuser -u "$SERVICE_USER" -- env HOME="$DATA_HOME" XDG_RUNTIME_DIR="$runtime" podman info >/dev/null 2>&1; then
     log "podman ready for $SERVICE_USER (rootless)"
   else
@@ -2681,6 +2733,7 @@ write_env() {
   set_env DSH_PLUGINS "$PLUGINS" "$file"
   set_env DESIGN "$DESIGN" "$file"
   set_env CONTAINERS "$CONTAINERS" "$file"
+  set_env SERVICE_USER "$SERVICE_USER" "$file"
   if [ "$DESIGN" = penpot ]; then
     set_env DSH_DESIGN_PORT "$DSH_DESIGN_PORT" "$file"
     set_env DSH_DESIGN_TLS_PORT "${DSH_DESIGN_TLS_PORT:-8443}" "$file"
@@ -2883,10 +2936,11 @@ ensure_user() {
     # service user owns. Older installs used the root-owned checkout.
     run usermod --home "$DATA_HOME" "$SERVICE_USER" 2>/dev/null \
       || warn "could not move $SERVICE_USER's home to $DATA_HOME"
-    return 0
+  else
+    log "creating the unprivileged service user $SERVICE_USER"
+    run useradd --system --home-dir "$DATA_HOME" --shell /bin/bash "$SERVICE_USER"
   fi
-  log "creating the unprivileged service user $SERVICE_USER"
-  run useradd --system --home-dir "$DATA_HOME" --shell /bin/bash "$SERVICE_USER"
+  ensure_linger
 }
 
 native_units() {
@@ -3130,7 +3184,7 @@ printf '    update:  /system update setup (Telegram) or ./update.sh --apply (hos
 # they appear before the operator has read what was installed.
 echo
 if [ -x "$SRC_DIR/scripts/repair.sh" ]; then
-  bash "$SRC_DIR/scripts/repair.sh" --dir "$DIR" --fix \
+  SERVICE_USER="$SERVICE_USER" bash "$SRC_DIR/scripts/repair.sh" --dir "$DIR" --fix \
     || warn "the health check found something above — ./setup.sh doctor"
 fi
 
