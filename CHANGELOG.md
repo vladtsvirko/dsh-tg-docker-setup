@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1-rc.5-0.15.2
+
+### Changed
+
+- **The connector floor is now `0.15.2`.** `0.15.1` shipped a Plugins-page
+  configuration form that did not render, and the setup documents that form as
+  the way to configure the connector. `plugins.json` now names `0.15.2` for
+  `spec`, `fallback` and `minimum`, so a deployment still on a lower version
+  reinstalls at its next boot or through `/system update connector`. Suggested
+  installs already resolved npm `latest`, so fresh installs were unaffected.
+
 ## 0.2.1-rc.5-0.15.1
 
 ### Fixed

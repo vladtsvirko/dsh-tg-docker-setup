@@ -3,9 +3,9 @@
   "comment": "Plugin policy metadata. A suggested install resolves npm latest at install time; `spec` is the pinned fallback (also used when the registry is unreachable), `fallback` is the same release from GitHub, and `minimum` is the floor a boot enforces. Plugin versions are independent of VERSION.",
   "plugins": {
     "dsh-telegram-connector": {
-      "spec": "dsh-telegram-connector@0.15.1",
-      "fallback": "github:vladtsvirko/dsh-telegram-connector#v0.15.1",
-      "minimum": "0.15.1",
+      "spec": "dsh-telegram-connector@0.15.2",
+      "fallback": "github:vladtsvirko/dsh-telegram-connector#v0.15.2",
+      "minimum": "0.15.2",
       "repository": "vladtsvirko/dsh-telegram-connector"
     },
     "dsh-penpot-plugin": {
