@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "comment": "Optional host toolchains installed by setup.sh --devtools and setup.sh devtools. Pins are deliberate: these are compiler/SDK installs outside the DSH data snapshot, so an update never replaces them. Android SDK packages are sdkmanager ids; the NDK and CMake versions are the AOSP defaults for the pinned platform.",
+  "root": "/opt/dsh-devtools",
+  "tools": {
+    "ios": {
+      "label": "iOS (xtool)",
+      "description": "Swift and xtool; xtool turns a SwiftPM package into a signed iOS app without a Mac. Completing xtool setup still needs an Apple ID and an Xcode.xip downloaded from Apple.",
+      "swift": "6.4.2",
+      "xtool": "1.24.0",
+      "minFreeMB": 7000,
+      "supported": {
+        "ubuntu": ["22.04", "24.04", "26.04"],
+        "debian": ["12", "13"]
+      },
+      "note": "Xcode.xip and the Apple sign-in are interactive and licensed to you; setup installs the toolchain, not the Apple SDK."
+    },
+    "android": {
+      "label": "Android",
+      "description": "OpenJDK, Android command-line tools, platform-tools, the Android 36 platform, build-tools and the NDK. Enough to build native Android apps with Gradle; no Android Studio and no emulator.",
+      "cmdlineTools": "15859902",
+      "platform": "android-36",
+      "packages": [
+        "platform-tools",
+        "platforms;android-36",
+        "build-tools;36.1.0",
+        "ndk;30.0.16248370",
+        "cmake;3.22.1"
+      ],
+      "java": ["openjdk-21-jdk-headless", "openjdk-17-jdk-headless"],
+      "minFreeMB": 7000,
+      "note": "Installing the SDK accepts the Android SDK license on this host. The emulator is not installed: it needs a desktop and KVM, and a device or CI is the normal target."
+    }
+  }
+}

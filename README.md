@@ -35,8 +35,10 @@ session between the two.
 | `scripts/credentials.mjs` | Reads and reconciles `data/home/.credentials.yaml` without printing a secret |
 | `scripts/git-manifest.mjs` | Builds or merges `secrets/git/profiles.json` from the installer's accounts |
 | `components.json` | Optional components (the Penpot stack, managed separately from DSH) |
+| `devtools.json` | Optional iOS (Swift + xtool) and Android (JDK + SDK + NDK) host toolchains |
 | `plugins.json` | Exact npm plugin specs, GitHub fallbacks and the minimum each boot enforces |
 | `design/` | Penpot compose stack on Podman + the `penpot` CLI (`--design penpot`, `setup.sh penpot`) |
+| `scripts/devtools.sh` | Installs, inspects and removes the optional mobile toolchains |
 | `docs/FIRST-RUN.md` | The guided first run |
 | `docs/HOST.md` | The host deployment: layout, containers, resource limits, security boundary |
 | `docs/VERSIONS.md` | Version scheme and update rules |
@@ -46,6 +48,7 @@ session between the two.
 | `docs/UPDATER.md` | The privileged updater service |
 | `docs/GIT.md` | Repository access: HTTPS tokens and SSH keys, per host and workspace |
 | `docs/CONTAINERS.md` | Rootless Podman for the agent; rootful Podman for Penpot |
+| `docs/DEVTOOLS.md` | The optional iOS (xtool) and Android build stacks |
 | `docs/REMOTE-PENPOT.md` | A design stack on one host, a desktop DSH on another |
 | `docs/UAT.md` | The acceptance run for a release |
 | `docs/LIMITS.md` | What still needs a host shell, and why |
@@ -87,8 +90,9 @@ Run it as a normal user with `sudo` available, or as root. It:
    (`/opt/dsh-setup` as root, `~/dsh-setup` otherwise),
 2. downloads that release into a git checkout — which is what makes
    `setup.sh update` work later,
-3. asks four required answers, shows the plan with working defaults for the
-   rest, offers one `Customize` question, then asks `Proceed? [Y/n]`,
+3. asks four required answers plus one optional mobile-toolchain question,
+   shows the plan with working defaults for the rest, offers one `Customize`
+   question, then asks `Proceed? [Y/n]`,
 4. asks what the agent should commit as, and optionally for one or more git
    accounts (GitHub, GitLab, Gitea/Forgejo, self-hosted; HTTPS token or SSH
    key) — stored in `<dir>/secrets/git/profiles.json`, mode 0600,
@@ -108,7 +112,7 @@ curl -fsSL …/setup.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.15.4`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.16.0`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -132,6 +136,22 @@ cd dsh-tg-docker-setup
 run `podman run --rm …` as `dsh`, with no root socket and no `docker` group.
 `--containers none` skips it. The optional Penpot stack (`--design penpot`) runs
 on rootful Podman under the updater; the agent's own containers stay rootless.
+
+### Mobile build toolchains
+
+Optional host tools for building apps without a Mac:
+
+```sh
+sudo ./setup.sh install --devtools android  # JDK + Android SDK 36 + NDK
+sudo ./setup.sh install --devtools ios      # Swift + xtool
+sudo ./setup.sh devtools status
+```
+
+Each is about 7 GB. They are installed outside the DSH data snapshot, so a
+setup update never replaces them. The iOS path still needs an Apple ID and an
+Xcode.xip for the one-time `xtool setup`; Android accepts the SDK license when
+you choose it. No Android Studio and no emulator. Details and the Xcode step:
+[docs/DEVTOOLS.md](docs/DEVTOOLS.md).
 
 ### Resource limits
 
@@ -238,7 +258,7 @@ different name is never touched. The setup currently ships:
 Three artifacts, two release tracks:
 
 ```
-setup          0.2.1-rc.5-0.15.4      tag v0.2.1-rc.5-0.15.4
+setup          0.2.1-rc.5-0.16.0      tag v0.2.1-rc.5-0.16.0
 connector      0.19.2                 tag v0.19.2
 penpot plugin  0.4.6                  tag v0.4.6
 ```

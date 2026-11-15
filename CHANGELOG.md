@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.2.1-rc.5-0.16.0
+
+### Added
+
+- **Optional mobile build toolchains.** `setup.sh install --devtools
+  none|ios|android|all` (or the new install question) adds host toolchains
+  beside DSH, like the Penpot stack: `ios` installs Swift 6.4.2 and xtool
+  1.24.0, `android` installs OpenJDK, the Android command-line tools, SDK
+  platform 36, build-tools 36.1.0, NDK 30 and CMake. Versions are pinned in
+  `devtools.json`; the installed trees live under `/opt/dsh-devtools` and a
+  setup update never replaces them.
+- **`setup.sh devtools status|install|remove`.** Install and remove one
+  toolchain later without re-running the installer; `install` writes
+  `DSH_DEVTOOLS`, `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `ANDROID_NDK_HOME` and
+  `JAVA_HOME` into `.env` and `status` reports a requested-but-missing tree.
+- The installer prints the exact `xtool setup` command after an iOS install.
+  That one step still needs an Apple ID and an Xcode.xip; the setup installs
+  the toolchain, not Apple's SDK or license.
+
+### Changed
+
+- The plan names the selected toolchains and their disk cost; a fresh
+  interactive install asks once, and `--yes` stays `none` unless the flag or an
+  answers file says otherwise.
+- `docs/DEVTOOLS.md` covers the iOS/Android stacks, the Apple-specific step,
+  disk/OS support, update policy and the security boundary.
+
+
 ## 0.2.1-rc.5-0.15.4
 
 ### Changed

@@ -219,7 +219,7 @@ else
 fi
 case "$COMMAND" in
   -*) COMMAND=install ;;
-  install|update|status|doctor|components|penpot|uninstall|help) shift || true ;;
+  install|update|status|doctor|components|penpot|devtools|uninstall|help) shift || true ;;
 esac
 COMMAND_ARGS=("$@")
 INSTALL_ARGS=("$@")
@@ -231,7 +231,7 @@ cd "$SRC_DIR"
 SETUP_VERSION="$(tr -d '\n' < "$SRC_DIR/VERSION")"
 DSH_VERSION="$(printf '%s' "$SETUP_VERSION" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+$//')"
 
-CONTAINERS="" CONTAINERS_SET=0 DESIGN_SET=0 PLUGINS_SET=0 DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0 DEPS=1 CLEAN_SOURCE=0
+CONTAINERS="" CONTAINERS_SET=0 DESIGN_SET=0 PLUGINS_SET=0 DEVTOOLS_SET=0 DEVTOOLS_FORCE=0 DEVTOOLS_REQUESTED=0 DEVTOOLS="" DIR="" CONFIG="" REF="" CHECK=0 YES=0 UNINSTALL=0 PURGE=0 DEPS=1 CLEAN_SOURCE=0
 DOCTOR=0 FIX=0 ROTATE_KEY=0
 SERVICE_USER="${SERVICE_USER:-}"
 DSH_PORT="${DSH_PORT:-}"
@@ -286,6 +286,7 @@ Commands:
   status       Show versions, services and health
   doctor       Check the deployment; --fix repairs the safe subset
   components   Manage the optional Penpot stack (alias: penpot)
+  devtools     Install or inspect iOS (Swift + xtool) / Android toolchains
   uninstall    Remove the services; --purge deletes data too
   help         Show this help, or help for one command
 
@@ -304,6 +305,7 @@ Examples:
   ./setup.sh status
   sudo ./setup.sh doctor --fix
   sudo ./setup.sh penpot enable         # Penpot is independent of DSH
+  sudo ./setup.sh devtools install --tools android
   sudo ./setup.sh uninstall --purge
 
 Exit codes: 0 ok, 1 error, 2 update available (--check), 3 cancelled.
@@ -315,7 +317,7 @@ EOF
 # --- answers from a file ---------------------------------------------------
 # Strict KEY=VALUE parsing: no sourcing, so a config file cannot execute code.
 CONFIG_KEYS="CONTAINERS DIR SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PROVIDER DSH_MODEL DSH_RESOURCE_PERCENT
-DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_PLUGINS DSH_DESIGN_PORT DSH_DESIGN_TLS_PORT PROVIDER_KEY
+DSH_TELEGRAM_BOT_TOKEN ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_PLUGINS DSH_DEVTOOLS DSH_DESIGN_PORT DSH_DESIGN_TLS_PORT PROVIDER_KEY
 PENPOT_ACCESS_TOKEN DSH_TELEGRAM_PUBLISHER_TOKENS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN GIT_HOST
 GIT_AUTH GIT_KEY GIT_KNOWN_HOSTS GIT_PROFILES_FILE"
 load_config() {
@@ -334,6 +336,7 @@ load_config() {
       DESIGN) DESIGN_SET=1 ;;
       CONTAINERS) CONTAINERS_SET=1 ;;
       DSH_PLUGINS) PLUGINS="$value"; PLUGINS_SET=1 ;;
+      DSH_DEVTOOLS) DEVTOOLS="$value"; DEVTOOLS_SET=1 ;;
     esac
   done < "$file"
 }
@@ -358,6 +361,8 @@ while [ $# -gt 0 ]; do
     --design) DESIGN="${2:?--design needs a value}"; DESIGN_SET=1; shift 2 ;;
     --plugins) PLUGINS="${2:?--plugins needs a value}"; PLUGINS_SET=1; shift 2 ;;
     --plugins=*) PLUGINS="${1#*=}"; PLUGINS_SET=1; shift ;;
+    --devtools) DEVTOOLS="${2:?--devtools needs a value}"; DEVTOOLS_SET=1; DEVTOOLS_FORCE=1; DEVTOOLS_REQUESTED=1; shift 2 ;;
+    --devtools=*) DEVTOOLS="${1#*=}"; DEVTOOLS_SET=1; DEVTOOLS_FORCE=1; DEVTOOLS_REQUESTED=1; shift ;;
     --design=*) DESIGN="${1#*=}"; DESIGN_SET=1; shift ;;
     --ref)    REF="${2:?--ref needs a value}"; shift 2 ;;
     --ref=*)  REF="${1#*=}"; shift ;;
@@ -816,6 +821,128 @@ provider_key_env() {
   esac
 }
 
+# --- optional host toolchains ----------------------------------------------
+# iOS (Swift + xtool) and Android (JDK + SDK + NDK) are host tools, not
+# containers and not part of the DSH data snapshot. They are installed once,
+# opt-in, and a setup update never replaces them.
+DEVTOOLS_ROOT="${DSH_DEVTOOLS_ROOT:-/opt/dsh-devtools}"
+
+devtools_normalize() {
+  local raw="${1:-}" out="" part ios=0 android=0
+  local -a parts
+  raw="${raw//[[:space:]]/}"
+  case "$raw" in
+    ""|none|None|NONE) printf 'none'; return 0 ;;
+    all|All|ALL) printf 'ios,android'; return 0 ;;
+  esac
+  IFS=',' read -r -a parts <<<"$raw"
+  for part in "${parts[@]}"; do
+    case "$part" in
+      ios|iOS|IOS) ios=1 ;;
+      android|Android|ANDROID) android=1 ;;
+      *) die "unknown devtools value: $part (choose none, ios, android or all)" ;;
+    esac
+  done
+  [ "$ios" = 1 ] && out=ios
+  if [ "$android" = 1 ]; then
+    [ -n "$out" ] && out="$out,android" || out=android
+  fi
+  printf '%s' "${out:-none}"
+}
+
+devtools_has() {
+  case ",$DEVTOOLS," in *",$1,"*) return 0 ;; esac
+  return 1
+}
+
+devtools_installed() {
+  case "$1" in
+    ios)
+      compgen -G "$DEVTOOLS_ROOT/swift-*/usr/bin/swift" >/dev/null 2>&1 \
+        && compgen -G "$DEVTOOLS_ROOT/xtool-*/xtool" >/dev/null 2>&1
+      ;;
+    android)
+      [ -x "$DEVTOOLS_ROOT/android-sdk/cmdline-tools/latest/bin/sdkmanager" ] \
+        && [ -d "$DEVTOOLS_ROOT/android-sdk/platforms/android-36" ]
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+devtools_plan_summary() {
+  local out="" sep=""
+  [ "$DEVTOOLS" = none ] && { printf 'none (optional: --devtools ios,android)'; return 0; }
+  if devtools_has ios; then
+    out="iOS: Swift + xtool (xtool setup still needs Xcode.xip and an Apple ID)"
+    sep=" · "
+  fi
+  if devtools_has android; then
+    out="${out}${sep}Android: JDK + SDK 36 + NDK (SDK license accepted on this host)"
+  fi
+  printf '%s' "$out"
+}
+
+devtools_status_summary() {
+  local out="" sep=""
+  [ "$DEVTOOLS" = none ] && { printf 'none'; return 0; }
+  if devtools_has ios; then out="ios $(devtools_installed ios && printf ok || printf missing)"; fi
+  if devtools_has android; then
+    [ -n "$out" ] && sep=", " || sep=""
+    out="${out}${sep}android $(devtools_installed android && printf ok || printf missing)"
+  fi
+  printf '%s' "${out:-none}"
+}
+
+java_home_path() {
+  local javac
+  javac="$(command -v javac 2>/dev/null || true)"
+  [ -n "$javac" ] || return 1
+  dirname "$(dirname "$(readlink -f "$javac")")"
+}
+
+android_ndk_path() {
+  local d
+  for d in "$DEVTOOLS_ROOT"/android-sdk/ndk/*; do
+    [ -d "$d" ] || continue
+    printf '%s\n' "$d"
+  done | sort -V | tail -1
+}
+
+# The env keys the runtime needs. Written by write_env and by devtools install;
+# the paths only appear when the tool tree is actually there, so a failed
+# optional install cannot leave a broken JAVA_HOME behind.
+devtools_env_write() {
+  local file="$1" tools="$2" java ndk
+  set_env DSH_DEVTOOLS "$tools" "$file"
+  case ",$tools," in
+    *,android,*)
+      if devtools_installed android; then
+        set_env ANDROID_HOME "$DEVTOOLS_ROOT/android-sdk" "$file"
+        set_env ANDROID_SDK_ROOT "$DEVTOOLS_ROOT/android-sdk" "$file"
+        ndk="$(android_ndk_path)"
+        if [ -n "$ndk" ]; then
+          set_env ANDROID_NDK_HOME "$ndk" "$file"
+          set_env ANDROID_NDK_ROOT "$ndk" "$file"
+        else
+          del_env ANDROID_NDK_HOME "$file"
+          del_env ANDROID_NDK_ROOT "$file"
+        fi
+        java="$(java_home_path || true)"
+        if [ -n "$java" ]; then set_env JAVA_HOME "$java" "$file"; else del_env JAVA_HOME "$file"; fi
+      else
+        del_env ANDROID_HOME "$file"; del_env ANDROID_SDK_ROOT "$file"
+        del_env ANDROID_NDK_HOME "$file"; del_env ANDROID_NDK_ROOT "$file"
+        del_env JAVA_HOME "$file"
+      fi
+      ;;
+    *)
+      del_env ANDROID_HOME "$file"; del_env ANDROID_SDK_ROOT "$file"
+      del_env ANDROID_NDK_HOME "$file"; del_env ANDROID_NDK_ROOT "$file"
+      del_env JAVA_HOME "$file"
+      ;;
+  esac
+}
+
 # CPUs systemd's CPUQuota is measured against: 100% is one core, so a share of
 # the machine is percent * cores.
 cpu_count() {
@@ -839,7 +966,7 @@ read_existing_env() {
   fi
   [ -r "$DIR/.env" ] || return 0
   for key in SERVICE_USER DSH_PORT DSH_BIND_IP DSH_PUBLIC_URL DSH_PROVIDER DSH_MODEL DSH_RESOURCE_PERCENT DSH_TELEGRAM_BOT_TOKEN \
-             ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DESIGN_PORT CONTAINERS \
+             ALLOWED_USER_IDS DSH_ADMIN_USER_ID DSH_UPDATER_TOKEN DESIGN DSH_DEVTOOLS DSH_DESIGN_PORT CONTAINERS \
              DSH_TELEGRAM_PUBLISHER_TOKENS DSH_PLUGINS GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_PROVIDER GIT_TOKEN \
              DSH_PROVIDER_API_KEY_ENV; do
     # The last assignment is what the runtime reads (systemd's EnvironmentFile
@@ -854,6 +981,12 @@ read_existing_env() {
     fi
     if [ "$key" = DSH_PLUGINS ]; then
       [ "$PLUGINS_SET" = 1 ] || [ -z "$value" ] || PLUGINS="$value"
+      continue
+    fi
+    if [ "$key" = DSH_DEVTOOLS ]; then
+      # Structural like DESIGN: an inherited service environment must not
+      # change (or silently install) a toolchain on a repair run.
+      [ "$DEVTOOLS_SET" = 1 ] || [ -z "$value" ] || DEVTOOLS="$value"
       continue
     fi
     if [ -n "${!key:-}" ]; then
@@ -1030,6 +1163,22 @@ fi
 [ "$COMMAND" = install ] && { [ -n "$DIR" ] || DIR=/srv/dsh; }
 
 [ "$SETUP_SOURCED" = 1 ] || read_existing_env
+
+# An answers file is a stored answer, not an install order: a repair run with
+# the same DSH_DEVTOOLS must not re-run apt/sdkmanager. The flag forces the
+# install; a config value that differs from the deployment does too.
+if [ "$DEVTOOLS_FORCE" = 1 ]; then
+  DEVTOOLS_REQUESTED=1
+elif [ "$DEVTOOLS_SET" = 1 ] && [ "$COMMAND" = install ]; then
+  deployed_devtools="$(sed -n 's/^DSH_DEVTOOLS=//p' "$DIR/.env" 2>/dev/null | tail -1)"
+  asked="$(devtools_normalize "$DEVTOOLS")"
+  deployed="$(devtools_normalize "${deployed_devtools:-none}")"
+  if [ -f "$DIR/.env" ] && [ "$asked" = "$deployed" ]; then
+    DEVTOOLS_REQUESTED=0
+  else
+    DEVTOOLS_REQUESTED=1
+  fi
+fi
 
 # --- deployment path guard -------------------------------------------------
 # --purge deletes data/ and .env as root. Refuse anything that is not a
@@ -1598,6 +1747,9 @@ repair_deployment() {
 
 
 status() {
+  DEVTOOLS="$(env_get DSH_DEVTOOLS)"
+  [ -n "$DEVTOOLS" ] || DEVTOOLS=none
+  DEVTOOLS="$(devtools_normalize "$DEVTOOLS")"
   printf '%-22s %s
 ' "setup version" "$(setup_version)"
   printf '%-22s %s
@@ -1608,6 +1760,8 @@ status() {
 ' "updater" "$(systemctl is-active dsh-updater.service 2>/dev/null || echo missing)"
   printf '%-22s %s
 ' "web" "$(web_label)"
+  printf '%-22s %s
+' "devtools" "$(devtools_status_summary)"
   printf '%-22s %s
 ' "telegram adapter" "$(
     node -p "require('$NATIVE_DATA/home/profiles/web/node_modules/dsh-telegram-connector/package.json').version" 2>/dev/null || echo 'not installed'
@@ -1895,9 +2049,15 @@ setup.sh install — install or repair the deployment.
   sudo ./setup.sh install --yes --config answers.env
   sudo ./setup.sh install                 # DSH only; no Penpot
   sudo ./setup.sh install --design penpot # add the independent Penpot stack
+  sudo ./setup.sh install --devtools android # add the Android build stack
 
 Options:
   --design penpot|none   optional Penpot stack on Podman; DSH runs without it
+  --devtools LIST        optional mobile host toolchains: none, ios, android
+                         or all. iOS is Swift + xtool (Xcode.xip and an Apple ID
+                         are still needed for xtool setup); Android is JDK + SDK
+                         + NDK. Each is several GB and is not replaced by a
+                         setup update.
   --plugins suggested|none
                          suggested: install the latest npm release of the
                          Telegram connector (with a bot token) and, when the
@@ -1950,7 +2110,8 @@ setup.sh status — the deployment at a glance.
   ./setup.sh status
 
 Prints the setup and DSH versions, the service and updater states, the web
-answer, the installed Telegram adapter version, and the firewall hint.
+answer, the installed Telegram adapter version, the optional mobile toolchains
+(installed or requested-but-missing), and the firewall hint.
 EOF
       ;;
     doctor)
@@ -1963,6 +2124,31 @@ setup.sh doctor — check the deployment.
 Checks the env file, provider key, stored credential, patch layer, registry,
 instance lock, version, service, web port, design assets, TLS certificate and
 Penpot token. --fix repairs the safe subset and needs root for ownership.
+EOF
+      ;;
+    devtools)
+      cat <<'EOF'
+setup.sh devtools — optional host toolchains for mobile apps.
+
+  ./setup.sh devtools status
+  sudo ./setup.sh devtools install --tools ios
+  sudo ./setup.sh devtools install --tools android
+  sudo ./setup.sh devtools install --tools all
+  sudo ./setup.sh devtools remove --tools ios
+
+ios      Swift and xtool. It builds SwiftPM packages into iOS apps without a
+         Mac, but `xtool setup` still needs an Apple ID and an Xcode.xip
+         downloaded from Apple; setup installs the toolchain, not the SDK.
+android  OpenJDK, Android command-line tools, platform-tools, platform 36,
+         build-tools 36.1.0, the NDK and CMake. No Android Studio and no
+         emulator. Installing accepts the Android SDK license on this host.
+
+Versions come from devtools.json and are independent of setup releases: a
+`setup.sh update` never reinstalls or replaces them. --tools defaults to the
+value in .env. `install` writes ANDROID_HOME/ANDROID_SDK_ROOT/ANDROID_NDK_HOME/
+JAVA_HOME into .env; restart dsh.service to expose them to the agent. Removal
+deletes the tool trees and launchers, keeps apt packages, and does not touch
+the deployment data.
 EOF
       ;;
     components|penpot)
@@ -1997,7 +2183,7 @@ EOF
       usage
       ;;
     *)
-      die "no help for '$1' — commands: install, update, status, doctor, components, uninstall"
+      die "no help for '$1' — commands: install, update, status, doctor, components, devtools, uninstall"
       ;;
   esac
 }
@@ -2087,6 +2273,85 @@ cmd_doctor() {
   [ "$fix" = 1 ] && args+=(--fix)
   export SERVICE_USER
   exec bash "$SETUP_ROOT/scripts/repair.sh" "${args[@]}"
+}
+
+cmd_devtools() {
+  local action="status" tools="" root="$DEVTOOLS_ROOT" dir=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      status|install|remove) action="$1"; shift ;;
+      --tools) tools="${2:?--tools needs a value}"; shift 2 ;;
+      --tools=*) tools="${1#*=}"; shift ;;
+      --root) root="${2:?--root needs a value}"; shift 2 ;;
+      --root=*) root="${1#*=}"; shift ;;
+      --dir) dir="${2:?--dir needs a value}"; shift 2 ;;
+      --dir=*) dir="${1#*=}"; shift ;;
+      -h|--help) help_for devtools; return 0 ;;
+      *) die "unknown option for devtools: $1" ;;
+    esac
+  done
+  [ -z "$dir" ] || DIR="$dir"
+  DEVTOOLS_ROOT="$root"
+  set_deployment
+  [ -n "${DATA_HOME:-}" ] || DATA_HOME="$DIR/data/home"
+  [ -n "$tools" ] || tools="$(sed -n 's/^DSH_DEVTOOLS=//p' "$ENV_FILE" 2>/dev/null | tail -1)"
+  [ -n "$tools" ] || tools=none
+  tools="$(devtools_normalize "$tools")" || return 1
+  local script="$SETUP_ROOT/scripts/devtools.sh"
+  [ -x "$script" ] || die "scripts/devtools.sh is missing — run this from a release checkout"
+
+  case "$action" in
+    status)
+      bash "$script" status --tools "$tools" --root "$root"
+      ;;
+    install)
+      [ "$(id -u)" = 0 ] || die "installing host toolchains needs root — run with sudo"
+      # `devtools install` adds to what the deployment already has; only
+      # `setup.sh install --devtools` replaces the set. Remove is explicit.
+      local combined t
+      combined="$(sed -n 's/^DSH_DEVTOOLS=//p' "$ENV_FILE" 2>/dev/null | tail -1)"
+      [ -n "$combined" ] || combined=none
+      combined="$(devtools_normalize "$combined")"
+      for t in ios android; do
+        case ",$tools," in *",$t,"*) ;; *) continue ;; esac
+        case ",$combined," in *",$t,"*) continue ;; esac
+        [ "$combined" = none ] && combined="$t" || combined="$combined,$t"
+      done
+      bash "$script" install --tools "$combined" --root "$root" \
+        --service-user "$SERVICE_USER" --home "$DATA_HOME" \
+        || die "toolchain install did not complete — see the messages above"
+      if [ -f "$ENV_FILE" ]; then
+        devtools_env_write "$ENV_FILE" "$combined"
+        chown "root:$SERVICE_USER" "$ENV_FILE" 2>/dev/null || true
+        chmod 640 "$ENV_FILE" 2>/dev/null || true
+        log "updated $ENV_FILE — restart dsh.service to put the toolchain paths in the runtime"
+      else
+        log "no DSH deployment at $DIR — the toolchains are installed for host use only"
+      fi
+      ;;
+    remove)
+      [ "$(id -u)" = 0 ] || die "removing host toolchains needs root — run with sudo"
+      local current remove remaining="" t
+      current="$(sed -n 's/^DSH_DEVTOOLS=//p' "$ENV_FILE" 2>/dev/null | tail -1)"
+      [ -n "$current" ] || current=none
+      remove="$tools"
+      bash "$script" remove --tools "$remove" --root "$root" \
+        || die "toolchain removal did not complete"
+      current="$(devtools_normalize "$current")"
+      for t in ios android; do
+        case ",$current," in *",$t,"*) ;; *) continue ;; esac
+        case ",$remove," in *",$t,"*) continue ;; esac
+        [ -n "$remaining" ] && remaining="$remaining,$t" || remaining="$t"
+      done
+      [ -n "$remaining" ] || remaining=none
+      if [ -f "$ENV_FILE" ]; then
+        devtools_env_write "$ENV_FILE" "$remaining"
+        chown "root:$SERVICE_USER" "$ENV_FILE" 2>/dev/null || true
+        chmod 640 "$ENV_FILE" 2>/dev/null || true
+        log "updated $ENV_FILE (DSH_DEVTOOLS=$remaining) — restart dsh.service to apply"
+      fi
+      ;;
+  esac
 }
 
 cmd_components() {
@@ -2237,6 +2502,7 @@ case "$COMMAND" in
   status)    cmd_status "${COMMAND_ARGS[@]}"; exit $? ;;
   doctor)    cmd_doctor "${COMMAND_ARGS[@]}"; exit $? ;;
   components|penpot) cmd_components "${COMMAND_ARGS[@]}"; exit $? ;;
+  devtools)  cmd_devtools "${COMMAND_ARGS[@]}"; exit $? ;;
   uninstall) cmd_uninstall "${COMMAND_ARGS[@]}"; exit $? ;;
   help)      cmd_help "${COMMAND_ARGS[@]}"; exit $? ;;
   *)         die "unknown command: $COMMAND — run setup.sh help" ;;
@@ -2341,6 +2607,15 @@ if [ "$CHECK" != 1 ]; then
   fi
 fi
 
+# The mobile toolchains are optional host tools, not plugins and not containers.
+# Ask once on a fresh install; an existing deployment keeps its answer and can
+# change it with --devtools or in Customize.
+if [ "$DEVTOOLS_SET" = 0 ] && [ ! -f "$DIR/.env" ] && can_ask; then
+  printf 'Optional mobile toolchains for the agent: iOS (Swift + xtool), Android (JDK + SDK + NDK).\n' >&2
+  ask DEVTOOLS "Install mobile toolchains (none/ios/android/all)" none
+  DEVTOOLS_REQUESTED=1
+fi
+
 # Defaults for everything the quick path did not ask. They are what the plan
 # prints; Customize replaces them one by one.
 [ -n "$DSH_PORT" ] || DSH_PORT=4310
@@ -2359,6 +2634,8 @@ if [ "$DESIGN" = penpot ]; then
   [ -n "$DSH_DESIGN_PORT" ] || DSH_DESIGN_PORT=8090
   [ "$CONTAINERS" = none ] && CONTAINERS=podman
 fi
+[ -n "$DEVTOOLS" ] || DEVTOOLS=none
+DEVTOOLS="$(devtools_normalize "$DEVTOOLS")"
 case "$DSH_RESOURCE_PERCENT" in
   unlimited|Unlimited|none|None) DSH_RESOURCE_PERCENT=0 ;;
 esac
@@ -2418,6 +2695,9 @@ compute_deps_plan() {
     DEPS_PLAN="$DEPS_PLAN · podman not requested"
   fi
   if node_ready; then DEPS_PLAN="$DEPS_PLAN · node present"; else DEPS_PLAN="$DEPS_PLAN · installs Node 22 (NodeSource)"; fi
+  if [ "${DEVTOOLS:-none}" != none ]; then
+    DEPS_PLAN="$DEPS_PLAN · devtools $DEVTOOLS (apt + downloads, several GB)"
+  fi
 }
 
 warn_exposure() {
@@ -2450,6 +2730,7 @@ print_plan() {
   else
     printf '    penpot:    none (optional stack; DSH runs without it)\n'
   fi
+  printf '    devtools:  %s\n' "$(devtools_plan_summary)"
   printf '    containers: %s\n' "$(if [ "$CONTAINERS" = podman ]; then printf 'podman (rootless)'; else printf 'none'; fi)"
   printf '    plugins:   %s\n' "$(if [ "$PLUGINS" = ui ]; then printf 'UI-managed (install and configure from the Plugins page)'; else printf 'suggested, latest at install (Telegram when a token is set; Penpot when enabled)'; fi)"
   printf '    user:      %s\n' "$SERVICE_USER"
@@ -2562,6 +2843,10 @@ if [ "$CUSTOMIZE" = 1 ]; then
   if [ "$DESIGN" = penpot ]; then
     ask DSH_DESIGN_PORT "Penpot port" 8090
   fi
+  old_devtools="$DEVTOOLS"
+  ask DEVTOOLS "Mobile toolchains (none/ios/android/all)" "$DEVTOOLS"
+  DEVTOOLS="$(devtools_normalize "$DEVTOOLS")"
+  [ "$DEVTOOLS" = "$old_devtools" ] || DEVTOOLS_REQUESTED=1
   ask DSH_RESOURCE_PERCENT "CPU/RAM limit for the runtime, percent of this machine (0 = unlimited)" 30
   case "$DSH_RESOURCE_PERCENT" in
     unlimited|Unlimited|none|None) DSH_RESOURCE_PERCENT=0 ;;
@@ -2831,6 +3116,7 @@ write_env() {
     set_env DSH_DESIGN_ENABLED 0 "$file"
     set_env PENPOT_ENABLED 0 "$file"
   fi
+  devtools_env_write "$file" "$DEVTOOLS"
   set_env DSH_UPDATER_URL "$UPDATER_URL" "$file"
   chmod 600 "$file"
   sync_stored_credential "$file"
@@ -3159,6 +3445,21 @@ native_apply() {
   run chown -R "$SERVICE_USER:$SERVICE_USER" "$DIR/data"
   podman_user_setup
 
+  # Optional host toolchains, installed before the unit is written so .env can
+  # carry their paths. A failure here is advisory: DSH itself still installs.
+  if [ "${DEVTOOLS_REQUESTED:-0}" = 1 ] && [ "${DEVTOOLS:-none}" != none ]; then
+    log "installing optional mobile toolchains: $DEVTOOLS"
+    if [ ! -x "$SRC_DIR/scripts/devtools.sh" ]; then
+      warn "scripts/devtools.sh is missing — skipping $DEVTOOLS"
+    elif bash "$SRC_DIR/scripts/devtools.sh" install --tools "$DEVTOOLS" \
+         --root "$DEVTOOLS_ROOT" --service-user "$SERVICE_USER" --home "$DATA_HOME"; then
+      log "mobile toolchains installed; check with ./setup.sh devtools status"
+    else
+      warn "mobile toolchain install did not complete — DSH will still be installed"
+      warn "retry with: ./setup.sh devtools install --tools $DEVTOOLS"
+    fi
+  fi
+
   if [ ! -d "$DIR/.git" ]; then
     log "initialising the setup checkout in $DIR"
     # In place: the directory already holds data/, and a clone would refuse a
@@ -3257,6 +3558,12 @@ else
 fi
 if [ "$DESIGN" = penpot ]; then
   printf '    penpot:  http://%s:%s/ (independent of DSH; manage with ./setup.sh penpot)\n' "$DSH_BIND_IP" "$DSH_DESIGN_PORT"
+fi
+if [ "$DEVTOOLS" != none ]; then
+  printf '    devtools: %s (%s; manage with ./setup.sh devtools)\n' "$DEVTOOLS" "$(devtools_status_summary)"
+  if devtools_has ios && devtools_installed ios; then
+    printf '    xtool:   finish once as %s: sudo -u %s -H env HOME=%s xtool setup\n' "$SERVICE_USER" "$SERVICE_USER" "$DATA_HOME"
+  fi
 fi
 printf '    logs:    journalctl -u dsh.service -f\n'
 if [ -z "$(grep -E '^(OPENCODE_GO_API_KEY|DEEPSEEK_API_KEY)=.+' "$DIR/.env" 2>/dev/null || true)" ]; then

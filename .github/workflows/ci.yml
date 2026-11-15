@@ -44,6 +44,9 @@ jobs:
       - name: Penpot CLI tests
         run: node --test penpot.test.mjs
 
+      - name: Devtool catalog and planner tests
+        run: node --test devtools.test.mjs
+
       - name: Design TLS tests
         run: node --test tls.test.mjs
 
@@ -54,7 +57,7 @@ jobs:
         run: node --test entrypoint.test.mjs
 
       - name: Shell syntax
-        run: bash -n setup.sh entrypoint.sh healthcheck.sh scripts/repair.sh scripts/design-tls.sh
+        run: bash -n setup.sh entrypoint.sh healthcheck.sh scripts/repair.sh scripts/design-tls.sh scripts/devtools.sh
 
       - name: Scripts and design stack
         run: |
@@ -64,6 +67,7 @@ jobs:
           test -x scripts/credentials.mjs
           # The HTTPS front runs it by path, and the compose mounts both files.
           test -x scripts/design-tls.sh
+          test -x scripts/devtools.sh
           test -f design/nginx-tls.conf
           # The Penpot stack is the only compose file left.
           cp design/.env.example design/.env

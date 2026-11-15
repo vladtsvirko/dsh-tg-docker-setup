@@ -42,7 +42,7 @@ async function install(args, { env = {}, cwd = here } = {}) {
     // test cannot silently read the live DESIGN/CONTAINERS/ALLOWED_USER_IDS.
     const merged = { ...process.env }
     for (const key of [
-      'DIR', 'SERVICE_USER', 'DESIGN', 'CONTAINERS', 'DSH_PLUGINS', 'DSH_DESIGN_ENABLED',
+      'DIR', 'SERVICE_USER', 'DESIGN', 'CONTAINERS', 'DSH_PLUGINS', 'DSH_DEVTOOLS', 'DSH_DESIGN_ENABLED',
       'PENPOT_ENABLED', 'PENPOT_API_URL', 'PENPOT_PLUGIN_REF', 'PENPOT_ACCESS_TOKEN',
       'DSH_SETUP_VERSION', 'DSH_PORT', 'DSH_BIND_IP', 'DSH_PUBLIC_URL',
       'DSH_PROVIDER', 'DSH_MODEL', 'DSH_RESOURCE_PERCENT', 'DSH_TELEGRAM_BOT_TOKEN',
@@ -66,6 +66,30 @@ async function install(args, { env = {}, cwd = here } = {}) {
     if (scratch !== undefined) await rm(scratch, { recursive: true, force: true })
   }
 }
+
+test('the plan names the optional mobile toolchains', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'install-devtools-'))
+  try {
+    const { code, out } = await install(['--check', '--yes', '--devtools', 'all', '--dir', join(root, 'deploy')])
+    assert.equal(code, 0)
+    assert.match(out, /devtools:\s+iOS: Swift \+ xtool/)
+    assert.match(out, /Android: JDK \+ SDK 36 \+ NDK/)
+    assert.match(out, /devtools ios,android \(apt \+ downloads/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an unknown --devtools value is rejected before anything runs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'install-devtools-bad-'))
+  try {
+    const { code, out } = await install(['--check', '--yes', '--devtools', 'macos', '--dir', join(root, 'deploy')])
+    assert.notEqual(code, 0)
+    assert.match(out, /unknown devtools value: macos/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 test('the plan names the directory, the version and the runtime', async () => {
   const root = await mkdtemp(join(tmpdir(), 'install-plan-'))
