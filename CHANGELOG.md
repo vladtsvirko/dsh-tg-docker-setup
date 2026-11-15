@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1-rc.5-0.17.1
+
+### Fixed
+
+- **The login-free iOS path now says `xtool new --skip-setup`.** `xtool new`
+  without the flag invokes `xtool setup` and asks for Apple credentials, which
+  defeats a dev-only install. The docs also call out that plain `xtool dev` is
+  `dev run` (login required) while `xtool dev build` is the build-only command.
+
 ## 0.2.1-rc.5-0.17.0
 
 ### Added

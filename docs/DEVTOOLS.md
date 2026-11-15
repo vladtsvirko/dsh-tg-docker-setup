@@ -56,10 +56,14 @@ sudo ./setup.sh devtools sdk --xcode /path/to/Xcode.xip
 This builds the Darwin SDK in the service user's home. Then development works:
 
 ```sh
-xtool new MyApp
+xtool new --skip-setup MyApp
 cd MyApp
 xtool dev build          # builds; ad-hoc signed
 ```
+
+`--skip-setup` matters: without it, `xtool new` invokes `xtool setup`, which
+authenticates with Apple first. `xtool dev` alone is `dev run` and also wants a
+login; use `xtool dev build` for the login-free path.
 
 `xtool dev build` does not require a token. Without one, the following refuse:
 
