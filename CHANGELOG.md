@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.1-rc.5-0.18.0
+
+### Added
+
+- **Devtools actions for the Telegram connector.** The root updater now
+  exposes `POST /devtools` with the whitelisted actions `install`, `remove`,
+  `sdk` and `logout`. It runs `setup.sh devtools ...` as a job, reports stage
+  and log tail through the existing `/status`, and supports the existing
+  `/cancel`. Paths are validated (absolute, `.xip`/`.app`/`.xtoolsdk`, regular
+  file) and the command is an argv array, never a shell string. There is no
+  login endpoint: Apple credentials and 2FA stay out of Telegram.
+- SDK extraction gets a two-hour deadline; install and remove get the normal
+  devtools timeout. Jobs do not send a duplicate Telegram report; the connector
+  card is the reporter.
+
+### Changed
+
+- `docs/UPDATER.md` documents the devtools endpoint and its job shape.
+
 ## 0.2.1-rc.5-0.17.1
 
 ### Fixed

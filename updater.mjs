@@ -9,10 +9,11 @@
  * POST /update   compatible | available | exact
  * GET  /status
  * GET  /health
+ * POST /devtools  install | remove | sdk | logout (validated, never login)
  */
 import { execFile, spawn } from 'node:child_process'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -189,10 +190,38 @@ const readBody = (request) => new Promise((resolve, reject) => {
 })
 
 /**
+ * The fixed argv for a devtools job. No caller string reaches a shell: the
+ * action, tool set, path and slim flag are validated before this runs, and the
+ * command is always `setup.sh devtools ...`.
+ */
+export function devtoolsCommand(job) {
+  const args = ['setup.sh', 'devtools', job.action]
+  if (job.action === 'install' || job.action === 'remove') {
+    args.push('--tools', job.tools)
+  } else if (job.action === 'sdk') {
+    args.push('--xcode', job.path)
+    if (job.slim === true) args.push('--slim')
+  }
+  return args
+}
+
+/** The installer stage named by one output line, or null. */
+export function devtoolsStage(line) {
+  if (/installing packages/i.test(line)) return 'packages'
+  if (/downloading|Downloading/i.test(line)) return 'downloading'
+  if (/unpacking/i.test(line)) return 'unpacking'
+  if (/extracting XIP|Extracting XIP/i.test(line)) return 'extracting'
+  if (/installing the Darwin SDK/i.test(line)) return 'sdk'
+  if (/Android SDK ready|Swift ready|xtool ready/i.test(line)) return 'finalizing'
+  if (/removed .* from \/opt\/dsh-devtools/i.test(line)) return 'removing'
+  return null
+}
+
+/**
  * Build the request handler. The git readers are injectable so tests do not
  * need a repository; `apply` is intentionally absent in slice 1.
  */
-export function createUpdater({ repo, dataDir, botToken = '', token = '', apply = false, refreshTags = async () => {}, tags = () => listTags(repo), current = () => currentTag(repo), now = Date.now, exit = (code) => process.exit(code), jobTimeoutMs = Math.max(60, Number(process.env.DSH_UPDATE_TIMEOUT_SECONDS ?? 1800)) * 1000 }) {
+export function createUpdater({ repo, dataDir, botToken = '', token = '', apply = false, refreshTags = async () => {}, tags = () => listTags(repo), current = () => currentTag(repo), now = Date.now, exit = (code) => process.exit(code), jobTimeoutMs = Math.max(60, Number(process.env.DSH_UPDATE_TIMEOUT_SECONDS ?? 1800)) * 1000, devtoolsTimeoutMs = Math.max(60, Number(process.env.DSH_DEVTOOLS_TIMEOUT_SECONDS ?? 3600)) * 1000 }) {
   const state = { job: null, child: null, timer: null }
 
   /**
@@ -452,6 +481,73 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
     job.reported = ok
   }
 
+  /**
+   * Run one devtools job. Unlike an update it never restarts dsh: it writes
+   * /opt, .env and the service user's home, and the card offers the existing
+   * restart action when the agent needs the new environment. Progress is polled
+   * by the connector; duplicates are suppressed.
+   */
+  const runDevtools = async (job) => {
+    job.state = 'running'
+    job.stage = 'starting'
+    await persist()
+    const args = devtoolsCommand(job)
+    let output = ''
+    let child
+    try {
+      child = spawn('bash', args, {
+        cwd: repo,
+        env: { ...process.env, PWD: repo, ASSUME_YES: '1' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true,
+      })
+    } catch (error) {
+      job.state = 'failed'
+      job.error = error instanceof Error ? error.message : String(error)
+      await persist()
+      return
+    }
+    const capture = (chunk) => {
+      const text = chunk.toString()
+      output = (output + text).slice(-12000)
+      for (const line of text.split('\n')) {
+        const stage = devtoolsStage(line)
+        if (stage !== null) job.stage = stage
+      }
+    }
+    child.stdout.on('data', capture)
+    child.stderr.on('data', capture)
+    state.child = child
+    state.timer = setTimeout(() => {
+      job.timedOut = true
+      killJob('devtools timeout')
+    }, job.action === 'sdk' ? devtoolsTimeoutMs * 2 : devtoolsTimeoutMs)
+    state.timer.unref?.()
+    const code = await new Promise((resolve) => {
+      child.on('error', () => resolve(-1))
+      child.on('close', (value) => resolve(value ?? -1))
+    })
+    state.child = null
+    if (state.timer !== null) {
+      clearTimeout(state.timer)
+      state.timer = null
+    }
+    const stripped = stripAnsi(output)
+    const safe = botToken.length > 0 ? stripped.replaceAll(botToken, '<redacted>') : stripped
+    job.exitCode = code
+    job.logTail = safe.split('\n').filter((line) => line.trim().length > 0).slice(-12).join('\n')
+    job.state = job.cancelled === true
+      ? 'cancelled'
+      : job.timedOut === true
+        ? 'failed'
+        : code === 0 ? 'done' : 'failed'
+    job.stage = job.state === 'done' ? 'done' : job.state
+    if (job.cancelled === true) job.error = 'cancelled'
+    if (job.timedOut === true) job.error = `timed out after ${String(Math.round(devtoolsTimeoutMs / 60000))} minutes`
+    job.finishedAt = new Date(now()).toISOString()
+    await persist()
+  }
+
   // --- firewall (native only) ---------------------------------------------
   // Read-only unless asked to allow one port, and then only a port this
   // deployment already serves (from .env) with a network derived from the bind
@@ -678,6 +774,64 @@ export function createUpdater({ repo, dataDir, botToken = '', token = '', apply 
         }
         console.log(`updater: allowed ${port}/tcp from ${target.network} (requested from Telegram)`)
         return json(response, 200, { ok: true, port, network: target.network, already: false })
+      }
+      if (path === '/devtools' && request.method === 'POST') {
+        if (token.length === 0) return json(response, 503, { error: 'updater is disabled (DSH_UPDATER_TOKEN is empty)' })
+        if (!authorized(request.headers.authorization, token)) return json(response, 401, { error: 'unauthorized' })
+        if (state.job !== null && !['done', 'failed', 'rolled-back', 'cancelled'].includes(state.job.state)) {
+          return json(response, 409, { error: 'another update or toolchain job is running' })
+        }
+        if (!apply) return json(response, 409, { error: 'this updater may not change the host' })
+        const raw = await readBody(request)
+        let body
+        try {
+          body = raw.length === 0 ? {} : JSON.parse(raw)
+        } catch {
+          throw new UpdateError(400, 'body must be JSON')
+        }
+        const action = typeof body.action === 'string' ? body.action : ''
+        if (!['install', 'remove', 'sdk', 'logout'].includes(action)) {
+          throw new UpdateError(400, `unknown devtools action ${action || '(none)'}`)
+        }
+        const job = {
+          id: randomUUID(),
+          kind: 'devtools',
+          action,
+          state: 'accepted',
+          startedAt: new Date(now()).toISOString(),
+        }
+        if (action === 'install' || action === 'remove') {
+          const tools = typeof body.tools === 'string' ? body.tools : ''
+          if (!['ios', 'android', 'all'].includes(tools)) {
+            throw new UpdateError(400, 'tools must be ios, android or all')
+          }
+          job.tools = tools
+        } else if (action === 'sdk') {
+          const candidate = typeof body.path === 'string' ? body.path.trim() : ''
+          if (candidate.length === 0 || candidate.length > 4096 || candidate.includes('\0')) {
+            throw new UpdateError(400, 'path to Xcode.xip is required')
+          }
+          if (!candidate.startsWith('/') || !/\.(xip|app|xtoolsdk)$/i.test(candidate)) {
+            throw new UpdateError(400, 'path must be absolute and end in .xip, .app or .xtoolsdk')
+          }
+          let info
+          try {
+            info = await stat(candidate)
+          } catch {
+            throw new UpdateError(422, `no such Xcode file: ${candidate}`)
+          }
+          const directoryInput = /\.(app|xtoolsdk)$/i.test(candidate)
+          if (directoryInput ? !info.isDirectory() : !info.isFile()) {
+            throw new UpdateError(422, `${candidate} is not a ${directoryInput ? 'directory' : 'file'}`)
+          }
+          job.path = candidate
+          job.slim = body.slim === true
+        }
+        state.job = job
+        console.log(`updater: devtools ${action}${job.tools === undefined ? '' : ` ${job.tools}`}`)
+        json(response, 202, { job: { ...job, timeoutSeconds: Math.round((action === 'sdk' ? devtoolsTimeoutMs * 2 : devtoolsTimeoutMs) / 1000) } })
+        setTimeout(() => void runDevtools(job), 100)
+        return undefined
       }
       if (path === '/status' && request.method === 'GET') {
         if (token.length === 0) return json(response, 503, { error: 'updater is disabled' })

@@ -112,7 +112,7 @@ curl -fsSL …/setup.sh | bash -s -- --yes --config answers.env
 ```
 
 The release the one-liner fetches is the newest tag; pin it with `--ref
-v0.2.1-rc.5-0.17.1`. `--dir` moves the deployment directory (default `/srv/dsh`).
+v0.2.1-rc.5-0.18.0`. `--dir` moves the deployment directory (default `/srv/dsh`).
 If Node is already installed and you would rather manage it yourself, pass
 `--no-deps`: the installer then fails with the exact command to run instead of
 touching apt.
@@ -152,8 +152,9 @@ setup update never replaces them. iOS development needs an **Xcode.xip** but
 **no Apple login**: install the SDK, then `xtool dev build` works. Signing and
 device deploy are a separate opt-in (`./setup.sh devtools login`); without a
 token xtool refuses `dev run` and `build --sign`. Android accepts the SDK
-license when you choose it. No Android Studio and no emulator. Details:
-[docs/DEVTOOLS.md](docs/DEVTOOLS.md).
+license when you choose it. No Android Studio and no emulator. With connector
+0.23.0 the same state and actions are under **System → Mobile toolchains** in
+Telegram. Details: [docs/DEVTOOLS.md](docs/DEVTOOLS.md).
 
 ### Resource limits
 
@@ -260,7 +261,7 @@ different name is never touched. The setup currently ships:
 Three artifacts, two release tracks:
 
 ```
-setup          0.2.1-rc.5-0.17.1      tag v0.2.1-rc.5-0.17.1
+setup          0.2.1-rc.5-0.18.0      tag v0.2.1-rc.5-0.18.0
 connector      0.19.2                 tag v0.19.2
 penpot plugin  0.4.6                  tag v0.4.6
 ```

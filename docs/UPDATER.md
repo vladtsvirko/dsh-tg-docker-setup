@@ -72,6 +72,8 @@ GET  /status   {job: {id, state, from, target, exitCode?, logTail?},
 GET  /components                      {components: [{name,label,enabled,port}]}
 POST /components {name,action,port?}   enable|disable|configure -> 202 {job}
 POST /cancel                           stop the running job
+POST /devtools {action, tools?, path?, slim?}
+                                       install|remove|sdk|logout -> 202 {job}
 GET  /firewall                         ufw state for the ports this deployment serves
 POST /firewall {port}                  allow one served port from its network
 ```
@@ -79,6 +81,29 @@ POST /firewall {port}                  allow one served port from its network
 There is no result-polling requirement for the connector: the updater reports
 directly. The connector watches `/status` while it is still alive so a failure
 before the restart unblocks it.
+
+### Devtools jobs
+
+`/devtools` is the one privileged path the Telegram card uses for the optional
+toolchains. It never accepts a shell string:
+
+```
+{"action":"install","tools":"ios|android|all"}
+{"action":"remove","tools":"ios|android|all"}
+{"action":"sdk","path":"/absolute/Xcode.xip","slim":false}
+{"action":"logout"}
+```
+
+The action is whitelisted, the path must be absolute, end in `.xip`, `.app` or
+`.xtoolsdk`, and be a regular file. The command is always
+`bash setup.sh devtools …` with an argv array. `logout` runs the same command
+as `dsh`; **login is deliberately absent** — it needs a TTY, password and 2FA,
+so the card prints the host command instead.
+
+Jobs set `kind:"devtools"`, use `/status` and `/cancel` like component jobs,
+and never restart `dsh`. SDK extraction gets twice the devtools deadline
+(two hours by default), because Xcode is tens of GB. The updater does not send
+a Telegram report for these jobs; the connector card polls `/status`.
 
 ## Modes and versions
 

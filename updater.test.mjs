@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { test } from 'node:test'
-import { commitSubjects, createUpdater, crossesCompat, firewallPorts, networkOf, parseTag, resolveTarget, UpdateError } from './updater.mjs'
+import { commitSubjects, createUpdater, crossesCompat, devtoolsCommand, devtoolsStage, firewallPorts, networkOf, parseTag, resolveTarget, UpdateError } from './updater.mjs'
 
 const exec = promisify(execFile)
 
@@ -415,5 +415,47 @@ test('commitSubjects lists the subjects between two tags', async () => {
     assert.deepEqual(await commitSubjects(dir, 'v0.2.1-rc.2-0.0.1', 'v0.2.1-rc.2-0.0.2'), ['second'])
   } finally {
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('devtoolsCommand never interpolates caller strings', () => {
+  assert.deepEqual(devtoolsCommand({ action: 'install', tools: 'ios' }), ['setup.sh', 'devtools', 'install', '--tools', 'ios'])
+  assert.deepEqual(devtoolsCommand({ action: 'sdk', path: '/srv/dsh/Xcode.xip', slim: true }), ['setup.sh', 'devtools', 'sdk', '--xcode', '/srv/dsh/Xcode.xip', '--slim'])
+  assert.deepEqual(devtoolsCommand({ action: 'logout' }), ['setup.sh', 'devtools', 'logout'])
+  assert.equal(devtoolsStage('==> installing packages: unzip'), 'packages')
+  assert.equal(devtoolsStage('==> Android SDK ready: /opt/dsh-devtools/android-sdk'), 'finalizing')
+  assert.equal(devtoolsStage('ordinary line'), null)
+})
+
+test('devtools endpoint validates and runs the fixed command', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'updater-devtools-'))
+  try {
+    await writeFile(join(repo, 'setup.sh'), '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$PWD/ran.log"\necho "==> Android SDK ready"\nexit 0\n')
+    const xip = join(repo, 'Xcode.xip')
+    await writeFile(xip, 'x')
+    const app = createUpdater({ repo, token: 'secret', apply: true, tags: async () => tags, current: async () => current })
+    const { server, base } = await start(app)
+    try {
+      assert.equal((await fetch(`${base}/devtools`, { method: 'POST', body: '{}' })).status, 401)
+      assert.equal((await fetch(`${base}/devtools`, { method: 'POST', headers: { authorization: 'Bearer secret' }, body: '{"action":"login"}' })).status, 400)
+      assert.equal((await fetch(`${base}/devtools`, { method: 'POST', headers: { authorization: 'Bearer secret' }, body: '{"action":"install","tools":"windows"}' })).status, 400)
+      const missing = await fetch(`${base}/devtools`, { method: 'POST', headers: { authorization: 'Bearer secret' }, body: JSON.stringify({ action: 'sdk', path: join(repo, 'nope.xip') }) })
+      assert.equal(missing.status, 422)
+      const accepted = await fetch(`${base}/devtools`, { method: 'POST', headers: { authorization: 'Bearer secret' }, body: JSON.stringify({ action: 'install', tools: 'android' }) })
+      assert.equal(accepted.status, 202)
+      assert.equal((await accepted.json()).job.kind, 'devtools')
+      await new Promise((resolve) => setTimeout(resolve, 700))
+      const status = await fetch(`${base}/status`, { headers: { authorization: 'Bearer secret' } })
+      const job = (await status.json()).job
+      assert.equal(job.state, 'done')
+      assert.match(await readFile(join(repo, 'ran.log'), 'utf8'), /devtools install --tools android/)
+      assert.equal((await fetch(`${base}/devtools`, { method: 'POST', headers: { authorization: 'Bearer secret' }, body: JSON.stringify({ action: 'sdk', path: xip }) })).status, 202)
+      await new Promise((resolve) => setTimeout(resolve, 700))
+      assert.match(await readFile(join(repo, 'ran.log'), 'utf8'), /devtools sdk --xcode .*Xcode.xip/)
+    } finally {
+      server.close()
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true })
   }
 })

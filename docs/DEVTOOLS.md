@@ -162,6 +162,16 @@ Build with the project's Gradle wrapper (`./gradlew assembleDebug`); Gradle
 itself is intentionally not installed system-wide, because every project pins
 its own.
 
+## From Telegram
+
+The connector (0.23.0 or newer) exposes these tools under **System → Mobile
+toolchains** in the rich card; the legacy `/panel` System tab links to the same
+card. It shows installed versions, SDK, login state and disk, and starts
+install/remove/SDK jobs through the updater's `/devtools` endpoint. Apple login
+is still a host step; the card prints the command rather than asking for a
+password. The updater's `docs/UPDATER.md` documents the endpoint and its
+validation.
+
 ## Disk, OS and architecture
 
 Each toolchain needs roughly 7 GB free; installing both needs about 14 GB.
