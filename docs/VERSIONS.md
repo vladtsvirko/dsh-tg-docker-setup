@@ -4,7 +4,7 @@ Three artifacts, two release tracks:
 
 | Artifact | Repository | Version | Released with |
 |---|---|---|---|
-| setup | `dsh-tg-docker-setup` | `0.2.1-rc.5-0.15.3` | DSH, as one tag |
+| setup | `dsh-tg-docker-setup` | `0.2.1-rc.5-0.15.4` | DSH, as one tag |
 | connector | `dsh-telegram-connector` | `0.19.2` | its own tag |
 | Penpot plugin | `dsh-penpot-plugin` | `0.4.6` | its own tag |
 
@@ -16,7 +16,7 @@ and do not have to.
 
 ```
 <dsh-version>-<major>.<minor>.<patch>          tag: v<same>
-v0.2.1-rc.5-0.15.3
+v0.2.1-rc.5-0.15.4
 ```
 
 - **DSH part** (`0.2.1-rc.5`) is the exact DSH release the setup was built and

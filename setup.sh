@@ -2170,7 +2170,10 @@ cmd_update() {
   set_deployment
   [ -f "$ENV_FILE" ] || die "no $ENV_FILE in $DIR — run setup.sh install first"
   cd "$DIR" || die "cannot enter $DIR"
-  ASSUME_YES=$yes
+  # The updater has no terminal and sets ASSUME_YES=1; --yes is the CLI form.
+  # Clearing the inherited value made the confirmation read from /dev/null fail
+  # under `set -e`, aborting a bot update right after the plan.
+  if [ "$yes" = 1 ]; then ASSUME_YES=1; fi
   if [ "$check" = 1 ]; then
     self_check "$allow"
   else

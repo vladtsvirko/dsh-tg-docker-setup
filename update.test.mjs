@@ -274,6 +274,29 @@ needsExec('--to refuses a cross-major target without the incompatibility flag', 
   }
 })
 
+needsExec('the updater ASSUME_YES survives cmd_update without --yes', async () => {
+  // `/system update setup` has no terminal: the updater sets ASSUME_YES=1 and
+  // spawns `setup.sh update --to`. cmd_update used to overwrite it with 0,
+  // making the confirmation read from /dev/null fail and abort right after the
+  // plan — the update never touched the deployment.
+  const dir = await deployment()
+  try {
+    const script = [
+      'self_update() { printf "%s\\n" "${ASSUME_YES:-unset}"; }',
+      'cmd_update --to v0.2.1-rc.5-0.15.4',
+    ].join('\n')
+    assert.equal(await source(dir, script, { ASSUME_YES: '1' }), '1')
+    assert.equal(await source(dir, script, { ASSUME_YES: '0' }), '0')
+    const forced = [
+      'self_update() { printf "%s\\n" "${ASSUME_YES:-unset}"; }',
+      'cmd_update --to v0.2.1-rc.5-0.15.4 --yes',
+    ].join('\n')
+    assert.equal(await source(dir, forced, { ASSUME_YES: '0' }), '1')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 needsExec('the native entrypoint runs from the workspace directory', async () => {
   // `dsh` loads the .env of its working directory and refuses launch-only keys
   // there. Running prepare from the deployment directory — where .env lives, and
