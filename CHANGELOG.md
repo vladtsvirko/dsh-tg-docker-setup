@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1-rc.5-0.15.3
+
+### Changed
+
+- **Connector updates no longer rebuild the whole profile.** `entrypoint
+  reset-plugin` now removes and reinstalls only the connector package, reusing
+  the existing `node_modules` and lockfile. The full wipe stays as a fallback
+  when the targeted install fails, and the supervisor still restores the
+  previous state if even that fails. In the VM the reset step went from a full
+  profile install to a one-package install (`profile plugin layer updated
+  without a full reinstall`), and a bogus target rolled back cleanly.
+- `plugins.json` names connector `0.19.2` for `spec`/`fallback`; `minimum` stays
+  `0.15.2`, so an older deployment is not forced to update at boot.
+
 ## 0.2.1-rc.5-0.15.2
 
 ### Changed

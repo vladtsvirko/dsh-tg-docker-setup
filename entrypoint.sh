@@ -496,8 +496,9 @@ latest_spec() {
 }
 
 install_plugin() {
-  # Check the installed copy, not the manifest entry: `reset-plugin` keeps the
-  # dependency but wipes node_modules, and that must re-trigger the install.
+  # Check the installed copy, not the manifest entry: `reset-plugin` removes the
+  # package before reinstalling it, and a wiped node_modules must re-trigger the
+  # install too.
   #
   # A newer compatible connector installed from the bot must survive a reboot,
   # so the checkout pin is a floor, not a ceiling. Only a missing package, a
@@ -855,8 +856,18 @@ case "${1:-serve}" in
     fi
     log "resetting the profile plugin layer"
     dsh plugin --profile web remove "$PLUGIN_PKG" >/dev/null 2>&1 || true
-    rm -rf "$PROFILE_DIR/node_modules" "$PROFILE_DIR/pnpm-lock.yaml" "$PROFILE_DIR/compatibility.json"
-    prepare
+    # Fast path: keep the dependency tree and let `dsh plugin add` install the
+    # one package that changed. Wiping node_modules forced a full profile
+    # reinstall on every connector update; on a slow link that dominated the
+    # downtime. If the targeted install fails, fall back to the full rebuild.
+    rm -f "$PROFILE_DIR/compatibility.json"
+    if ( prepare ); then
+      log "profile plugin layer updated without a full reinstall"
+    else
+      warn "targeted plugin install failed; rebuilding the profile dependency layer"
+      rm -rf "$PROFILE_DIR/node_modules" "$PROFILE_DIR/pnpm-lock.yaml" "$PROFILE_DIR/compatibility.json"
+      prepare
+    fi
     ;;
   *) exec "$@" ;;
 esac
