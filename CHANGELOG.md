@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.1-rc.5-0.17.0
+
+### Added
+
+- **Apple login is opt-in for the iOS toolchain.** `install --devtools ios`
+  installs Swift and xtool but does not authenticate. `setup.sh devtools sdk
+  --xcode <Xcode.xip>` installs the Darwin SDK without an Apple account, and
+  `xtool dev build` then works; `xtool dev run`, `build --sign` and device
+  installs refuse without a token. `setup.sh devtools login` (or
+  `apple-login`) runs the interactive Apple authentication only when you ask
+  for it; `logout` and `auth-status` manage the token. The token lives in the
+  service user's home, so logging in also gives the agent deploy ability —
+  docs state that boundary and the separate-user alternative.
+- The iOS install summary now prints the no-login SDK path and the opt-in
+  login path instead of telling everyone to run `xtool setup` (which forces a
+  login first). `devtools sdk` uses a disk-backed `TMPDIR`, so Xcode extraction
+  does not fill a 4 GB `/tmp` tmpfs.
+
 ## 0.2.1-rc.5-0.16.1
 
 ### Fixed

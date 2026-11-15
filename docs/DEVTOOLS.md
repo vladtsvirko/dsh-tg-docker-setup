@@ -26,7 +26,6 @@ installed trees alone.
 
 ```sh
 sudo ./setup.sh devtools install --tools ios
-sudo -u dsh -H env HOME=/srv/dsh/data/home xtool setup
 ```
 
 Installed:
@@ -39,34 +38,84 @@ Installed:
 
 The `/usr/local/bin/xtool` launcher extracts the AppImage into the user's
 `~/.cache/dsh-xtool` instead of mounting it with FUSE, which is more reliable on
-a server or in a container. `xtool` replaces Xcode's build/sign/install path
-for **SwiftPM apps**. It is not
-a Mac, and it does not ship Apple's SDK. The one-time `xtool setup` still needs:
+a server or in a container.
 
-- an Apple ID (a free account works with the password login mode; a paid Apple
-  Developer Program membership enables the API-key mode), and
-- **Xcode.xip**, downloaded from <https://developer.apple.com/download/all/> while
-  signed in. It is large (tens of GB unpacked) and its license is yours to
-  accept.
+`xtool` replaces Xcode's build path for **SwiftPM apps**. It is not a Mac, and
+it does not ship Apple's SDK. Both modes below still need **Xcode.xip**,
+downloaded from <https://developer.apple.com/download/all/> while signed in.
+It is large (tens of GB unpacked) and its license is yours to accept.
 
-Run `xtool setup` as the **runtime user** — `dsh` by default — because it stores
-the Apple session and the Darwin SDK in that user's home. That is also the user
-the agent runs as, so the toolchain is visible to the agent afterwards:
+### Development without an Apple account
+
+`xtool sdk install` needs the Xcode file, but **not** an Apple login:
 
 ```sh
-sudo -u dsh -H env HOME=/srv/dsh/data/home xtool setup
-sudo -u dsh -H env HOME=/srv/dsh/data/home swift sdk list    # should print darwin
+sudo ./setup.sh devtools sdk --xcode /path/to/Xcode.xip
 ```
 
-With a custom `SERVICE_USER`/`--dir`, use that user and
-`<dir>/data/home`. The install summary prints the exact command.
+This builds the Darwin SDK in the service user's home. Then development works:
 
-Scope: SwiftPM projects. React Native, Flutter and Xcode-project builds are a
-different toolchain; xtool does not make an `.xcodeproj` build on Linux.
+```sh
+xtool new MyApp
+cd MyApp
+xtool dev build          # builds; ad-hoc signed
+```
+
+`xtool dev build` does not require a token. Without one, the following refuse:
+
+- `xtool dev run` — builds and installs to a device; needs a token.
+- `xtool dev build --sign` — signing; needs a token.
+- `xtool install` — device install; needs a token.
+
+That is the boundary: no Apple token, no deploy. It is enforced by xtool, not by
+a setup flag. The agent runs as the same `dsh` user, so it gets exactly the
+same build-only ability.
+
+The setup command above uses a disk-backed `TMPDIR`
+(`<dir>/data/home/.cache/tmp`) because extracting Xcode into a 4 GB `/tmp`
+tmpfs fails. Do the same if you run the command by hand:
+
+```sh
+sudo -u dsh -H env HOME=/srv/dsh/data/home \
+  TMPDIR=/srv/dsh/data/home/.cache/tmp \
+  xtool sdk install /path/to/Xcode.xip
+```
+
+### Deploy: opt in to Apple login
+
+Deploying or signing is a deliberate second step:
+
+```sh
+sudo ./setup.sh devtools login       # runs `xtool auth login` as dsh
+```
+
+It asks for an Apple ID and, for the password mode, a 2FA code. A free Apple ID
+works in password mode; a paid Apple Developer Program membership enables the
+API-key mode. The token is stored in the service user's home.
+
+After that:
+
+```sh
+xtool dev run            # build, sign and install on the connected iPhone
+xtool dev build --sign
+```
+
+`sudo ./setup.sh devtools logout` clears the token; `auth-status` checks it.
+`xtool setup` is equivalent to `xtool auth` followed by `xtool sdk` — use it
+only when you want login and SDK in one step, not for the dev-only setup.
+
+> **What the boundary does and does not mean.** Once a token is in the `dsh`
+> home, the agent can deploy too; the token is the permission. If the human
+> should deploy but the agent should not, use a **separate OS user** for the
+> Apple login and device work, or log out after deploying. Do not put an Apple
+> password in the workspace or in a prompt.
 
 For device deployment, the host must see the iPhone over USB (`usbmuxd` does
 that on a normal machine). A VM needs USB passthrough; a CI runner usually
 builds an `.ipa` and lets a Mac or a device service install it.
+
+Scope: SwiftPM projects. React Native, Flutter and Xcode-project builds are a
+different toolchain; xtool does not make an `.xcodeproj` build on Linux.
 
 ## Android: JDK, SDK, NDK
 

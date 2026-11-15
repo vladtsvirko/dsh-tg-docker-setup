@@ -873,7 +873,7 @@ devtools_plan_summary() {
   local out="" sep=""
   [ "$DEVTOOLS" = none ] && { printf 'none (optional: --devtools ios,android)'; return 0; }
   if devtools_has ios; then
-    out="iOS: Swift + xtool (xtool setup still needs Xcode.xip and an Apple ID)"
+    out="iOS: Swift + xtool (Xcode.xip to build; Apple login only to sign/deploy)"
     sep=" · "
   fi
   if devtools_has android; then
@@ -2054,10 +2054,10 @@ setup.sh install — install or repair the deployment.
 Options:
   --design penpot|none   optional Penpot stack on Podman; DSH runs without it
   --devtools LIST        optional mobile host toolchains: none, ios, android
-                         or all. iOS is Swift + xtool (Xcode.xip and an Apple ID
-                         are still needed for xtool setup); Android is JDK + SDK
-                         + NDK. Each is several GB and is not replaced by a
-                         setup update.
+                         or all. iOS is Swift + xtool; the Xcode.xip is needed
+                         to build, but Apple login is opt-in and only required
+                         to sign/deploy. Android is JDK + SDK + NDK. Each is
+                         several GB and is not replaced by a setup update.
   --plugins suggested|none
                          suggested: install the latest npm release of the
                          Telegram connector (with a bot token) and, when the
@@ -2136,12 +2136,24 @@ setup.sh devtools — optional host toolchains for mobile apps.
   sudo ./setup.sh devtools install --tools all
   sudo ./setup.sh devtools remove --tools ios
 
+  # iOS: development without an Apple account, then opt in to deploy
+  sudo ./setup.sh devtools sdk --xcode /path/to/Xcode.xip
+  sudo ./setup.sh devtools login       # opt-in; stores an Apple token
+  sudo ./setup.sh devtools auth-status
+  sudo ./setup.sh devtools logout
+
 ios      Swift and xtool. It builds SwiftPM packages into iOS apps without a
-         Mac, but `xtool setup` still needs an Apple ID and an Xcode.xip
-         downloaded from Apple; setup installs the toolchain, not the SDK.
+         Mac. `xtool sdk install` needs an Xcode.xip but no Apple login, and
+         `xtool dev build` then works; signing, `xtool dev run` and device
+         installs require `devtools login` (or `xtool auth login`).
 android  OpenJDK, Android command-line tools, platform-tools, platform 36,
          build-tools 36.1.0, the NDK and CMake. No Android Studio and no
          emulator. Installing accepts the Android SDK license on this host.
+
+Login is deliberately not part of `install`: without a token the agent can
+develop but cannot deploy. Once logged in, the token lives in the service
+user's home and the agent can deploy too; use logout, or a separate OS user,
+if that boundary matters.
 
 Versions come from devtools.json and are independent of setup releases: a
 `setup.sh update` never reinstalls or replaces them. --tools defaults to the
@@ -2282,12 +2294,15 @@ cmd_doctor() {
 }
 
 cmd_devtools() {
-  local action="status" tools="" root="$DEVTOOLS_ROOT" dir=""
+  local action="status" tools="" root="$DEVTOOLS_ROOT" dir="" xcode="" slim=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      status|install|remove) action="$1"; shift ;;
+      status|install|remove|login|apple-login|logout|auth-status|sdk) action="$1"; shift ;;
       --tools) tools="${2:?--tools needs a value}"; shift 2 ;;
       --tools=*) tools="${1#*=}"; shift ;;
+      --xcode) xcode="${2:?--xcode needs a path}"; shift 2 ;;
+      --xcode=*) xcode="${1#*=}"; shift ;;
+      --slim) slim=1; shift ;;
       --root) root="${2:?--root needs a value}"; shift 2 ;;
       --root=*) root="${1#*=}"; shift ;;
       --dir) dir="${2:?--dir needs a value}"; shift 2 ;;
@@ -2334,6 +2349,38 @@ cmd_devtools() {
       else
         log "no DSH deployment at $DIR — the toolchains are installed for host use only"
       fi
+      ;;
+    login|apple-login|logout|auth-status|sdk)
+      [ "$(id -u)" = 0 ] || die "switching to $SERVICE_USER needs root — run with sudo"
+      [ -x /usr/local/bin/xtool ] || die "xtool is not installed — run ./setup.sh devtools install --tools ios first"
+      case "$action" in
+        login|apple-login)
+          warn "opt-in: the Apple token is stored in $DATA_HOME; the agent can deploy once it is present"
+          warn "for dev-only use, skip this and install the SDK with: xtool sdk install /path/Xcode.xip"
+          run_as_service /usr/local/bin/xtool auth login
+          ;;
+        logout)
+          run_as_service /usr/local/bin/xtool auth logout
+          ;;
+        auth-status)
+          run_as_service /usr/local/bin/xtool auth status
+          ;;
+        sdk)
+          [ -n "$xcode" ] || die "usage: setup.sh devtools sdk --xcode /path/to/Xcode.xip [--slim]"
+          [ -f "$xcode" ] || die "no such Xcode file: $xcode"
+          xcode="$(readlink -f "$xcode")"
+          run_as_service test -r "$xcode" \
+            || die "$SERVICE_USER cannot read $xcode — make it readable or copy it into $DATA_HOME"
+          local -a sdk_args=(/usr/local/bin/xtool sdk install "$xcode")
+          [ "$slim" = 1 ] && sdk_args+=(--slim)
+          local sdk_tmp="$DATA_HOME/.cache/tmp"
+          mkdir -p "$sdk_tmp" 2>/dev/null || true
+          chown "$SERVICE_USER:$SERVICE_USER" "$sdk_tmp" 2>/dev/null || true
+          log "installing the Darwin SDK as $SERVICE_USER (Apple login is not required)"
+          # Xcode extraction is tens of GB; /tmp is a tmpfs on many hosts.
+          run_as_service env TMPDIR="$sdk_tmp" "${sdk_args[@]}"
+          ;;
+      esac
       ;;
     remove)
       [ "$(id -u)" = 0 ] || die "removing host toolchains needs root — run with sudo"

@@ -5,7 +5,7 @@
   "tools": {
     "ios": {
       "label": "iOS (xtool)",
-      "description": "Swift and xtool; xtool turns a SwiftPM package into a signed iOS app without a Mac. Completing xtool setup still needs an Apple ID and an Xcode.xip downloaded from Apple.",
+      "description": "Swift and xtool; xtool turns a SwiftPM package into an iOS app without a Mac. Building still needs an Xcode.xip, but Apple login is optional and only required to sign or deploy.",
       "swift": "6.4.2",
       "xtool": "1.24.0",
       "minFreeMB": 7000,
@@ -13,7 +13,7 @@
         "ubuntu": ["22.04", "24.04", "26.04"],
         "debian": ["12", "13"]
       },
-      "note": "Xcode.xip and the Apple sign-in are interactive and licensed to you; setup installs the toolchain, not the Apple SDK."
+      "note": "Xcode.xip is interactive and licensed to you. Apple login is a separate opt-in: without it xtool dev build works, while dev run, build --sign and install refuse."
     },
     "android": {
       "label": "Android",

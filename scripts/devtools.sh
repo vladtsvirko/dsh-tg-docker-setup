@@ -432,7 +432,7 @@ plan() {
     has_tool "$tool" || continue
     case "$tool" in
       ios)
-        printf 'iOS: Swift %s + xtool %s (~7 GB; xtool setup still needs an Apple ID and Xcode.xip)\n' \
+        printf 'iOS: Swift %s + xtool %s (~7 GB; Xcode.xip to build; Apple login only to sign/deploy)\n' \
           "$(catalog ios swift)" "$(catalog ios xtool)"
         ;;
       android)
@@ -517,11 +517,13 @@ install_all() {
   fi
   if [ "$rc" -eq 0 ] && has_tool ios; then
     local user="${SERVICE_USER:-dsh}"
-    printf '\nxtool is installed, but its Apple SDK is not.\n' >&2
-    printf 'Run once as the runtime user, on this host:\n' >&2
-    printf '  sudo -u %s -H env HOME=%s xtool setup\n' "$user" "$SERVICE_HOME" >&2
-    printf 'It asks for your Apple ID and the Xcode.xip you downloaded from developer.apple.com.\n' >&2
-    printf 'Until then `swift sdk list` has no darwin SDK and xtool cannot build for iOS.\n' >&2
+    printf '\nxtool is installed. Apple login is optional:\n' >&2
+    printf '  dev/build only (no Apple login):\n' >&2
+    printf '    sudo -u %s -H env HOME=%s TMPDIR=%s/.cache/tmp xtool sdk install /path/Xcode.xip\n' "$user" "$SERVICE_HOME" "$SERVICE_HOME" >&2
+    printf '  deploy/sign (opt-in Apple login):\n' >&2
+    printf '    sudo ./setup.sh devtools login\n' >&2
+    printf 'Without a token, `xtool dev build` works; `xtool dev run` and `build --sign` refuse.\n' >&2
+    printf 'Either path still needs the Xcode.xip from developer.apple.com.\n' >&2
   fi
   return "$rc"
 }

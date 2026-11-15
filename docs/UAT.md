@@ -1,6 +1,6 @@
 # Acceptance run: the native install
 
-These steps were written for `v0.2.1-rc.5-0.16.1`; if you are accepting a later
+These steps were written for `v0.2.1-rc.5-0.17.0`; if you are accepting a later
 tag, substitute it everywhere below.
 
 One run, ~20 minutes. The point is not to see it work once, but to see the
@@ -33,8 +33,8 @@ in step 7.
 Install the way a stranger would — one downloaded file:
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.16.1/setup.sh | sudo bash -s -- --check --dir /srv/dsh
-wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.16.1/setup.sh | sudo bash -s -- --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.17.0/setup.sh | sudo bash -s -- --check --dir /srv/dsh
+wget -qO- https://raw.githubusercontent.com/vladtsvirko/dsh-tg-docker-setup/v0.2.1-rc.5-0.17.0/setup.sh | sudo bash -s -- --dir /srv/dsh
 ```
 
 All `./setup.sh` and `./setup.sh update` checks below run from `/srv/dsh`.
@@ -47,7 +47,7 @@ All `./setup.sh` and `./setup.sh update` checks below run from `/srv/dsh`.
       `Proceed? [Y/n]`
 - [ ] it installs Node 22 (and says so), then `dsh` and `pnpm`; a missing Podman
       daemon is not an error for this run
-- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.16.1`
+- [ ] the installer ends with `==> installed: 0.2.1-rc.5-0.17.0`
 - [ ] the self-check that follows reports `clean`: `service`, `web` and
       `data-owner` all ok
 - [ ] `sudo ./setup.sh doctor` (no `--fix`) exits 0 and names the deployed
@@ -76,7 +76,7 @@ All `./setup.sh` and `./setup.sh update` checks below run from `/srv/dsh`.
 - [ ] tap it, add the bot to a new group with Topics enabled: the group gets a
       dashboard
 - [ ] `/new` in the group creates a topic; a message in it gets a streamed answer
-- [ ] `/system status` shows: version `0.2.1-rc.5-0.16.1`, the admin line,
+- [ ] `/system status` shows: version `0.2.1-rc.5-0.17.0`, the admin line,
       `web: 127.0.0.1:<port> answered …`, `key: set`,
       `registry: 1 workspace(s) in the runtime · 1 bound to Telegram`,
       `data: … this runtime`, `last agent error: none`
@@ -143,8 +143,10 @@ default run.
 - [ ] after `systemctl restart dsh.service`, the agent can run `adb version`
       and `sdkmanager --version`
 - [ ] `sudo ./setup.sh devtools install --tools ios` installs Swift and xtool;
-      `swift --version` works and `xtool --help` runs (the Apple SDK is the
-      separate `xtool setup` step, not a failure here)
+      `swift --version` works and `xtool --help` runs (the Apple SDK and login
+      are separate steps, not a failure here)
+- [ ] `sudo ./setup.sh devtools auth-status` reports logged out; no Apple token
+      is created by `install`
 - [ ] `./setup.sh devtools remove --tools ios` removes only the iOS tree and
       leaves the Android tree; `.env` says `DSH_DEVTOOLS=android`
 - [ ] `./setup.sh update` does not reinstall or change either tree

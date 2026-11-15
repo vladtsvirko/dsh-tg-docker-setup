@@ -90,4 +90,9 @@ test('setup.sh exposes --devtools and the devtools command', async () => {
   assert.match(setup, /devtools_env_write "\$file" "\$DEVTOOLS"/)
   assert.match(setup, /DSH_DEVTOOLS/)
   assert.match(setup, /scripts\/devtools\.sh/)
+  // Apple login is an explicit action, never part of install.
+  assert.match(setup, /login\|apple-login\|logout\|auth-status\|sdk/)
+  assert.match(setup, /run_as_service \/usr\/local\/bin\/xtool auth login/)
+  assert.match(setup, /run_as_service env TMPDIR="\$sdk_tmp" "\$\{sdk_args\[@\]\}"/)
+  assert.doesNotMatch(setup, /run_as_service xtool setup/)
 })
