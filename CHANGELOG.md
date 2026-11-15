@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1-rc.5-0.18.1
+
+### Fixed
+
+- **The SDK path accepts `Xcode.app` and `darwin.xtoolsdk` again.** The updater
+  and `docs/DEVTOOLS.md` already allowed those directory inputs, but
+  `setup.sh devtools sdk` still required a regular file. It now checks that the
+  path exists and is reachable by the service user, then lets xtool validate
+  the input.
+
 ## 0.2.1-rc.5-0.18.0
 
 ### Added

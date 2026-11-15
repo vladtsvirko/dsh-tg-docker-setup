@@ -2367,8 +2367,10 @@ cmd_devtools() {
           ;;
         sdk)
           [ -n "$xcode" ] || die "usage: setup.sh devtools sdk --xcode /path/to/Xcode.xip [--slim]"
-          [ -f "$xcode" ] || die "no such Xcode file: $xcode"
+          [ -e "$xcode" ] || die "no such Xcode path: $xcode"
           xcode="$(readlink -f "$xcode")"
+          run_as_service test -e "$xcode" \
+            || die "$SERVICE_USER cannot reach $xcode — make it readable or copy it into $DATA_HOME"
           run_as_service test -r "$xcode" \
             || die "$SERVICE_USER cannot read $xcode — make it readable or copy it into $DATA_HOME"
           local -a sdk_args=(/usr/local/bin/xtool sdk install "$xcode")
