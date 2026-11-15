@@ -2205,9 +2205,15 @@ deployed_service_user() {
 # The commands below share the deployment globals the update path expects.
 set_deployment() {
   if [ -z "${DIR:-}" ]; then
-    # Run from the deployment when that is where the caller stands; otherwise
-    # fall back to the documented default.
-    if [ -f "$PWD/.env" ]; then DIR="$PWD"; else DIR=/srv/dsh; fi
+    # A sourced caller (the test suite) captured DEPLOY_DIR before setup.sh
+    # changed the working directory; prefer that over PWD.
+    if [ -n "${DEPLOY_DIR:-}" ] && [ -f "$DEPLOY_DIR/.env" ]; then
+      DIR="$DEPLOY_DIR"
+    elif [ -f "$PWD/.env" ]; then
+      DIR="$PWD"
+    else
+      DIR=/srv/dsh
+    fi
   fi
   DEPLOY_DIR="$(cd "$DIR" 2>/dev/null && pwd -P || printf '%s' "$DIR")"
   ENV_FILE="$DEPLOY_DIR/.env"

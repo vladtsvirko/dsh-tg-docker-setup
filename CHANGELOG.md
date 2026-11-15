@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1-rc.5-0.16.1
+
+### Fixed
+
+- **Sourced helper calls now keep their deployment directory.** `setup.sh`
+  changes the working directory while defining helpers, so `set_deployment`
+  fell back to `/srv/dsh` when a caller sourced it from a throwaway directory.
+  It now prefers the `DEPLOY_DIR` captured before the `cd`; this is what made
+  the update-path CI probe depend on a live deployment and fail on a clean
+  runner. No installed behaviour changes.
+
 ## 0.2.1-rc.5-0.16.0
 
 ### Added
